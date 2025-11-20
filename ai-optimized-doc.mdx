@@ -1,0 +1,1424 @@
+---
+title: "AI Builder: Complete Guide"
+description: "Comprehensive guide to AI Builder - the orchestration engine powering Prisme.ai platform for building sophisticated AI applications"
+---
+
+# AI Builder: Complete Guide
+
+AI Builder is the orchestration engine at the heart of the Prisme.ai platform that enables you to build sophisticated AI applications through an event-driven, modular architecture.
+
+## Overview & Getting Started
+
+### What is AI Builder?
+
+AI Builder enables you to:
+- **Connect agents** with each other and enterprise systems
+- **Create custom AI use cases** with sophisticated workflows
+- **Automate complex processes** through event-driven architecture
+- **Build complete applications** with no-code, low-code, or code approaches
+
+### Technical Approaches
+
+**No-Code**: Visual interface for basic workflows
+- Drag-and-drop components
+- Pre-built templates
+- Configuration-based customization
+- **Ideal for**: Business analysts, process owners
+
+**Low-Code**: Blended approach with limited coding
+- Visual designers with code extension points
+- Custom expressions and formulas
+- **Ideal for**: Technical business users, citizen developers
+
+**Code**: Full development capabilities
+- JavaScript/TypeScript for frontend
+- Node.js for backend automations
+- Python for data processing and ML
+- **Ideal for**: Developers, data scientists
+
+### Quick Start Process
+
+1. **Create a Workspace**: Dedicated environment with pages, blocks, automations, activity logs
+2. **Design User Interfaces**: Select blocks, arrange layouts, configure properties, connect events
+3. **Build Automations**: Create backend logic triggered by events, HTTP requests, schedules
+4. **Test and Monitor**: Real-time event monitoring, error detection, performance metrics
+5. **Deploy and Share**: Direct access, app packaging, version control, access control
+
+---
+
+## Core Architecture
+
+### Three-Tier Architecture
+
+**Presentation Tier** (UI layer):
+- **Next.js**: Server-side rendering, performance
+- **React**: Component-based UI development
+- **BlockProtocol.org Components**: Standardized UI blocks
+- **Tailwind CSS**: Styling and responsive design
+
+**Application Tier** (Business logic):
+- **Event Processing Engine**: Asynchronous operations
+- **API Gateway**: External system integration
+- **Runtime**: Automation execution
+
+**Data Tier** (Storage):
+- **Memory Stores**: Session, user, global variables
+- **Event Log**: Activity tracking and debugging
+- **Vector Databases**: AI knowledge storage
+- **Relational Databases**: Structured data
+
+### Event-Driven Architecture (EDA)
+
+**Core Principles**:
+- **Events as First-Class Citizens**: All actions generate events
+- **Decoupled Components**: Services communicate through events
+- **Asynchronous Processing**: Independent action execution
+- **Scalability**: Components scale independently
+
+**Event Types**:
+- **System Events**: Platform-generated (page loads, authentication)
+- **User Events**: UI interactions with blocks
+- **Automation Events**: Process execution results
+- **Custom Events**: Application-specific events
+
+**Event Flow**:
+1. **Emission**: From UI, automations, or external systems
+2. **Routing**: Event router determines destinations
+3. **Handling**: Recipients process according to type
+4. **Logging**: Complete record in Activity log
+
+---
+
+## Workspaces
+
+### Workspace Fundamentals
+
+A workspace contains:
+- **Configuration**: Centralized settings and parameters
+- **Automations**: Backend processes and workflows
+- **Pages**: User interfaces built with blocks
+- **Apps**: Integrated applications extending functionality
+- **Security**: Role-based access control
+- **Events**: Activity tracking and communication
+- **Repositories**: Version control connections
+
+### Workspace Configuration
+
+```yaml
+name: MyConfiguredWorkspace
+slug: test
+config:
+  value:
+    API_URL: https://api.mycompany.com
+    LOGIN_URL: "{{config.API_URL}}/login"
+    headers:
+      apiKey: "{{secret.apiKey}}"
+```
+
+**Configuration Features**:
+- **Value References**: Use `{{config.PROPERTY}}` syntax
+- **Secrets**: Secure storage with `{{secret.secretName}}`
+- **Environment Variables**: `WORKSPACE_CONFIG_slug_PROPERTY`
+- **Schema Validation**: Optional type checking and defaults
+
+### Workspace Events
+
+**Event Structure**:
+```yaml
+type: user-action
+payload:
+  action: button-click
+  userId: "12345"
+  timestamp: "2024-01-01T00:00:00Z"
+source:
+  userId: "12345"
+  sessionId: session-abc
+  correlationId: corr-123
+  automationSlug: my-automation
+```
+
+**Event Uses**:
+- **Recording Activity**: Audit trail maintenance
+- **Triggering Automations**: Workflow initiation
+- **Inter-Component Communication**: Service interaction
+- **Monitoring and Analytics**: Usage insights
+
+### Workspace Secrets
+
+```yaml
+config:
+  value:
+    headers:
+      apiKey: '{{secret.apiKey}}'
+```
+
+**Secret Management**:
+- Web interface configuration
+- API-based management
+- CI pipeline integration
+- Owner-only access by default
+
+### Version Control
+
+```yaml
+repositories:
+  github:
+    name: My GitHub Repository
+    type: git
+    mode: read-write
+    config:
+      url: https://github.com/YourUser/your-repository.git
+      branch: main
+      auth:
+        user: 'your git user'
+        password: '{{secret.gitPassword}}'
+```
+
+---
+
+### Key Built-in Blocks
+
+#### Form Block
+Interactive forms with validation:
+
+```yaml
+- slug: Form
+  title:
+    en: Contact Form
+  schema:
+    type: object
+    properties:
+      name:
+        type: string
+        title: Name
+        minLength: 2
+      email:
+        type: string
+        format: email
+    required: [name, email]
+  onSubmit: submitContactForm
+  values:
+    name: "{{user.name}}"
+```
+
+#### RichText Block
+Formatted text display:
+
+```yaml
+- slug: RichText
+  content:
+    en: "# Welcome to AI Builder"
+    fr: "# Bienvenue à AI Builder"
+  markdown: true
+  allowUnsecure: true
+```
+
+#### Action Block
+Interactive buttons and links:
+
+```yaml
+- slug: Action
+  type: event
+  value: myButtonEvent
+  text: Click Me
+  payload:
+    action: button_clicked
+    timestamp: "{{now}}"
+```
+
+#### Chat Block
+Conversational interface:
+
+```yaml
+- slug: Chat
+  title: AI Assistant
+  placeholder: Ask me anything...
+  onMessage: processMessage
+  messageHistory: "{{session.chatHistory}}"
+```
+
+---
+
+## Pages (User Interfaces)
+
+### Page Fundamentals
+
+Pages are complete views that:
+- **Organize blocks** into structured layouts
+- **Define navigation** between different views
+- **Control access** through permissions
+- **Handle events** for interactivity
+
+### Page Types
+
+- **Standard Pages**: General-purpose interfaces
+- **_doc Pages**: Documentation with special formatting
+- **index Pages**: Home/landing pages
+- **401/404 Pages**: Custom error pages
+- **Template Pages**: Reusable structures
+
+### Creating Pages
+
+**Steps**:
+1. Navigate to "Pages" folder
+2. Click "+" to add new page
+3. Choose page type
+4. Enter unique slug
+5. Provide name and description
+
+**Properties**:
+- **Slug**: URL identifier
+- **Name**: Human-readable title
+- **Description**: Purpose explanation
+- **Access Control**: Public/private/role-based
+- **Language**: Default localization
+- **SEO Settings**: Metadata for search engines
+
+### Page Features
+
+**URL Structure**:
+```
+https://[workspace-slug].pages.prisme.ai/[language]/[page-slug]
+```
+
+**Access Control**:
+- **Public Pages**: Anyone with URL
+- **Private Pages**: Authentication required
+- **Role-Based**: Specific user roles
+- **Email-Based**: Specific email addresses
+- **SSO Integration**: Enterprise systems
+
+**Navigation**:
+- Menu systems between pages
+- Breadcrumbs for hierarchy
+- Tabs for content organization
+- Links to pages and external resources
+- Query parameter support
+
+---
+
+## Automations (Backend Logic)
+
+### Automation Fundamentals
+
+Automations define **what to do** and **when to do it**:
+- **What**: Sequence of instructions processing data
+- **When**: Triggers activating automation on conditions
+
+### Automation Structure
+```yaml
+slug: myAutomation
+name: My Automation
+description: Does something useful
+do:
+  - set: ...
+arguments:
+  param1:
+    type: string
+validateArguments: true # Validates input against arguments schema
+output: '{{result}}' # Defines the return value of the automation
+```
+
+### Triggers
+
+#### URL (Webhook/API)
+Makes automation publicly available via URL:
+
+**Available Variables**:
+- `body`: Request body
+- `headers`: Request headers  
+- `method`: HTTP method
+- `query`: URL query parameters
+
+**Response Control**:
+```yaml
+- set:
+    name: $http
+    value:
+      headers:
+        content-type: application/json
+      status: 200
+```
+
+**Server-Sent Events**:
+```yaml
+- set:
+    name: $http
+    value:
+      chunk:
+        partial: "Streaming response"
+```
+
+#### Events
+Listen to event lists:
+
+```yaml
+when:
+  events:
+    - user-login
+    - document-uploaded
+```
+
+**Available Variables**:
+- `payload`: Event data
+- `source`: Event origin information
+
+#### Schedules
+Cron-based triggers:
+
+```yaml
+when:
+  schedules:
+    - '0 9 * * 1-5'  # 9 AM weekdays
+```
+
+**Limitations**:
+- Minimum 15-minute intervals
+- UTC timezone
+- Runs "on the hour"
+
+### Memory Architecture
+
+#### Run Scope
+**Current execution only**: `{{run.variable}}`
+
+Includes:
+- `run.date`: Current timestamp
+- `run.ip`: Client IP address
+- `run.automationSlug`: Current automation
+- `run.correlationId`: Tracing ID
+- `run.trigger.type`: Trigger type
+
+#### User Scope
+**Persistent per user**: `{{user.variable}}`
+
+Includes:
+- `user.id`: Unique identifier
+- `user.email`: Email address
+- `user.authData`: Authentication info
+- `user.role`: Workspace role
+
+#### Session Scope
+**Current user session**: `{{session.variable}}`
+
+Features:
+- Form inputs across steps
+- Wizard progress state
+- Temporary preferences
+- 1-month expiration (authenticated)
+- 1-hour expiration (unauthenticated)
+
+#### Global Scope
+**Workspace-wide**: `{{global.variable}}`
+
+Includes:
+- `global.workspaceId`: Workspace ID
+- `global.apiUrl`: API instance URL
+- `global.endpoints`: Available endpoints
+- Custom workspace variables
+
+#### Config Scope
+**Configuration access**: `{{config.variable}}`
+
+Contains workspace configuration from settings.
+
+### Common Instructions
+
+**Calling Other Automations**:
+You can call other automations directly by using their slug as the instruction key. This allows for modular and reusable logic.
+
+```yaml
+- myHelperAutomation:
+    inputParam1: "value"
+    inputParam2: "{{variable}}"
+    output: resultVariable
+```
+
+**Conditions (Switch-Case)**:
+Use `conditions` for multiple conditional branches (similar to switch-case).
+```yaml
+- conditions:
+    '{{variable}} == "value1"':
+      - set:
+          name: result
+          value: "Case 1"
+    '{{variable}} == "value2"':
+      - set:
+          name: result
+          value: "Case 2"
+    default:
+      - set:
+          name: result
+          value: "Default Case"
+```
+
+> [!NOTE]
+> Keys in a `conditions` block are implicit expressions. You do not need `{% %}` wrappers, but you can use `{{variable}}` interpolation.
+>
+> **Operators**:
+> - `=` is equivalent to `==`
+> - `and` is equivalent to `&&`
+> - `or` is equivalent to `||`
+>
+> We encourage using `=`, `and`, and `or` for better clarity.
+
+
+**Variable Management**:
+```yaml
+- set:
+    name: variableName
+    value: "{{expression}}"
+    scope: session  # run, session, user, global
+```
+
+**Expressions & Interpolation**:
+
+- **Interpolation `{{variable}}`**: Strictly for variable substitution. NO JavaScript allowed.
+  - Valid: `{{user.name}}`, `{{data.items[0]}}`
+  - Invalid: `{{user.name || 'Guest'}}`, `{{!isValid}}`
+
+- **Expressions `{% expression %}`**: For JavaScript expressions. Can contain interpolated variables. Required for `set` values or other properties that need logic.
+  - Valid: `{% !{{isValid}} %}`, `{% {{count}} > 5 %}`, `{% {{a}} || {{b}} %}`
+
+**Variable Interpolation & Dynamic Object Access**:
+
+When accessing object properties dynamically with variables, you must nest the interpolation:
+
+Common use cases:
+```yaml
+# Accessing object properties dynamically in loops
+- repeat:
+    'on': '{{propertyNames}}'
+    do:
+      - set:
+          name: currentValue
+          value: '{{myObject[{{item}}]}}'
+
+# Accessing array elements with dynamic index
+- set:
+    name: element
+    value: '{{myArray[{{index}}]}}'
+
+# Nested property access
+- set:
+    name: nestedValue
+    value: '{{data[{{category}}][{{itemId}}]}}'
+```
+
+**Repeating on Objects**:
+
+When using `repeat` directly on an object (not an array), the `{{item}}` variable contains two properties:
+- `{{item.key}}` - the property name/key
+- `{{item.value}}` - the property value
+
+Example:
+```yaml
+# Iterating over object properties
+- repeat:
+    'on': '{{myObject}}'
+    do:
+      - set:
+          name: keyName
+          value: '{{item.key}}'
+      - set:
+          name: keyValue
+          value: '{{item.value}}'
+      - emit:
+          event: property-processed
+          payload:
+            name: '{{item.key}}'
+            value: '{{item.value}}'
+      - break: # Optional: exit loop early
+          scope: all # or 'repeat', 'automation'
+```
+
+
+**HTTP Requests**:
+```yaml
+- fetch:
+    url: https://api.example.com/data
+    method: POST
+    headers:
+      Authorization: "Bearer {{secret.apiToken}}"
+    body:
+      key: value
+```
+
+**Conditional Logic**:
+```yaml
+- if:
+    condition: "{{user.role}} === 'admin'"
+    then:
+      - set:
+          name: adminData
+          value: "Admin content"
+    else:
+      - set:
+          name: adminData
+          value: "User content"
+```
+
+**Event Emission**:
+```yaml
+- emit:
+    event: user-action-completed
+    payload:
+      userId: "{{user.id}}"
+      action: "profile-update"
+      timestamp: "{{now}}"
+```
+
+---
+
+## Integrations (Apps)
+
+### Integration Types
+
+- **API Integrations**: REST, GraphQL, other protocols
+- **Database Connections**: SQL, NoSQL, vector databases
+- **Webhook Mechanisms**: Event notifications
+- **File System Operations**: File processing
+- **Authentication Systems**: SSO, identity providers
+- **Marketplace Apps**: Pre-built integrations
+
+### API Integrations
+
+**HTTP Configuration**:
+```yaml
+- fetch:
+    url: https://api.example.com/endpoint
+    method: POST
+    headers:
+      Authorization: "Bearer {{secret.apiKey}}"
+      Content-Type: application/json
+    body:
+      data: "{{requestData}}"
+    timeout: 30000
+```
+
+**Authentication Methods**:
+- **API Keys**: Simple key-based
+- **OAuth 2.0**: Token-based flow
+- **Basic Auth**: Username/password
+- **JWT**: JSON Web Tokens
+- **Custom Schemes**: Specialized mechanisms
+
+### Database Integrations
+
+**Relational Databases**:
+```yaml
+connection:
+  type: postgresql
+  host: database.example.com
+  port: 5432
+  database: customer_data
+  username: "{{secrets.DB_USERNAME}}"
+  password: "{{secrets.DB_PASSWORD}}"
+  ssl: true
+  pool:
+    min: 5
+    max: 20
+```
+
+**NoSQL Databases**:
+```yaml
+connection:
+  type: mongodb
+  uri: "mongodb+srv://{{secrets.MONGO_USERNAME}}:{{secrets.MONGO_PASSWORD}}@cluster.example.mongodb.net"
+  database: analytics
+  options:
+    retryWrites: true
+    w: majority
+```
+
+**Vector Databases**:
+```yaml
+connection:
+  type: pinecone
+  apiKey: "{{secrets.PINECONE_API_KEY}}"
+  environment: us-west1-gcp
+  projectId: "e12345-abc-123"
+  namespace: customer-support
+  dimensions: 1536
+```
+
+### Webhook Integrations
+
+**Inbound Webhooks**:
+```yaml
+# URL trigger automation
+when:
+  url: true
+do:
+  - set:
+      name: webhookData
+      value: "{{body}}"
+  - emit:
+      event: webhook-received
+      payload: "{{webhookData}}"
+```
+
+**Outbound Webhooks**:
+```yaml
+- fetch:
+    url: "{{config.webhookEndpoint}}"
+    method: POST
+    headers:
+      X-Webhook-Signature: "{{generateSignature(payload)}}"
+    body: "{{payload}}"
+```
+
+---
+
+## Security & Access Control
+
+### RBAC Fundamentals
+
+Role-Based Access Control consists of:
+- **Roles**: Permission sets assigned to users
+- **Subjects**: Resources that can be acted upon
+- **Actions**: Operations on subjects
+- **Rules**: Define role-action-subject relationships
+- **Conditions**: Additional restrictions
+
+### RBAC Configuration
+
+```yaml
+authorizations:
+  roles:
+    editor: {}
+    user:
+      auth:
+        prismeai: {}  # Auto-assigned to Prisme.ai users
+    workspace:
+      auth:
+        apiKey: {}    # For API access
+        
+  rules:
+    # Allow editors full workspace control
+    - role: editor
+      action: [read, update, manage]
+      subject: workspaces
+      
+    # Public page access with conditions
+    - action: read
+      subject: pages
+      conditions:
+        labels:
+          $in: [public]
+          
+    # Deny editor access to API key events
+    - role: editor
+      inverted: true
+      action: read
+      subject: events
+      conditions:
+        type:
+          $regex: ^apikeys\.*$
+```
+
+### Common RBAC Patterns
+
+**Role Hierarchy**:
+```yaml
+roles:
+  user:
+    auth:
+      prismeai: {}
+  editor:
+    auth:
+      prismeai:
+        emailDomain: company.com
+  admin:
+    auth:
+      prismeai:
+        email:
+          $in: [admin@company.com]
+```
+
+**Conditional Access**:
+```yaml
+rules:
+  - role: user
+    action: read
+    subject: pages
+    conditions:
+      department: "{{user.authData.department}}"
+```
+
+### API Key Permissions
+
+```yaml
+roles:
+  workspace:
+    auth:
+      apiKey: {}
+      
+rules:
+  - role: workspace
+    action: [read, manage_permissions]
+    subject: [workspaces, events, pages]
+```
+
+**Using API Keys**:
+```yaml
+- fetch:
+    url: '...'
+    prismeaiApiKey:
+      name: workspace
+```
+
+---
+
+## Testing & Debugging
+
+### Testing Approaches
+
+**Manual Testing**:
+- **Preview Mode**: Real-time testing during development
+- **Manual Execution**: Run automations with custom inputs
+- **Event Simulation**: Trigger events to test responses
+- **Interactive Debugging**: Step through processes
+- **Visual Validation**: UI appearance and behavior
+
+**Automated Testing**:
+- **Test Sets**: Predefined scenario collections
+- **Expected Results**: Success criteria definition
+- **Batch Execution**: Multiple test runs
+- **Regression Testing**: Change impact validation
+- **Scheduled Validation**: Regular automated checks
+
+**Integration Testing**:
+- **End-to-End**: Complete user journey validation
+- **API Testing**: External system connections
+- **Event Chain Testing**: Event propagation verification
+- **Data Flow Validation**: Information passing checks
+
+### Activity Log
+
+Central monitoring and debugging dashboard:
+
+**Filtering Options**:
+- **Event Types**: System, custom, errors
+- **Time Range**: Custom periods or presets
+- **Source**: Specific components or systems
+- **Search**: Text search across details
+- **Advanced Filters**: Multiple criteria combinations
+
+**Event Analysis**:
+- **Correlation IDs**: Connect related events
+- **Timeline View**: Event order visualization
+- **Context Linking**: Jump to related events
+- **Duration Indicators**: Lengthy operation identification
+
+### Debugging Tools
+
+**Logging**:
+```yaml
+- emit:
+    event: debug
+    payload:
+      level: "info"
+      message: "Process completed"
+      duration: "{{processingTime}}"
+      items: "{{itemCount}}"
+```
+
+**Error Diagnostics**:
+- **Error Captures**: Detailed failure information
+- **Stack Traces**: Error location identification
+- **Context Preservation**: State at error time
+- **Error Categorization**: Different error types
+- **Suggested Solutions**: Common error guidance
+
+**Network Monitoring**:
+- **Request Logging**: Outgoing HTTP requests
+- **Response Tracking**: Complete response viewing
+- **Timing Information**: Request duration measurement
+- **Headers/Authentication**: Request configuration verification
+
+### Performance Testing
+
+**Load Testing with k6**:
+```javascript
+import http from 'k6/http';
+import { check, sleep } from 'k6';
+
+export const options = {
+  stages: [
+    { duration: '5m', target: 100 },
+    { duration: '10m', target: 100 },
+    { duration: '5m', target: 0 },
+  ],
+  thresholds: {
+    'http_req_duration': ['p(99)<1500'],
+  },
+};
+
+export default () => {
+  const response = http.post(`${BASE_URL}/webhooks/automation`, {
+    data: "test"
+  });
+
+  check(response, {
+    'automation runs successfully': (resp) => resp.status === 200,
+  });
+
+  sleep(1);
+};
+```
+
+---
+
+## Deployment & DevOps
+
+### Deployment Strategies
+
+**Single Workspace**:
+- **Best for**: Basic applications
+- Development and production in same workspace
+- Use versioning for stable points
+- **Pros**: Simplest approach, no migration needed
+- **Cons**: Limited dev/prod separation
+
+**Multi-Workspace**:
+- **Best for**: Moderate complexity
+- Separate development and production workspaces
+- Same Prisme.ai instance
+- **Pros**: Clear separation, shared resources
+- **Cons**: Migration process required
+
+**Multi-Instance**:
+- **Best for**: Enterprise applications
+- Separate instances per environment
+- Complete isolation
+- **Pros**: Highest security and stability
+- **Cons**: Most complex to manage
+
+### Version Control Setup
+
+```yaml
+repositories:
+  github:
+    name: My GitHub Repository
+    type: git
+    mode: read-write
+    config:
+      url: https://github.com/YourUser/your-repository.git
+      branch: main
+      auth:
+        user: 'your git user'
+        password: '{{secret.gitPassword}}'
+    pull:
+      exclude:
+        - path: 'index'     # Preserve workspace config
+        - path: 'security'  # Preserve security settings
+```
+
+### CI/CD Integration
+
+**GitHub Actions Example**:
+```yaml
+name: Deploy Workspace
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Validate configuration
+        run: ./validate-config.sh
+        
+      - name: Deploy to staging
+        run: ./deploy.sh staging
+        
+      - name: Run tests
+        run: ./run-tests.sh
+        
+      - name: Deploy to production
+        if: success()
+        run: ./deploy.sh production
+```
+
+### API-Based Deployment
+
+**Key Endpoints**:
+- `GET /workspaces/{id}/export` - Export workspace
+- `POST /workspaces/{id}/import` - Import workspace
+- `POST /workspaces/{id}/push` - Push to repository
+- `POST /workspaces/{id}/pull` - Pull from repository
+
+**Deployment Script Example**:
+```javascript
+const axios = require('axios');
+
+async function deployWorkspace(sourceId, targetId) {
+  // Export from source
+  const exportResponse = await axios.get(`/workspaces/${sourceId}/export`, {
+    headers: { Authorization: `Bearer ${API_TOKEN}` }
+  });
+  
+  // Import to target
+  await axios.post(`/workspaces/${targetId}/import`, exportResponse.data, {
+    headers: { Authorization: `Bearer ${API_TOKEN}` }
+  });
+}
+```
+
+---
+
+## Advanced Topics
+
+### Event-Driven Architecture Deep Dive
+
+**Event Structure**:
+```yaml
+type: user-action
+payload:
+  action: button-click
+  userId: "12345"
+  timestamp: "2024-01-01T00:00:00Z"
+source:
+  userId: "12345"
+  sessionId: session-abc
+  correlationId: corr-123
+  automationSlug: my-automation
+```
+
+**Event Mapping for Analytics**:
+```yaml
+events:
+  types:
+    usage:
+      schema:
+        usage:
+          type: object
+          properties:
+            total_tokens:
+              type: number
+            completion_tokens:
+              type: number
+            cost:
+              type: number
+              format: double
+```
+
+**Advanced Event Patterns**:
+
+1. **User Activity Tracking**:
+```yaml
+- emit:
+    event: user-action
+    payload:
+      action: page-view
+      page: "{{page.slug}}"
+      sessionId: "{{session.id}}"
+      timestamp: "{{now}}"
+```
+
+2. **AI Model Performance Tracking**:
+```yaml
+- emit:
+    event: model-usage
+    payload:
+      model: "{{model.name}}"
+      prompt_tokens: "{{result.usage.prompt_tokens}}"
+      completion_tokens: "{{result.usage.completion_tokens}}"
+      cost: "{{result.cost}}"
+      duration: "{{result.duration}}"
+```
+
+3. **Multi-Step Workflows**:
+```yaml
+# Step 1: Document processing initiated
+- emit:
+    event: document-processing-started
+    payload:
+      documentId: "{{document.id}}"
+      stage: "initiated"
+
+# Step 2: Triggered by first event
+when:
+  events:
+    - document-processing-started
+do:
+  - emit:
+      event: document-processing-completed
+      payload:
+        documentId: "{{event.payload.documentId}}"
+        stage: "processed"
+```
+
+### Advanced Analytics
+
+**Event Analytics Query**:
+```javascript
+const usageAnalytics = await searchEvents({
+  query: {
+    bool: {
+      filter: [
+        {
+          term: {
+            type: "usage"
+          }
+        }
+      ]
+    }
+  },
+  aggs: {
+    usage_over_time: {
+      date_histogram: {
+        field: "createdAt",
+        interval: "day"
+      },
+      aggs: {
+        total_tokens: {
+          sum: {
+            field: "aggPayload.usage.total_tokens"
+          }
+        },
+        avg_cost: {
+          avg: {
+            field: "aggPayload.usage.cost"
+          }
+        }
+      }
+    }
+  }
+});
+```
+
+### Microservices Architecture
+
+**Service Components**:
+- **UI Rendering Service**: React/Next.js components
+- **Automation Execution Service**: Business logic processing
+- **Event Processing Service**: Event routing and handling
+- **Storage Services**: Data persistence layers
+- **Integration Services**: External system connections
+
+**Service Characteristics**:
+- **API-First Design**: RESTful HTTP interfaces
+- **Containerization**: Docker containers
+- **Service Discovery**: Automatic registration and load balancing
+- **Circuit Breaking**: Fault tolerance mechanisms
+
+### Cloud-Native Features
+
+**Infrastructure as Code**:
+- **Terraform**: Cloud resource provisioning
+- **Helm Charts**: Kubernetes deployments
+- **GitOps**: Configuration management
+
+**Multi-Cloud Support**:
+- AWS, Azure, GCP compatibility
+- OpenShift for hybrid environments
+- Cloud-native service leveraging
+
+**Scalability**:
+- Auto-scaling based on load
+- Stateless design for replication
+- Distributed processing capabilities
+
+---
+
+## Use Cases & Examples
+
+### Enterprise Knowledge Management
+
+#### Corporate Knowledge Base
+
+**Business Challenge**: Information scattered across systems, productivity loss.
+
+**AI Builder Solution**:
+- Connects to multiple repositories (SharePoint, Confluence)
+- Advanced RAG for document processing
+- Conversational knowledge retrieval interface
+- Role-based access for sensitive information
+- Usage analytics for knowledge gap identification
+
+**Implementation**:
+```yaml
+# Knowledge retrieval automation
+- slug: KnowledgeRetrieval
+  when:
+    events:
+      - knowledge-query
+  do:
+    - fetch:
+        url: "{{config.searchEndpoint}}"
+        method: POST
+        body:
+          query: "{{event.payload.question}}"
+          user_context: "{{user.department}}"
+    - emit:
+        event: knowledge-response
+        payload:
+          answer: "{{response.answer}}"
+          sources: "{{response.sources}}"
+          confidence: "{{response.confidence}}"
+```
+
+**Results**:
+- 65% reduction in information search time
+- 40% decrease in expert interruptions
+- 25% improvement in customer service accuracy
+
+#### Technical Documentation Assistant
+
+**Business Challenge**: Complex, outdated technical documentation.
+
+**Solution Components**:
+- Code repository processing
+- Syntax-aware documentation chunking
+- Version control integration
+- Code generation from documentation
+- Documentation-code consistency checking
+
+**Implementation**:
+```yaml
+# Technical query processing
+- slug: TechnicalAssistant
+  when:
+    events:
+      - tech-question
+  do:
+    - fetch:
+        url: "{{config.codebaseAPI}}"
+        body:
+          query: "{{event.payload.question}}"
+          context: "{{event.payload.repository}}"
+    - generateCodeExample:
+        language: "{{event.payload.language}}"
+        specification: "{{response.specification}}"
+```
+
+### Customer Experience Enhancement
+
+#### Intelligent Customer Service
+
+**Business Challenge**: High volume, repetitive queries, inconsistent quality.
+
+**Solution Features**:
+- Product knowledge base integration
+- Secure customer data access
+- Transaction processing capabilities
+- Context-aware escalation
+- 24/7 multi-channel support
+
+**Implementation**:
+```yaml
+# Customer service automation
+- slug: CustomerService
+  when:
+    events:
+      - customer-inquiry
+  do:
+    - identifyIntent:
+        message: "{{event.payload.message}}"
+        customer_id: "{{event.payload.customerId}}"
+    - if:
+        condition: "{{intent.type}} === 'account_inquiry'"
+        then:
+          - fetchCustomerData:
+              customer_id: "{{event.payload.customerId}}"
+          - generateResponse:
+              context: "{{customerData}}"
+              question: "{{event.payload.message}}"
+        else:
+          - searchKnowledgeBase:
+              query: "{{event.payload.message}}"
+```
+
+### Operational Efficiency
+
+#### Intelligent Document Processing
+
+**Business Challenge**: Manual document processing bottlenecks.
+
+**Solution Components**:
+- Multi-format document extraction
+- Automated classification and routing
+- Business rule validation
+- Workflow automation
+- Downstream system integration
+
+**Implementation**:
+```yaml
+# Document processing pipeline
+- slug: DocumentProcessor
+  when:
+    events:
+      - document-uploaded
+  do:
+    - extractDocumentData:
+        document_url: "{{event.payload.url}}"
+        document_type: "{{event.payload.type}}"
+    - validateBusinessRules:
+        extracted_data: "{{extractedData}}"
+        rules: "{{config.validationRules}}"
+    - if:
+        condition: "{{validation.passed}}"
+        then:
+          - routeToWorkflow:
+              data: "{{extractedData}}"
+              workflow: "{{validation.suggestedWorkflow}}"
+        else:
+          - requestHumanReview:
+              document_id: "{{document.id}}"
+              issues: "{{validation.issues}}"
+```
+
+**Results**:
+- 80% reduction in manual handling
+- 60% faster processing times
+- 45% cost reduction in operations
+
+### Industry-Specific Applications
+
+#### Healthcare Patient Management
+
+```yaml
+# Patient data integration
+- slug: PatientDataIntegration
+  when:
+    events:
+      - patient-record-request
+  do:
+    - fetchPatientHistory:
+        patient_id: "{{event.payload.patientId}}"
+        include_sensitive: "{{user.role === 'doctor'}}"
+    - generateSummary:
+        history: "{{patientHistory}}"
+        focus: "{{event.payload.focus}}"
+    - emit:
+        event: patient-summary-ready
+        payload:
+          summary: "{{summary}}"
+          recommendations: "{{recommendations}}"
+```
+
+#### Financial Risk Assessment
+
+```yaml
+# Risk analysis automation
+- slug: RiskAssessment
+  when:
+    events:
+      - loan-application
+  do:
+    - fetchCreditData:
+        applicant_id: "{{event.payload.applicantId}}"
+    - runRiskModels:
+        financial_data: "{{creditData}}"
+        loan_amount: "{{event.payload.amount}}"
+    - generateRiskReport:
+        risk_score: "{{riskModels.score}}"
+        factors: "{{riskModels.factors}}"
+    - if:
+        condition: "{{riskModels.score}} > {{config.approvalThreshold}}"
+        then:
+          - approveApplication:
+              application_id: "{{event.payload.applicationId}}"
+        else:
+          - requestAdditionalReview:
+              application_id: "{{event.payload.applicationId}}"
+              concerns: "{{riskModels.concerns}}"
+```
+
+---
+
+## Best Practices & Tips
+
+### Development Best Practices
+
+1. **Event Naming Convention**:
+   - Use descriptive, hierarchical names: `user.profile.updated`
+   - Include context: `document.processing.started`
+   - Avoid generic names: `event`, `action`
+
+2. **Memory Management**:
+   - Use appropriate scopes for data persistence
+   - Clean up temporary data after processing
+   - Leverage session scope for multi-step workflows
+
+3. **Error Handling**:
+   ```yaml
+   - try:
+       - riskyOperation:
+           data: "{{inputData}}"
+     catch:
+       - emit:
+           event: error
+           payload:
+             error: "{{error.message}}"
+             context: "{{inputData}}"
+   ```
+
+4. **Performance Optimization**:
+   - Use parallel processing where possible
+   - Implement caching for repeated data
+   - Minimize external API calls in loops
+
+### Security Best Practices
+
+1. **Sensitive Data Handling**:
+   - Always use secrets for credentials
+   - Implement data masking in logs
+   - Use HTTPS for all external communications
+
+2. **Access Control**:
+   - Follow principle of least privilege
+   - Implement role-based restrictions
+   - Regularly audit permissions
+
+3. **Input Validation**:
+   ```yaml
+   - validate:
+       schema:
+         type: object
+         properties:
+           email:
+             type: string
+             format: email
+         required: [email]
+       data: "{{event.payload}}"
+   ```
+
+### Monitoring and Maintenance
+
+1. **Health Checks**:
+   ```yaml
+   - slug: HealthCheck
+     when:
+       schedules:
+         - '*/5 * * * *'  # Every 5 minutes
+     do:
+       - checkExternalServices:
+           services: "{{config.criticalServices}}"
+       - if:
+           condition: "{{healthCheck.failed.length}} > 0"
+           then:
+             - emit:
+                 event: system-alert
+                 payload:
+                   type: service-failure
+                   failed_services: "{{healthCheck.failed}}"
+   ```
+
+2. **Performance Monitoring**:
+   - Track automation execution times
+   - Monitor external API response times
+   - Set up alerts for anomalies
+
+3. **Data Quality**:
+   - Implement data validation
+   - Monitor data flow integrity
+   - Set up automated testing
+
+This comprehensive guide covers all aspects of AI Builder, from basic concepts to advanced implementations. Use it as a reference for building sophisticated AI applications that leverage the full power of the Prisme.ai platform. 
