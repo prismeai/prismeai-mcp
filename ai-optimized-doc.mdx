@@ -471,12 +471,87 @@ Use `conditions` for multiple conditional branches (similar to switch-case).
 > [!NOTE]
 > Keys in a `conditions` block are implicit expressions. You do not need `{% %}` wrappers, but you can use `{{variable}}` interpolation.
 >
-> **Operators**:
-> - `=` is equivalent to `==`
-> - `and` is equivalent to `&&`
-> - `or` is equivalent to `||`
+> **Comparison Operators**:
 >
-> We encourage using `=`, `and`, and `or` for better clarity.
+> ```yaml
+> # Numeric comparisons
+> {{someAge}} > 18
+> {{someAge}} >= 18
+> {{someAge}} < 18
+> {{someAge}} <= 18
+> {{someAge}} == 18
+> {{someAge}} = 18       # Equivalent to ==
+> {{someValue}} + {{anotherValue}} # Can use +-/%*
+>
+> # String equality
+> {{cityName}} = "Toulouse"
+>
+> # Inequality
+> {{someAge}} !== 18
+> {{someAge}} != 18
+>
+> # String matching (substring check)
+> "hello" matches "hel"
+> "carousel" matches {{lowerText}}
+> "hello" matches {{someArray}}
+>
+> # Variable checking
+> {{testedVariable}}      # Is this variable defined?
+> !{{testedVariable}}     # Is this variable empty?
+>
+> # Membership testing
+> {{someValue}} in {{someList}}
+> {{someKey}} in {{someObject}}
+> {{someKey}} not in {{someObject}}
+> {{someKey}} not in "my,string,list"
+>
+> # Type checking
+> isArray({{someVariable}})
+> isObject({{someVariable}})
+> isString({{someVariable}})
+> isNumber({{someVariable}})
+>
+> # Logical operators
+> {{condition1}} and {{condition2}}    # Preferred
+> {{condition1}} && {{condition2}}     # Also works
+> {{condition1}} or {{condition2}}     # Preferred
+> {{condition1}} || {{condition2}}     # Also works
+> ```
+>
+> **Utility Functions (for use in `{% %}` expressions)**:
+>
+> ```yaml
+> # String case conversion
+> lower({{foo}})                          # Convert to lowercase
+> upper({{foo}})                          # Convert to uppercase
+>
+> # String truncation
+> truncate({{str}})                       # Truncate with default length
+> truncate({{str}}, 42)                   # Truncate to 42 characters
+> truncate({{str}}, 42, ' etc')           # Custom ellipsis
+> truncate({{str}}, {{len}}, {{ellipsis}})  # Dynamic truncation
+>
+> # JSON parsing/stringifying
+> json('{"foo": "bar"}')                  # Parse JSON string -> Object { foo: "bar" }
+> json({"foo": "bar"})                    # Stringify object -> String '{"foo":"bar"}'
+>
+> # Unsafe JSON parsing (never raises exception, extracts JSON from text)
+> unsafejson('Voici un tableaux: ["un"] !')           # ["un"]
+> unsafejson('Voici un objet :\n ```{"un": 1}```\n !') # {"un": 1}
+>
+> # String manipulation
+> split('one,two,three', ',')             # Array ["one", "two", "three"]
+> join(['one', 'two', 'three'], ',')      # String "one,two,three"
+> replace('hello world', 'world', 'there') # String "hello there"
+>
+> # HTML sanitization
+> sanitize('<b>Bonjour <u>toi</u></b> !') # &#60;b&#62;Bonjour &#60;u&#62;toi&#60;/u&#62;&#60;/b&#62; !
+>
+> # Remove complex unicode characters (non BMP, non UTF16 surrogates)
+> sanitize('Bonjour 🌍 ! Ça va ? 我爱你 ❤️')  # Bonjour  ! Ça va ? 我爱你 ❤️
+> ```
+>
+> We encourage using `=`, `and`, `or`, and `matches` for better clarity.
 
 
 **Variable Management**:
@@ -493,8 +568,32 @@ Use `conditions` for multiple conditional branches (similar to switch-case).
   - Valid: `{{user.name}}`, `{{data.items[0]}}`
   - Invalid: `{{user.name || 'Guest'}}`, `{{!isValid}}`
 
-- **Expressions `{% expression %}`**: For JavaScript expressions. Can contain interpolated variables. Required for `set` values or other properties that need logic.
+- **Expressions `{% expression %}`**: For complex logic and utility functions. Can contain interpolated variables.
   - Valid: `{% !{{isValid}} %}`, `{% {{count}} > 5 %}`, `{% {{a}} || {{b}} %}`
+  - With utility functions: `{% lower({{messageText}}) %}`, `{% truncate({{description}}, 100) %}`
+  
+**Examples using utility functions**:
+```yaml
+# Convert to lowercase before comparison
+- set:
+    name: lowerText
+    value: '{% lower({{messageText}}) %}'
+
+# Parse JSON response
+- set:
+    name: parsedData
+    value: '{% json({{apiResponse}}) %}'
+
+# Split comma-separated values
+- set:
+    name: itemList
+    value: '{% split({{csvString}}, ",") %}'
+
+# Truncate long text
+- set:
+    name: preview
+    value: '{% truncate({{longText}}, 50, "...") %}'
+```
 
 **Variable Interpolation & Dynamic Object Access**:
 
