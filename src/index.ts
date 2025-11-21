@@ -167,7 +167,44 @@ const tools: Tool[] = [
     },
     {
         name: 'search_events',
-        description: 'Search for events in Prisme.ai workspace using Elasticsearch DSL. Use the "type" filter in the query to filter for specific event types. Use "source.automationSlug" to filter events by specific automation names. Supports full Elasticsearch DSL query syntax including aggregations, sorting, and pagination.',
+        description: `Search for events in Prisme.ai workspace using Elasticsearch DSL. 
+    
+    EVENT STRUCTURE:
+    Events contain the following key fields:
+    - @timestamp: Event timestamp (ISO 8601 format) - USE THIS FOR SORTING, NOT "timestamp"
+    - id: Unique event ID
+    - type: Event type (e.g., "runtime.automations.executed", "workspaces.pages.updated", "error")
+    - source: Metadata object containing:
+      - correlationId: Groups all events from a single API request/operation
+      - userId: User who triggered the event
+      - sessionId: User session identifier
+      - workspaceId: Workspace identifier
+      - automationSlug: Automation name (for automation-related events)
+      - http: HTTP request details (method, path, hostname, ip)
+      - host: Service information (replica, service name)
+    - payload: Event-specific data (varies by event type)
+    - createdAt: Creation timestamp
+    
+    COMMON QUERIES:
+    - Find all events for a specific request: {"bool": {"filter": [{"term": {"source.correlationId": "uuid-here"}}]}}
+    - Find automation executions: {"bool": {"filter": [{"term": {"type": "runtime.automations.executed"}}]}}
+    - Find events for specific automation: {"bool": {"filter": [{"term": {"source.automationSlug": "automation-name"}}]}}
+    - Find errors: {"bool": {"filter": [{"term": {"type": "error"}}]}}
+    - Exclude specific correlationId: {"bool": {"must_not": [{"term": {"source.correlationId": "uuid-here"}}]}}
+    
+    SORTING:
+    - Always use "@timestamp" field for time-based sorting: [{"@timestamp": {"order": "desc"}}]
+    - DO NOT use "timestamp" as it's not mapped in the index
+    
+    COMMON EVENT TYPES:
+    - runtime.automations.executed
+    - runtime.interactions.triggered
+    - runtime.dsul.updated
+    - workspaces.automations.created/updated/deleted
+    - workspaces.pages.created/updated/deleted
+    - error
+    
+    Supports full Elasticsearch DSL query syntax including aggregations, sorting, and pagination.`,
         inputSchema: {
             type: 'object',
             properties: {
@@ -177,29 +214,29 @@ const tools: Tool[] = [
                 },
                 limit: {
                     type: 'number',
-                    description: 'Page size (number of documents to return)'
+                    description: 'Page size (number of documents to return, default varies by API)'
                 },
                 page: {
                     type: 'number',
-                    description: 'Page number'
+                    description: 'Page number (1-indexed)'
                 },
                 aggs: {
                     type: 'object',
-                    description: 'Elasticsearch aggregations to execute on the results'
+                    description: 'Elasticsearch aggregations to execute on the results (e.g., count by type, group by correlationId)'
                 },
                 sort: {
                     type: 'array',
-                    description: 'Elasticsearch sort criteria',
+                    description: 'Elasticsearch sort criteria. IMPORTANT: Use "@timestamp" not "timestamp" for time-based sorting. Example: [{"@timestamp": {"order": "desc"}}]',
                     items: { type: 'object' }
                 },
                 source: {
                     type: 'array',
-                    description: 'Fields to include in the response',
+                    description: 'Fields to include in the response. Omit to get all fields. Example: ["correlationId", "@timestamp", "type", "source.automationSlug"]',
                     items: { type: 'string' }
                 },
                 track_total_hits: {
                     type: 'boolean',
-                    description: 'Get real total count instead of capped at 10000'
+                    description: 'Get real total count instead of capped at 10000 (may impact performance)'
                 }
             },
             required: ['query']
