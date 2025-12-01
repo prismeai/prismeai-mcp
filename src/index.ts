@@ -361,7 +361,7 @@ Returns a structured list of violations with:
     },
     {
         name: 'push_workspace',
-        description: 'Upload the local workspace directory to Prisme.ai. Creates a backup version "MCP-backup" before importing.',
+        description: 'Upload the local workspace directory to Prisme.ai. Creates a backup version before importing.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -369,12 +369,17 @@ Returns a structured list of violations with:
                     type: 'string',
                     description: 'Local directory path containing the workspace (e.g., "." for current directory)'
                 },
+                message: {
+                    type: 'string',
+                    description: 'Version message for the backup (only letters, numbers, hyphens, and underscores allowed - no spaces)',
+                    pattern: '^[a-zA-Z0-9_-]+$'
+                },
                 prune: {
                     type: 'boolean',
                     description: 'Delete remote files not present locally (default: true)'
                 }
             },
-            required: ['path']
+            required: ['path', 'message']
         },
         annotations: {
             destructiveHint: true
@@ -708,7 +713,7 @@ If no violations are found, return:
             }
 
             case 'push_workspace': {
-                const { path: sourcePath, prune = true } = args as { path: string; prune?: boolean };
+                const { path: sourcePath, message, prune = true } = args as { path: string; message: string; prune?: boolean };
                 const resolvedPath = resolve(sourcePath);
 
                 if (!existsSync(resolvedPath)) {
@@ -723,7 +728,19 @@ If no violations are found, return:
                     };
                 }
 
-                const backupResult = await apiClient.publishVersion('MCP-backup', 'Backup before MCP push');
+                if (!/^[a-zA-Z0-9_-]+$/.test(message)) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Error: Invalid message format. Only letters, numbers, hyphens, and underscores are allowed (no spaces).`
+                            }
+                        ],
+                        isError: true
+                    };
+                }
+
+                const backupResult = await apiClient.publishVersion(message, `Backup before MCP push: ${message}`);
 
                 const zip = new AdmZip();
 
