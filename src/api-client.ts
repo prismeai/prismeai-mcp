@@ -134,6 +134,18 @@ export class PrismeApiClient {
         return response.data;
     }
 
+    async getApp(appSlug: string): Promise<any> {
+        const appResponse = await this.client.get(`/apps/${appSlug}`);
+        const app = appResponse.data;
+        
+        if (app.workspaceId) {
+            const workspaceResponse = await this.client.get(`/workspaces/${app.workspaceId}`);
+            app.automations = workspaceResponse.data.automations || {};
+        }
+        
+        return app;
+    }
+
     async publishVersion(name: string, description: string): Promise<any> {
         const response = await this.client.post(
             `/workspaces/${this.workspaceId}/versions`,

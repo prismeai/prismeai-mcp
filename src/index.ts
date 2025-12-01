@@ -204,6 +204,23 @@ const tools: Tool[] = [
         }
     },
     {
+        name: 'get_app',
+        description: 'Get an app from the Prisme.ai app store with its configuration schema and automations. Use this to understand what config an app requires before installing it in the imports folder.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                appSlug: {
+                    type: 'string',
+                    description: 'The slug of the app to retrieve from the app store'
+                }
+            },
+            required: ['appSlug']
+        },
+        annotations: {
+            readOnlyHint: true
+        }
+    },
+    {
         name: 'execute_automation',
         description: 'Execute/test an automation already existing in the Prisme.ai workspace with optional payload',
         inputSchema: {
@@ -486,6 +503,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     labels?: string;
                 };
                 const result = await apiClient.listApps({ text, workspaceId, page, limit, labels });
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2)
+                        }
+                    ]
+                };
+            }
+
+            case 'get_app': {
+                const { appSlug } = args as { appSlug: string };
+                const app = await apiClient.getApp(appSlug);
+                const automations: Record<string, { description?: string; arguments?: Record<string, any> }> = {};
+                if (app.automations) {
+                    for (const [slug, automation] of Object.entries(app.automations as Record<string, any>)) {
+                        automations[slug] = {
+                            description: automation.description,
+                            arguments: automation.arguments
+                        };
+                    }
+                }
+                const result = {
+                    slug: app.slug,
+                    name: app.name,
+                    description: app.description,
+                    configSchema: app.config?.schema || {},
+                    automations
+                };
                 return {
                     content: [
                         {
