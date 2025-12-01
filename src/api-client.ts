@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import FormData from 'form-data';
 
 export interface PrismeConfig {
     apiKey: string;
@@ -107,6 +108,35 @@ export class PrismeApiClient {
         const response = await this.client.post(
             `/workspaces/${this.workspaceId}/search`,
             query
+        );
+        return response.data;
+    }
+
+    async publishVersion(name: string, description: string): Promise<any> {
+        const response = await this.client.post(
+            `/workspaces/${this.workspaceId}/versions`,
+            { name, description }
+        );
+        return response.data;
+    }
+
+    async exportWorkspace(): Promise<Buffer> {
+        const response = await this.client.post(
+            `/workspaces/${this.workspaceId}/versions/current/export`,
+            {},
+            { responseType: 'arraybuffer' }
+        );
+        return Buffer.from(response.data);
+    }
+
+    async importWorkspace(archive: Buffer, prune: boolean = true): Promise<any> {
+        const formData = new FormData();
+        formData.append('archive', archive, { filename: 'workspace.zip' });
+
+        const response = await this.client.post(
+            `/workspaces/${this.workspaceId}/import?prune=${prune}`,
+            formData,
+            { headers: formData.getHeaders() }
         );
         return response.data;
     }

@@ -10,9 +10,10 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 import { PrismeApiClient } from './api-client.js';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
+import AdmZip from 'adm-zip';
 
 // Load environment variables
 dotenv.config();
@@ -277,6 +278,38 @@ Returns a structured list of violations with:
             },
             required: ['automationYaml']
         }
+    },
+    {
+        name: 'pull_workspace',
+        description: 'Download the current workspace from Prisme.ai and extract it to a local directory. This will overwrite existing files.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                path: {
+                    type: 'string',
+                    description: 'Local directory path to extract workspace to (e.g., "." for current directory)'
+                }
+            },
+            required: ['path']
+        }
+    },
+    {
+        name: 'push_workspace',
+        description: 'Upload the local workspace directory to Prisme.ai. Creates a backup version "MCP backup" before importing.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                path: {
+                    type: 'string',
+                    description: 'Local directory path containing the workspace (e.g., "." for current directory)'
+                },
+                prune: {
+                    type: 'boolean',
+                    description: 'Delete remote files not present locally (default: true)'
+                }
+            },
+            required: ['path']
+        }
     }
 ];
 
@@ -469,7 +502,7 @@ If no violations are found, return:
                             }
                         ],
                         systemPrompt,
-                        maxTokens: 4096,
+                        maxTokens: 10000,
                         includeContext: 'none'
                     };
 
@@ -527,6 +560,95 @@ If no violations are found, return:
                         isError: true
                     };
                 }
+            }
+
+            case 'pull_workspace': {
+                const { path: targetPath } = args as { path: string };
+                const resolvedPath = resolve(targetPath);
+
+                const zipBuffer = await apiClient.exportWorkspace();
+                const zip = new AdmZip(zipBuffer);
+
+                if (!existsSync(resolvedPath)) {
+                    mkdirSync(resolvedPath, { recursive: true });
+                }
+
+                zip.extractAllTo(resolvedPath, true);
+
+                const extractedFiles: string[] = [];
+                zip.getEntries().forEach(entry => {
+                    if (!entry.isDirectory) {
+                        extractedFiles.push(entry.entryName);
+                    }
+                });
+
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                success: true,
+                                path: resolvedPath,
+                                filesExtracted: extractedFiles.length,
+                                files: extractedFiles
+                            }, null, 2)
+                        }
+                    ]
+                };
+            }
+
+            case 'push_workspace': {
+                const { path: sourcePath, prune = true } = args as { path: string; prune?: boolean };
+                const resolvedPath = resolve(sourcePath);
+
+                if (!existsSync(resolvedPath)) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Error: Directory not found: ${resolvedPath}`
+                            }
+                        ],
+                        isError: true
+                    };
+                }
+
+                const backupResult = await apiClient.publishVersion('MCP backup', 'Backup before MCP push');
+
+                const zip = new AdmZip();
+
+                const addDirectoryToZip = (dirPath: string, zipPath: string = '') => {
+                    const entries = readdirSync(dirPath);
+                    for (const entry of entries) {
+                        const fullPath = join(dirPath, entry);
+                        const entryZipPath = zipPath ? `${zipPath}/${entry}` : entry;
+                        const stat = statSync(fullPath);
+
+                        if (stat.isDirectory()) {
+                            addDirectoryToZip(fullPath, entryZipPath);
+                        } else {
+                            zip.addLocalFile(fullPath, zipPath || undefined);
+                        }
+                    }
+                };
+
+                addDirectoryToZip(resolvedPath);
+
+                const zipBuffer = zip.toBuffer();
+                const importResult = await apiClient.importWorkspace(zipBuffer, prune);
+
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                success: true,
+                                backup: backupResult,
+                                import: importResult
+                            }, null, 2)
+                        }
+                    ]
+                };
             }
 
             default:
