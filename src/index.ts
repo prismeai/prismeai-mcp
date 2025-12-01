@@ -10,7 +10,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 import { PrismeApiClient } from './api-client.js';
-import { readFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import AdmZip from 'adm-zip';
@@ -334,7 +334,7 @@ Returns a structured list of violations with:
     },
     {
         name: 'push_workspace',
-        description: 'Upload the local workspace directory to Prisme.ai. Creates a backup version "MCP backup" before importing.',
+        description: 'Upload the local workspace directory to Prisme.ai. Creates a backup version "MCP-backup" before importing.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -632,12 +632,27 @@ If no violations are found, return:
                     mkdirSync(resolvedPath, { recursive: true });
                 }
 
-                zip.extractAllTo(resolvedPath, true);
-
                 const extractedFiles: string[] = [];
+                const currentPrefix = 'current/';
+
                 zip.getEntries().forEach(entry => {
-                    if (!entry.isDirectory) {
-                        extractedFiles.push(entry.entryName);
+                    if (entry.entryName.startsWith(currentPrefix)) {
+                        const relativePath = entry.entryName.slice(currentPrefix.length);
+                        if (relativePath) {
+                            const targetFilePath = join(resolvedPath, relativePath);
+                            if (entry.isDirectory) {
+                                if (!existsSync(targetFilePath)) {
+                                    mkdirSync(targetFilePath, { recursive: true });
+                                }
+                            } else {
+                                const fileDir = dirname(targetFilePath);
+                                if (!existsSync(fileDir)) {
+                                    mkdirSync(fileDir, { recursive: true });
+                                }
+                                writeFileSync(targetFilePath, entry.getData());
+                                extractedFiles.push(relativePath);
+                            }
+                        }
                     }
                 });
 
@@ -672,7 +687,7 @@ If no violations are found, return:
                     };
                 }
 
-                const backupResult = await apiClient.publishVersion('MCP backup', 'Backup before MCP push');
+                const backupResult = await apiClient.publishVersion('MCP-backup', 'Backup before MCP push');
 
                 const zip = new AdmZip();
 
