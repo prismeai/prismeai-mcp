@@ -41,6 +41,21 @@ export interface SearchResponse {
     aggs?: Record<string, any>;
 }
 
+export interface ListAppsParams {
+    text?: string;
+    workspaceId?: string;
+    page?: number;
+    limit?: number;
+    labels?: string;
+}
+
+export interface App {
+    slug: string;
+    name: string | Record<string, string>;
+    description?: string | Record<string, string>;
+    [key: string]: any;
+}
+
 export class PrismeApiClient {
     private client: AxiosInstance;
     private workspaceId: string;
@@ -65,9 +80,10 @@ export class PrismeApiClient {
         return response.data;
     }
 
-    async getAutomation(automationSlug: string): Promise<Automation> {
+    async getAutomation(automationSlug: string, workspaceId?: string): Promise<Automation> {
+        const wsId = workspaceId || this.workspaceId;
         const response = await this.client.get(
-            `/workspaces/${this.workspaceId}/automations/${automationSlug}`
+            `/workspaces/${wsId}/automations/${automationSlug}`
         );
         return response.data;
     }
@@ -87,9 +103,10 @@ export class PrismeApiClient {
         return response.data;
     }
 
-    async listAutomations(): Promise<Record<string, any>> {
+    async listAutomations(workspaceId?: string): Promise<Record<string, any>> {
+        const wsId = workspaceId || this.workspaceId;
         const response = await this.client.get(
-            `/workspaces/${this.workspaceId}`
+            `/workspaces/${wsId}`
         );
         return response.data.automations || {};
     }
@@ -109,6 +126,11 @@ export class PrismeApiClient {
             `/workspaces/${this.workspaceId}/search`,
             query
         );
+        return response.data;
+    }
+
+    async listApps(params?: ListAppsParams): Promise<App[]> {
+        const response = await this.client.get('/apps', { params });
         return response.data;
     }
 

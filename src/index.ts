@@ -103,6 +103,10 @@ const tools: Tool[] = [
                 automationSlug: {
                     type: 'string',
                     description: 'The slug of the automation to retrieve'
+                },
+                workspaceId: {
+                    type: 'string',
+                    description: 'Optional workspace ID to retrieve the automation from (defaults to configured workspace)'
                 }
             },
             required: ['automationSlug']
@@ -145,7 +149,42 @@ const tools: Tool[] = [
         description: 'List all automations in the Prisme.ai workspace',
         inputSchema: {
             type: 'object',
-            properties: {},
+            properties: {
+                workspaceId: {
+                    type: 'string',
+                    description: 'Optional workspace ID to list automations from (defaults to configured workspace)'
+                }
+            },
+            required: []
+        }
+    },
+    {
+        name: 'list_apps',
+        description: 'Search apps from the Prisme.ai app store',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                text: {
+                    type: 'string',
+                    description: 'Search keywords'
+                },
+                workspaceId: {
+                    type: 'string',
+                    description: 'Filter apps published from this workspace'
+                },
+                page: {
+                    type: 'number',
+                    description: 'Page number'
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Page size'
+                },
+                labels: {
+                    type: 'string',
+                    description: 'Comma-separated labels list to filter on'
+                }
+            },
             required: []
         }
     },
@@ -351,8 +390,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'get_automation': {
-                const { automationSlug } = args as { automationSlug: string };
-                const result = await apiClient.getAutomation(automationSlug);
+                const { automationSlug, workspaceId } = args as { automationSlug: string; workspaceId?: string };
+                const result = await apiClient.getAutomation(automationSlug, workspaceId);
                 return {
                     content: [
                         {
@@ -390,7 +429,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'list_automations': {
-                const result = await apiClient.listAutomations();
+                const { workspaceId } = args as { workspaceId?: string };
+                const result = await apiClient.listAutomations(workspaceId);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2)
+                        }
+                    ]
+                };
+            }
+
+            case 'list_apps': {
+                const { text, workspaceId, page, limit, labels } = args as {
+                    text?: string;
+                    workspaceId?: string;
+                    page?: number;
+                    limit?: number;
+                    labels?: string;
+                };
+                const result = await apiClient.listApps({ text, workspaceId, page, limit, labels });
                 return {
                     content: [
                         {
