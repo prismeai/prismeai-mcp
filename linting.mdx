@@ -67,7 +67,63 @@ value: "{{data[{{category}}][{{itemId}}]}}"
 
 ---
 
-### Rule 2: Only Allowed Functions in Expressions `{% %}`
+### Rule 2: Use `comment:` Instruction Instead of YAML Comments
+
+**Severity: ERROR**
+
+In Prisme.ai automations, comments between instructions must use the `comment:` instruction, NOT standard YAML comments (`#`). YAML comments placed between list items in the `do:` block are ignored and can cause confusion.
+
+#### ❌ INVALID Examples (YAML Comments Between Instructions)
+
+```yaml
+do:
+  - set:
+      name: data
+      value: "{{input}}"
+  
+  # This comment will be ignored and is bad practice
+  
+  - fetch:
+      url: "{{config.apiUrl}}"
+
+  # Duplicate detected - remove cache entry and skip
+  
+  - set:
+      name: result
+      value: "{{response}}"
+```
+
+#### ✅ VALID Examples (Using `comment:` Instruction)
+
+```yaml
+do:
+  - set:
+      name: data
+      value: "{{input}}"
+  
+  - comment: |
+      Fetch data from the external API
+  
+  - fetch:
+      url: "{{config.apiUrl}}"
+
+  - comment: |
+      Duplicate detected - remove cache entry and skip
+  
+  - set:
+      name: result
+      value: "{{response}}"
+```
+
+**Why this matters:**
+- YAML comments (`#`) between instructions are silently ignored by the parser
+- The `comment:` instruction is properly tracked and visible in the automation flow
+- It makes the automation more readable and maintainable
+- Comments are preserved when exporting/importing automations
+
+---
+
+### Rule 3: Only Allowed Functions in Expressions `{% %}`
 
 **Severity: ERROR**
 
@@ -400,6 +456,35 @@ value: "{% !{{isValid}} %}"
 value: "{% !{{user.active}} %}"
 ```
 
+### Mistake 9: YAML Comments Instead of `comment:` Instruction
+
+```yaml
+# ❌ WRONG - YAML comments between instructions
+do:
+  - set:
+      name: data
+      value: "{{input}}"
+  
+  # Process the data
+  # This is a multi-line comment
+  
+  - fetch:
+      url: "{{config.apiUrl}}"
+
+# ✅ CORRECT - Use comment: instruction
+do:
+  - set:
+      name: data
+      value: "{{input}}"
+  
+  - comment: |
+      Process the data
+      This is a multi-line comment
+  
+  - fetch:
+      url: "{{config.apiUrl}}"
+```
+
 ---
 
 ## Complete Allowed Functions List
@@ -458,17 +543,22 @@ When reviewing automation YAML, check for:
    - [ ] No JavaScript built-ins (`JSON.parse`, `Object.keys`, etc.)
    - [ ] No template literals or string concatenation
 
-2. **Only Allowed Functions in `{% %}`**
+2. **Use `comment:` Instruction for Comments**
+   - [ ] No YAML comments (`#`) between instructions in `do:` blocks
+   - [ ] All comments use the `comment:` instruction
+   - [ ] Multi-line comments use `comment: |` with proper YAML block syntax
+
+3. **Only Allowed Functions in `{% %}`**
    - [ ] All function calls are from the allowed list
    - [ ] Function arguments use proper syntax
    - [ ] No JavaScript methods or built-ins
 
-3. **Proper Expression Context**
+4. **Proper Expression Context**
    - [ ] Complex logic uses `{% %}` not `{{}}`
    - [ ] Conditions blocks use implicit expression syntax
    - [ ] Arithmetic operations are in `{% %}` blocks
 
-4. **Correct Variable Access**
+5. **Correct Variable Access**
    - [ ] Dynamic property access uses nested interpolation: `{{obj[{{key}}]}}`
    - [ ] Array access uses index: `{{items[0]}}`
    - [ ] Object iteration uses `{{item.key}}` and `{{item.value}}`
