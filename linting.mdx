@@ -485,6 +485,16 @@ do:
       url: "{{config.apiUrl}}"
 ```
 
+### Mistake 10: Date Arithmetic Without Timestamp Conversion
+
+```yaml
+# ❌ WRONG - Cannot do arithmetic directly on date strings
+value: "{% {{run.date}} - 3600000 %}"
+
+# ✅ CORRECT - Use date().ts to get timestamp first
+value: "{% date({{run.date}}).ts - 3600000 %}"
+```
+
 ---
 
 ## Complete Allowed Functions List
