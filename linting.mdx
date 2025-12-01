@@ -1,0 +1,475 @@
+---
+title: "Prisme.ai Automation Linting Rules"
+description: "Comprehensive linting rules for validating Prisme.ai automations - checking expressions, functions, and common mistakes"
+---
+
+# Prisme.ai Automation Linting Rules
+
+This document defines linting rules for validating Prisme.ai automation YAML files. Use these rules to identify and fix common mistakes before deployment.
+
+## Critical Rules
+
+### Rule 1: No JavaScript in Variable Interpolation `{{}}`
+
+**Severity: ERROR**
+
+Variable interpolation `{{}}` is **strictly for variable substitution only**. No JavaScript expressions, operators, or function calls are allowed inside `{{}}`.
+
+#### ❌ INVALID Examples (JavaScript in `{{}}`)
+
+```yaml
+# JavaScript logical operators - INVALID
+value: "{{user.name || 'Guest'}}"
+value: "{{isValid ? 'yes' : 'no'}}"
+value: "{{!isActive}}"
+value: "{{count && count > 0}}"
+
+# JavaScript methods - INVALID
+value: "{{user.name.toLowerCase()}}"
+value: "{{items.filter(x => x.active)}}"
+value: "{{data.map(item => item.id)}}"
+value: "{{array.join(', ')}}"
+value: "{{str.split(',')[0]}}"
+value: "{{JSON.parse(response)}}"
+value: "{{JSON.stringify(data)}}"
+value: "{{Object.keys(myObject)}}"
+value: "{{Array.isArray(items)}}"
+
+# JavaScript arithmetic in interpolation - INVALID
+value: "{{count + 1}}"
+value: "{{price * quantity}}"
+
+# Template literals / string concatenation - INVALID
+value: "{{`Hello ${name}`}}"
+value: "{{'Hello ' + name}}"
+```
+
+#### ✅ VALID Examples (Pure Variable Access)
+
+```yaml
+# Simple variable access
+value: "{{user.name}}"
+value: "{{data.items}}"
+value: "{{config.apiUrl}}"
+
+# Nested property access
+value: "{{user.profile.firstName}}"
+value: "{{response.data.results}}"
+
+# Array index access
+value: "{{items[0]}}"
+value: "{{data.items[2].name}}"
+
+# Dynamic property access (nested interpolation)
+value: "{{myObject[{{propertyName}}]}}"
+value: "{{data[{{category}}][{{itemId}}]}}"
+```
+
+---
+
+### Rule 2: Only Allowed Functions in Expressions `{% %}`
+
+**Severity: ERROR**
+
+Expression blocks `{% %}` support a specific set of utility functions. Using any function not in this list will cause runtime errors.
+
+## Allowed Functions Reference
+
+### String Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `lower(str)` | Convert string to lowercase | `{% lower({{foo}}) %}` |
+| `upper(str)` | Convert string to uppercase | `{% upper({{foo}}) %}` |
+| `truncate(str)` | Truncate with default length | `{% truncate({{str}}) %}` |
+| `truncate(str, length)` | Truncate to specific length | `{% truncate({{str}}, 42) %}` |
+| `truncate(str, length, ellipsis)` | Truncate with custom ellipsis | `{% truncate({{str}}, 42, ' etc') %}` |
+| `split(str, delimiter)` | Split string into array | `{% split('one,two,three', ',') %}` → `["one", "two", "three"]` |
+| `join(array, delimiter)` | Join array into string | `{% join(['one', 'two', 'three'], ',') %}` → `"one,two,three"` |
+| `replace(str, search, replacement)` | Replace substring | `{% replace('hello world', 'world', 'there') %}` → `"hello there"` |
+| `sanitize(str)` | Sanitize HTML entities | `{% sanitize('<b>Hello</b>') %}` |
+
+### JSON Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `json(string)` | Parse JSON string to object | `{% json('{"foo": "bar"}') %}` → `{ foo: "bar" }` |
+| `json(object)` | Stringify object to JSON | `{% json({"foo": "bar"}) %}` → `'{"foo":"bar"}'` |
+| `unsafejson(str)` | Extract JSON from mixed text (never throws) | `{% unsafejson('Result: ["a","b"]') %}` → `["a","b"]` |
+
+### Date Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `date(dateStr, format)` | Format date | `{% date("2023-03-31T17:07:23.975Z", "l") %}` → `"3/31/2023"` |
+| `date(dateStr, format, locale)` | Format with locale | `{% date("2023-03-31T17:07:23.975Z", "LT", "fr") %}` → `"19:07"` |
+| `date(dateStr, format, locale, timezone)` | Format with timezone | `{% date("2023-03-31T17:07:23.975Z", "LT", "fr", "America/New_York") %}` → `"13:07"` |
+| `elapsed(dateStr, unit, value)` | Check if time has elapsed | `{% elapsed("2022-04-13T08:00:05.493Z", "seconds", 10) %}` |
+
+**Date Format Tokens:**
+- `l` - Short date (3/31/2023)
+- `L` - Long date
+- `LT` - Time (7:07 PM)
+- `LTS` - Time with seconds
+- `lll` - Full date and time with locale
+- `DD/MM/YYYY` - Custom format
+- See [Day.js documentation](https://day.js.org/docs/en/display/format) for all tokens
+
+**Elapsed Unit Options:**
+- `seconds`, `minutes`, `hours`, `days`, `weeks`, `months`, `years`
+- `day` (day of week: 0=Sunday, 3=Wednesday)
+
+### Math Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `rand()` | Random float between 0 and 1 | `{% rand() %}` |
+| `rand(min, max)` | Random integer between min and max | `{% rand(50, 150) %}` |
+| `round(value)` | Round to nearest integer | `{% round(10.6) %}` → `11` |
+| `round(value, decimals)` | Round to decimal places | `{% round(10.26, 1) %}` → `10.3` |
+| `ceil(value)` | Round up to nearest integer | `{% ceil(10.1) %}` → `11` |
+
+**Math Operators (in expressions):**
+```yaml
+{% 1 + 1 %}
+{% {{firstVar}} * {{secondVar}} %}
+{% ({{firstVar}} * {{secondVar}} + 10) / 2 %}
+{% {{value}} - 5 %}
+{% {{total}} / {{count}} %}
+{% {{number}} % 2 %}  # Modulo
+```
+
+### URL Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `URLSearchParams(str).asJSON` | Parse query string to object | `{% URLSearchParams("key1=value1&key2=value2").asJSON %}` |
+| `URLSearchParams(obj).asString` | Convert object to query string | `{% URLSearchParams({foo: "bar"}).asString %}` → `"foo=bar"` |
+| `URL(urlStr)` | Parse complete URL to object | `{% URL("https://example.com/path?q=1").hostname %}` |
+
+**URL Object Properties:**
+- `href` - Full URL
+- `origin` - Protocol + host
+- `protocol` - Protocol (https:)
+- `username` - URL username
+- `password` - URL password
+- `host` - Hostname with port
+- `hostname` - Hostname only
+- `port` - Port number
+- `pathname` - Path
+- `search` - Query string with ?
+- `searchParams` - Query as object
+- `hash` - Fragment with #
+
+### Type Checking Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `isArray(value)` | Check if value is array | `{% isArray({{someVariable}}) %}` |
+| `isObject(value)` | Check if value is object | `{% isObject({{someVariable}}) %}` |
+| `isString(value)` | Check if value is string | `{% isString({{someVariable}}) %}` |
+| `isNumber(value)` | Check if value is number | `{% isNumber({{someVariable}}) %}` |
+
+---
+
+## Condition Operators (for `conditions:` blocks)
+
+Conditions blocks have **implicit expression context** - you don't need `{% %}` wrappers.
+
+### Comparison Operators
+
+```yaml
+conditions:
+  # Numeric comparisons
+  '{{someAge}} > 18': [...]
+  '{{someAge}} >= 18': [...]
+  '{{someAge}} < 18': [...]
+  '{{someAge}} <= 18': [...]
+  '{{someAge}} == 18': [...]
+  '{{someAge}} = 18': [...]      # Equivalent to ==
+  '{{someAge}} !== 18': [...]
+  '{{someAge}} != 18': [...]
+  
+  # String equality
+  '{{cityName}} = "Toulouse"': [...]
+  
+  # Arithmetic in conditions
+  '{{someValue}} + {{anotherValue}} > 100': [...]
+```
+
+### Logical Operators
+
+```yaml
+conditions:
+  # AND operations (prefer 'and')
+  '{{condition1}} and {{condition2}}': [...]
+  '{{condition1}} && {{condition2}}': [...]
+  
+  # OR operations (prefer 'or')
+  '{{condition1}} or {{condition2}}': [...]
+  '{{condition1}} || {{condition2}}': [...]
+  
+  # Negation
+  '!{{testedVariable}}': [...]
+```
+
+### String Matching
+
+```yaml
+conditions:
+  # Substring check
+  '"hello" matches "hel"': [...]
+  '"carousel" matches {{lowerText}}': [...]
+  
+  # Match against array
+  '"hello" matches {{someArray}}': [...]
+```
+
+### Membership Testing
+
+```yaml
+conditions:
+  # Check if value is in list/object
+  '{{someValue}} in {{someList}}': [...]
+  '{{someKey}} in {{someObject}}': [...]
+  
+  # Check if value is NOT in list/object
+  '{{someKey}} not in {{someObject}}': [...]
+  '{{someKey}} not in "my,string,list"': [...]
+```
+
+### Variable Existence Check
+
+```yaml
+conditions:
+  # Check if variable is defined (truthy)
+  '{{testedVariable}}': [...]
+  
+  # Check if variable is empty/undefined (falsy)
+  '!{{testedVariable}}': [...]
+  
+  # Default case
+  'default': [...]
+```
+
+---
+
+## Common Mistakes to Detect
+
+### Mistake 1: JavaScript Methods in Interpolation
+
+```yaml
+# ❌ WRONG
+value: "{{user.name.toUpperCase()}}"
+value: "{{items.length}}"
+value: "{{data.toString()}}"
+
+# ✅ CORRECT
+value: "{% upper({{user.name}}) %}"
+# For array length, access it as a property (if supported) or count in repeat
+```
+
+### Mistake 2: JavaScript Logical Operators in Interpolation
+
+```yaml
+# ❌ WRONG
+value: "{{value || 'default'}}"
+value: "{{isActive && 'yes'}}"
+value: "{{condition ? trueVal : falseVal}}"
+
+# ✅ CORRECT - Use conditions block or set with conditions
+- conditions:
+    '{{value}}':
+      - set:
+          name: result
+          value: "{{value}}"
+    default:
+      - set:
+          name: result
+          value: "default"
+```
+
+### Mistake 3: JavaScript Array/Object Methods
+
+```yaml
+# ❌ WRONG
+value: "{{items.map(x => x.name)}}"
+value: "{{Object.keys(data)}}"
+value: "{{array.filter(Boolean)}}"
+value: "{{items.find(x => x.id === 1)}}"
+
+# ✅ CORRECT - Use repeat instruction
+- repeat:
+    'on': '{{items}}'
+    do:
+      - set:
+          name: names
+          type: push
+          value: "{{item.name}}"
+```
+
+### Mistake 4: JSON.parse/JSON.stringify
+
+```yaml
+# ❌ WRONG
+value: "{{JSON.parse(response)}}"
+value: "{{JSON.stringify(data)}}"
+
+# ✅ CORRECT
+value: "{% json({{response}}) %}"      # Parse string to object
+value: "{% json({{data}}) %}"          # Stringify object to string
+```
+
+### Mistake 5: String Concatenation in Interpolation
+
+```yaml
+# ❌ WRONG
+value: "{{'Hello ' + user.name}}"
+value: "{{`${greeting} ${name}`}}"
+
+# ✅ CORRECT - Use string interpolation naturally
+value: "Hello {{user.name}}"
+value: "{{greeting}} {{name}}"
+```
+
+### Mistake 6: Undefined Functions
+
+```yaml
+# ❌ WRONG - These functions don't exist
+value: "{% parseInt({{str}}) %}"
+value: "{% parseFloat({{str}}) %}"
+value: "{% Math.floor({{num}}) %}"
+value: "{% String({{value}}) %}"
+value: "{% Number({{str}}) %}"
+value: "{% Boolean({{value}}) %}"
+value: "{% encodeURIComponent({{str}}) %}"
+value: "{% decodeURIComponent({{str}}) %}"
+value: "{% trim({{str}}) %}"
+value: "{% substring({{str}}, 0, 5) %}"
+value: "{% indexOf({{str}}, 'x') %}"
+value: "{% includes({{str}}, 'x') %}"
+value: "{% startsWith({{str}}, 'x') %}"
+value: "{% endsWith({{str}}, 'x') %}"
+value: "{% concat({{arr1}}, {{arr2}}) %}"
+value: "{% slice({{arr}}, 0, 5) %}"
+value: "{% sort({{arr}}) %}"
+value: "{% reverse({{arr}}) %}"
+value: "{% push({{arr}}, {{item}}) %}"
+value: "{% pop({{arr}}) %}"
+value: "{% shift({{arr}}) %}"
+value: "{% unshift({{arr}}, {{item}}) %}"
+value: "{% keys({{obj}}) %}"
+value: "{% values({{obj}}) %}"
+value: "{% entries({{obj}}) %}"
+value: "{% assign({{obj1}}, {{obj2}}) %}"
+value: "{% merge({{obj1}}, {{obj2}}) %}"
+value: "{% filter({{arr}}, condition) %}"
+value: "{% map({{arr}}, transform) %}"
+value: "{% reduce({{arr}}, reducer) %}"
+value: "{% find({{arr}}, condition) %}"
+value: "{% forEach({{arr}}, callback) %}"
+value: "{% every({{arr}}, condition) %}"
+value: "{% some({{arr}}, condition) %}"
+
+# ✅ Use only the allowed functions listed above
+```
+
+### Mistake 7: Arithmetic in Interpolation
+
+```yaml
+# ❌ WRONG
+value: "{{count + 1}}"
+value: "{{price * quantity}}"
+value: "{{total / count}}"
+
+# ✅ CORRECT - Use expression blocks
+value: "{% {{count}} + 1 %}"
+value: "{% {{price}} * {{quantity}} %}"
+value: "{% {{total}} / {{count}} %}"
+```
+
+### Mistake 8: Negation in Interpolation
+
+```yaml
+# ❌ WRONG
+value: "{{!isValid}}"
+value: "{{!user.active}}"
+
+# ✅ CORRECT - Use expression blocks
+value: "{% !{{isValid}} %}"
+value: "{% !{{user.active}} %}"
+```
+
+---
+
+## Complete Allowed Functions List
+
+For quick reference, here is the **complete list** of allowed functions in `{% %}` expressions:
+
+### String
+- `lower(str)`
+- `upper(str)`
+- `truncate(str)` / `truncate(str, len)` / `truncate(str, len, ellipsis)`
+- `split(str, delimiter)`
+- `join(array, delimiter)`
+- `replace(str, search, replacement)`
+- `sanitize(str)`
+
+### JSON
+- `json(value)` - Parse or stringify
+- `unsafejson(str)` - Safe JSON extraction
+
+### Date
+- `date(dateStr, format)` / `date(dateStr, format, locale)` / `date(dateStr, format, locale, timezone)`
+- `elapsed(dateStr, unit, value)`
+
+### Math
+- `rand()` / `rand(min, max)`
+- `round(value)` / `round(value, decimals)`
+- `ceil(value)`
+- Operators: `+`, `-`, `*`, `/`, `%`
+
+### URL
+- `URLSearchParams(value).asJSON`
+- `URLSearchParams(value).asString`
+- `URL(urlStr)` and property access (`.hostname`, `.pathname`, etc.)
+
+### Type Checking
+- `isArray(value)`
+- `isObject(value)`
+- `isString(value)`
+- `isNumber(value)`
+
+### Operators (in conditions and expressions)
+- Comparison: `>`, `>=`, `<`, `<=`, `==`, `=`, `!=`, `!==`
+- Logical: `and`, `&&`, `or`, `||`, `!`
+- Membership: `in`, `not in`
+- Matching: `matches`
+
+---
+
+## Linting Checklist
+
+When reviewing automation YAML, check for:
+
+1. **No JavaScript in `{{}}`**
+   - [ ] No method calls (`.toLowerCase()`, `.map()`, `.filter()`, etc.)
+   - [ ] No operators (`||`, `&&`, `? :`, `+`, `-`, etc.)
+   - [ ] No JavaScript built-ins (`JSON.parse`, `Object.keys`, etc.)
+   - [ ] No template literals or string concatenation
+
+2. **Only Allowed Functions in `{% %}`**
+   - [ ] All function calls are from the allowed list
+   - [ ] Function arguments use proper syntax
+   - [ ] No JavaScript methods or built-ins
+
+3. **Proper Expression Context**
+   - [ ] Complex logic uses `{% %}` not `{{}}`
+   - [ ] Conditions blocks use implicit expression syntax
+   - [ ] Arithmetic operations are in `{% %}` blocks
+
+4. **Correct Variable Access**
+   - [ ] Dynamic property access uses nested interpolation: `{{obj[{{key}}]}}`
+   - [ ] Array access uses index: `{{items[0]}}`
+   - [ ] Object iteration uses `{{item.key}}` and `{{item.value}}`
+

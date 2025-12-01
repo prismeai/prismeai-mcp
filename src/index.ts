@@ -6,6 +6,7 @@ import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
     Tool,
+    CreateMessageRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 import { PrismeApiClient } from './api-client.js';
@@ -203,6 +204,10 @@ const tools: Tool[] = [
     - workspaces.automations.created/updated/deleted
     - workspaces.pages.created/updated/deleted
     - error
+
+    ADDITIONAL INFO:
+    - SearchError are probably caused by your own previous failed attempt to create filters. This is usually not the event the user ask for. Keep searching for the events before the SearchError ones.
+    - Always use "source" to filter only the necessary fields. Only include the informations that are relevant to the user's request. Ignore durations, timestamps, IP adress if not asked for.
     
     Supports full Elasticsearch DSL query syntax including aggregations, sorting, and pagination.`,
         inputSchema: {
@@ -231,7 +236,7 @@ const tools: Tool[] = [
                 },
                 source: {
                     type: 'array',
-                    description: 'Fields to include in the response. Omit to get all fields. Example: ["correlationId", "@timestamp", "type", "source.automationSlug"]',
+                    description: 'Fields to include in the response. Omit to get all fields. Example: ["correlationId", "@timestamp", "type", "source.automationSlug", "payload"]',
                     items: { type: 'string' }
                 },
                 track_total_hits: {
@@ -249,6 +254,28 @@ const tools: Tool[] = [
             type: 'object',
             properties: {},
             required: []
+        }
+    },
+    {
+        name: 'lint_automation',
+        description: `Lint a Prisme.ai automation YAML to check for common mistakes.
+        
+This tool performs LLM-based linting via MCP sampling to analyze the automation without cluttering the main conversation context.
+
+Returns a structured list of violations with:
+- Line references
+- Error descriptions  
+- Suggested fixes
+- Severity levels (error/warning)`,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                automationYaml: {
+                    type: 'string',
+                    description: 'The automation YAML content to lint'
+                }
+            },
+            required: ['automationYaml']
         }
     }
 ];
@@ -386,6 +413,115 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             {
                                 type: 'text',
                                 text: `Error reading documentation: ${error instanceof Error ? error.message : 'Unknown error'}`
+                            }
+                        ],
+                        isError: true
+                    };
+                }
+            }
+
+            case 'lint_automation': {
+                try {
+                    const { automationYaml } = args as { automationYaml: string };
+                    const lintingPath = join(__dirname, '..', 'linting.mdx');
+                    const lintingRules = readFileSync(lintingPath, 'utf-8');
+                    
+                    const systemPrompt = `You are a Prisme.ai automation linter. Analyze YAML automations against the provided linting rules and return ONLY a valid JSON response.
+
+${lintingRules}`;
+
+                    const userPrompt = `Analyze this automation YAML and return a JSON object with linting results:
+
+\`\`\`yaml
+${automationYaml}
+\`\`\`
+
+Return ONLY valid JSON in this exact format (no markdown, no explanation):
+{
+  "violations": [
+    {
+      "line": <line_number or null if unknown>,
+      "severity": "error" | "warning",
+      "rule": "<rule_id>",
+      "message": "<description of the issue>",
+      "original": "<the problematic code snippet>",
+      "fix": "<the corrected code snippet>"
+    }
+  ],
+  "summary": {
+    "errors": <count>,
+    "warnings": <count>,
+    "passed": <boolean>
+  }
+}
+
+If no violations are found, return:
+{"violations": [], "summary": {"errors": 0, "warnings": 0, "passed": true}}`;
+
+                    const samplingParams: CreateMessageRequest['params'] = {
+                        messages: [
+                            {
+                                role: 'user',
+                                content: {
+                                    type: 'text',
+                                    text: userPrompt
+                                }
+                            }
+                        ],
+                        systemPrompt,
+                        maxTokens: 4096,
+                        includeContext: 'none'
+                    };
+
+                    const result = await server.createMessage(samplingParams);
+                    
+                    let responseText = '';
+                    if (result.content.type === 'text') {
+                        responseText = result.content.text;
+                    }
+                    
+                    try {
+                        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                        if (jsonMatch) {
+                            const lintResult = JSON.parse(jsonMatch[0]);
+                            return {
+                                content: [
+                                    {
+                                        type: 'text',
+                                        text: JSON.stringify(lintResult, null, 2)
+                                    }
+                                ]
+                            };
+                        }
+                    } catch {
+                        // If JSON parsing fails, return raw response
+                    }
+                    
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: responseText
+                            }
+                        ]
+                    };
+                } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                    if (errorMessage.includes('sampling') || errorMessage.includes('createMessage')) {
+                        return {
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: `Sampling not supported by client. Falling back to returning linting rules.\n\nThe client (e.g., Cursor) may not support MCP sampling yet. Please analyze the automation manually using these rules:\n\n${readFileSync(join(__dirname, '..', 'linting.mdx'), 'utf-8')}`
+                                }
+                            ]
+                        };
+                    }
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Error during linting: ${errorMessage}`
                             }
                         ],
                         isError: true

@@ -560,6 +560,34 @@ Use `conditions` for multiple conditional branches (similar to switch-case).
     name: variableName
     value: "{{expression}}"
     scope: session  # run, session, user, global
+    type: replace  # replace (default), push, merge
+```
+
+**Set Types**:
+- `replace` (default): Replaces the variable value entirely
+- `push`: Appends the value to an existing array
+- `merge`: Merges the value with an existing array or object
+
+```yaml
+# Push a value to an array
+- set:
+    name: contents
+    type: push
+    value: '{{content}}'
+
+# Merge objects
+- set:
+    name: userSettings
+    type: merge
+    value:
+      theme: dark
+      language: en
+
+# Merge arrays
+- set:
+    name: allItems
+    type: merge
+    value: '{{newItems}}'
 ```
 
 **Expressions & Interpolation**:
