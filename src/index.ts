@@ -629,7 +629,13 @@ If no violations are found, return:
                     };
                 } catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                    if (errorMessage.includes('sampling') || errorMessage.includes('createMessage')) {
+                    const isSamplingNotSupported = 
+                        errorMessage.includes('sampling') || 
+                        errorMessage.includes('createMessage') ||
+                        errorMessage.includes('Method not found') ||
+                        errorMessage.includes('-32601');
+                    
+                    if (isSamplingNotSupported) {
                         return {
                             content: [
                                 {
