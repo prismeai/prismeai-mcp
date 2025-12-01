@@ -371,8 +371,9 @@ Returns a structured list of violations with:
                 },
                 message: {
                     type: 'string',
-                    description: 'Version message for the backup (only letters, numbers, hyphens, and underscores allowed - no spaces)',
-                    pattern: '^[a-zA-Z0-9_-]+$'
+                    description: 'Version name for the backup (max 15 characters, only letters, numbers, hyphens, and underscores allowed - no spaces)',
+                    pattern: '^[a-zA-Z0-9_-]+$',
+                    maxLength: 15
                 },
                 prune: {
                     type: 'boolean',
@@ -734,6 +735,18 @@ If no violations are found, return:
                             {
                                 type: 'text',
                                 text: `Error: Invalid message format. Only letters, numbers, hyphens, and underscores are allowed (no spaces).`
+                            }
+                        ],
+                        isError: true
+                    };
+                }
+
+                if (message.length > 15) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Error: Version name must be 15 characters or less (got ${message.length} characters).`
                             }
                         ],
                         isError: true
