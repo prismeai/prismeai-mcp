@@ -1,0 +1,14 @@
+appSlug: Custom Code
+slug: Custom Code
+config:
+  functions:
+    cleanYamlBrackets:
+      parameters:
+        toClean:
+          type: string
+      code: |
+        return toClean
+          .replace(/\{\{/g, '-{-{')
+          .replace(/\}\}/g, '}-}-')
+          .replace(/\{%/g, '-{-%')
+          .replace(/%\}/g, '%-}-');

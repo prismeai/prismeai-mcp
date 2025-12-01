@@ -55,16 +55,8 @@ do:
             name: returnedValue
             value: |
               Error: No automation found
-  - set:
-      name: result
-      value:
-        value: '{{returnedValue}}'
-        description: Search results from Prisme.ai workspace {{body.arguments.workspace}}
 validateArguments: true
 output:
-  type: tool_result
-  output: '{{result}}'
-when:
-  endpoint: true
-labels:
-  - tools
+  content:
+    - type: text
+      text: '{{returnedValue}}'

@@ -36,6 +36,7 @@ arguments:
               recent first.
             items:
               type: object
+              description: Sort object with field name as key and order direction as value.
           limit:
             type: number
             description: >-
@@ -56,6 +57,7 @@ arguments:
               return only these fields.
             items:
               type: string
+              description: Field name to include in the response.
           runtime_mappings:
             type: object
             description: >-
@@ -133,16 +135,8 @@ do:
                     Error: The output is too long, try a more precise query or
                     to exclude fields using `source`.
       catch: []
-  - set:
-      name: result
-      value:
-        value: '{{returnedValue}}'
-        description: Search results from Prisme.ai workspace {{body.arguments.workspace}}
 validateArguments: true
 output:
-  type: tool_result
-  output: '{{result}}'
-when:
-  endpoint: true
-labels:
-  - tools
+  content:
+    - type: text
+      text: '{% json({{returnedValue}}) %}'
