@@ -1,0 +1,14 @@
+id: lcVgclg
+description: Template for LLM Debugger agent
+photo: >-
+  https://uploads.prisme.ai/lcVgclg/8KLKyH3eYSUwYJzSEfiEU.Screenshot-2025-12-01-at-10.29.30.png
+labels:
+  - production:product
+repositories: {}
+config:
+  value:
+    agentCredentials:
+      projectId: ''
+      apiKey: ''
+name: LLM Debugger Template
+slug: llm-debugger-template

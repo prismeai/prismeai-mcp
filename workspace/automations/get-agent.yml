@@ -1,0 +1,15 @@
+slug: get-agent
+name: 05_Get/get-agent
+description: Get agent from AI Knowledge
+do:
+  - set:
+      name: agentId
+      value: '{{config.agentCredentials.projectId}}'
+  - MyAgent.Projects - Get one project:
+      id: agentId
+      refreshCache: true
+      output: agent
+validateArguments: true
+when:
+  endpoint: false
+output: '{{agent}}'

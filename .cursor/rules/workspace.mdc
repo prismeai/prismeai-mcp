@@ -1,0 +1,8 @@
+---
+alwaysApply: true
+---
+- Read the prisme-ai-docs MCP for high level documentation, and use the one from prisme-ai-builder when building YAML (DSUL) automation or pages.
+- Always run a lint check using the prisme-ai-builder tool for this after creating or updating automations.
+- Develop the automation in local, then ask the user for a review before you can push them to prisme.ai
+- Run the automations you update on prisme.ai with test data to ensure it work properly, but always ask first.
+- When installing an App, add it in the `imports` folder.

@@ -1,0 +1,41 @@
+slug: sync-automations-tools
+name: 03_Tools/0-tools-sync
+do:
+  - conditions:
+      ({{run.trigger.value}} == "workspaces.automations.created" || {{run.trigger.value}} == "workspaces.automations.updated"):
+        - conditions:
+            '!{{payload.automation.labels}} || !("tools" in {{payload.automation.labels}})':
+              - set:
+                  name: output
+                  value:
+                    message: Ignoring {{payload.slug}} as it does not have tools label
+              - break: {}
+        - set:
+            name: automations
+            value:
+              - '{{payload.automation}}'
+        - conditions:
+            '{{payload.oldSlug}}':
+              - set:
+                  name: automations[]
+                  value:
+                    - slug: '{{payload.oldSlug}}'
+                      op: delete
+        - MyAgent.updateAutomationTool:
+            automations: '{{automations}}'
+            id: '{{config.agentCredentials.projectId}}'
+            output: output
+      '{{run.trigger.value}} == "workspaces.automations.deleted"':
+        - MyAgent.updateAutomationTool:
+            automations:
+              - slug: '{{payload.automationSlug}}'
+                op: delete
+            id: '{{config.agentCredentials.projectId}}'
+            output: output
+validateArguments: false
+when:
+  events:
+    - workspaces.automations.created
+    - workspaces.automations.updated
+    - workspaces.automations.deleted
+output: '{{output}}'

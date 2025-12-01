@@ -1,0 +1,148 @@
+slug: activitySearch
+name: 03_Tools/activitySearch
+description: Tool to search for the activity feed of AI Store / AI Knowledge.
+arguments:
+  body:
+    type: object
+    properties:
+      arguments:
+        type: object
+        properties:
+          workspace:
+            type: string
+            description: >-
+              The workspace to search in. Can be one of: "AI Store", "AI
+              Knowledge", or a custom workspace ID (e.g., "cYUcA4C")
+          query:
+            type: object
+            description: >-
+              REQUIRED. Elasticsearch DSL query to filter response documents.
+              Examples: {"match_all": {}} for all documents, {"bool": {"filter":
+              [{"term": {"type": "runtime.automations.executed"}}]}} to filter
+              for automation execution, {"bool": {"must": [{"range":
+              {"@timestamp": {"gte": "2025-01-01"}}}]}} for time-based queries.
+          aggs:
+            type: object
+            description: >-
+              Elasticsearch aggregations executed on response documents (e.g.,
+              count by type, group by field). These run on all documents
+              matching the query, regardless of limit/page.
+          sort:
+            type: array
+            description: >-
+              Elasticsearch sort criteria as an array of sort objects.
+              IMPORTANT: Use "@timestamp" (not "timestamp") for time-based
+              sorting. Example: [{"@timestamp": {"order": "desc"}}] for most
+              recent first.
+            items:
+              type: object
+          limit:
+            type: number
+            description: >-
+              Page size - limits the number of documents returned in the
+              response. Note: aggregations still execute on all matching
+              documents. Defaults to 5 if not specified.
+          page:
+            type: number
+            description: >-
+              Page number for pagination (1-indexed). Use with limit to paginate
+              through results. Defaults to 1 if not specified.
+          source:
+            type: array
+            description: >-
+              REQUIRED. Array of field names to include in the response
+              documents (Elasticsearch _source filtering). If omitted, all
+              fields are returned. Example: ["@timestamp", "type", "payload"] to
+              return only these fields.
+            items:
+              type: string
+          runtime_mappings:
+            type: object
+            description: >-
+              Elasticsearch runtime_mappings to define computed fields at query
+              time. Useful for creating temporary fields based on existing data
+              without re-indexing.
+          track_total_hits:
+            type: boolean
+            description: >-
+              Set to true to get the real total count of matching documents
+              instead of the default cap at 10,000. May impact performance on
+              large datasets.
+do:
+  - conditions:
+      '{{body.arguments.workspace}} = "AI Store"':
+        - set:
+            name: workspaceId
+            value: '{{global.workspacesRegistry["ai-store"].id}}'
+      '{{body.arguments.workspace}} = "AI Knowledge"':
+        - set:
+            name: workspaceId
+            value: '{{global.workspacesRegistry["ai-knowledge"].id}}'
+      default:
+        - set:
+            name: workspaceId
+            value: '{{body.arguments.workspace}}'
+  - conditions:
+      '!{{body.arguments.limit}} or {{body.arguments.limit}} > 5':
+        - set:
+            name: body.arguments.limit
+            value: 5
+  - conditions:
+      '!{{body.arguments.page}} and {{body.arguments.page}} != 0':
+        - set:
+            name: body.arguments.page
+            value: 1
+  - conditions:
+      '!{{body.arguments.query}}':
+        - set:
+            name: body.arguments.query
+            value:
+              match_all: {}
+  - conditions:
+      '!{{body.arguments.source}} and {{body.arguments.limit}} > 1':
+        - set:
+            name: returnedValue
+            value: >
+              Error: You haven't specified a `source` value, and at the same
+              time more than one entry. You should specify either a `limit` to 1
+              to get all fields, or filters field using `source`.
+  - Prismeai API.searchEvents:
+      query: '{{body.arguments.query}}'
+      aggs: '{{body.arguments.aggs}}'
+      sort: '{{body.arguments.sort}}'
+      limit: '{{body.arguments.limit}}'
+      page: '{{body.arguments.page}}'
+      _source: '{{body.arguments.source}}'
+      runtime_mappings: '{{body.arguments.runtime_mappings}}'
+      track_total_hits: '{{body.arguments.track_total_hits}}'
+      workspaceId: '{{workspaceId}}'
+      output: returnedValue
+  - try:
+      do:
+        - set:
+            name: stringifiedResult
+            value: '{% json({{returnedValue}} %}'
+        - set:
+            name: resultCharCount
+            value: '{{stringifiedResult.length}}'
+        - conditions:
+            '{{resultCharCount}} > 20000':
+              - set:
+                  name: returnedValue
+                  value: >
+                    Error: The output is too long, try a more precise query or
+                    to exclude fields using `source`.
+      catch: []
+  - set:
+      name: result
+      value:
+        value: '{{returnedValue}}'
+        description: Search results from Prisme.ai workspace {{body.arguments.workspace}}
+validateArguments: true
+output:
+  type: tool_result
+  output: '{{result}}'
+when:
+  endpoint: true
+labels:
+  - tools

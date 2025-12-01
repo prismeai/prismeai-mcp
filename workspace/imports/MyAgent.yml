@@ -1,0 +1,5 @@
+appSlug: Knowledge Client
+slug: MyAgent
+config:
+  projectId: '{{config.agentCredentials.projectId}}'
+  apiKey: '{{config.agentCredentials.apiKey}}'
