@@ -110,6 +110,9 @@ const tools: Tool[] = [
                 }
             },
             required: ['automationSlug']
+        },
+        annotations: {
+            readOnlyHint: true
         }
     },
     {
@@ -128,6 +131,9 @@ const tools: Tool[] = [
                 }
             },
             required: ['automationSlug', 'automation']
+        },
+        annotations: {
+            destructiveHint: true
         }
     },
     {
@@ -142,6 +148,9 @@ const tools: Tool[] = [
                 }
             },
             required: ['automationSlug']
+        },
+        annotations: {
+            destructiveHint: true
         }
     },
     {
@@ -156,6 +165,9 @@ const tools: Tool[] = [
                 }
             },
             required: []
+        },
+        annotations: {
+            readOnlyHint: true
         }
     },
     {
@@ -186,6 +198,9 @@ const tools: Tool[] = [
                 }
             },
             required: []
+        },
+        annotations: {
+            readOnlyHint: true
         }
     },
     {
@@ -204,6 +219,9 @@ const tools: Tool[] = [
                 }
             },
             required: ['automationSlug']
+        },
+        annotations: {
+            openWorldHint: true
         }
     },
     {
@@ -285,6 +303,9 @@ const tools: Tool[] = [
                 }
             },
             required: ['query']
+        },
+        annotations: {
+            readOnlyHint: true
         }
     },
     {
@@ -294,6 +315,9 @@ const tools: Tool[] = [
             type: 'object',
             properties: {},
             required: []
+        },
+        annotations: {
+            readOnlyHint: true
         }
     },
     {
@@ -316,6 +340,9 @@ Returns a structured list of violations with:
                 }
             },
             required: ['automationYaml']
+        },
+        annotations: {
+            readOnlyHint: true
         }
     },
     {
@@ -348,6 +375,9 @@ Returns a structured list of violations with:
                 }
             },
             required: ['path']
+        },
+        annotations: {
+            destructiveHint: true
         }
     }
 ];
