@@ -320,20 +320,18 @@ output: '{{result}}' # Defines the return value of the automation
 ```
 
 **Folder Organization**:
-You can organize automations into folders using forward slash notation in both the `name` and `slug` fields:
+Organize automations into folders by placing the YAML file in the appropriate directory structure:
 
 ```yaml
-slug: myFolder/myAutomation
-name: myFolder/My Automation
+# File located at: automations/myFolder/myAutomation.yml
+slug: myAutomation
+name: automations/myFolde/rMy Automation
 description: Automation organized in a folder
 ```
 
-- The automation will appear in the `myFolder` folder in the AI Builder interface
-- The file should be located in the `myFolder/` directory for the local folder hierarchy.
-- Example: `ring-central/createRichResponse` creates an automation in the `ring-central` folder
-
-Some existing automations may not be in subfolder but use namespace in the `name` or `slug`. Prefer to also use real folder
-for new automations.
+- Place the automation file in the desired folder (e.g., `automations/myFolder/`)
+- Use a simple slug without namespace prefixes
+- The Name `/` structure determines the organization in the AI Builder interface
 
 ### Triggers
 
