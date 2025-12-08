@@ -72,9 +72,10 @@ export class PrismeApiClient {
     }
 
     // Automation CRUD operations
-    async createAutomation(automation: Automation): Promise<Automation> {
+    async createAutomation(automation: Automation, workspaceId?: string): Promise<Automation> {
+        const wsId = workspaceId || this.workspaceId;
         const response = await this.client.post(
-            `/workspaces/${this.workspaceId}/automations`,
+            `/workspaces/${wsId}/automations`,
             automation
         );
         return response.data;
@@ -88,17 +89,19 @@ export class PrismeApiClient {
         return response.data;
     }
 
-    async updateAutomation(automationSlug: string, automation: Partial<Automation>): Promise<Automation> {
+    async updateAutomation(automationSlug: string, automation: Partial<Automation>, workspaceId?: string): Promise<Automation> {
+        const wsId = workspaceId || this.workspaceId;
         const response = await this.client.patch(
-            `/workspaces/${this.workspaceId}/automations/${automationSlug}`,
+            `/workspaces/${wsId}/automations/${automationSlug}`,
             automation
         );
         return response.data;
     }
 
-    async deleteAutomation(automationSlug: string): Promise<{ slug: string }> {
+    async deleteAutomation(automationSlug: string, workspaceId?: string): Promise<{ slug: string }> {
+        const wsId = workspaceId || this.workspaceId;
         const response = await this.client.delete(
-            `/workspaces/${this.workspaceId}/automations/${automationSlug}`
+            `/workspaces/${wsId}/automations/${automationSlug}`
         );
         return response.data;
     }
@@ -112,18 +115,20 @@ export class PrismeApiClient {
     }
 
     // Automation execution
-    async testAutomation(automationSlug: string, payload?: any): Promise<any> {
+    async testAutomation(automationSlug: string, payload?: any, workspaceId?: string): Promise<any> {
+        const wsId = workspaceId || this.workspaceId;
         const response = await this.client.post(
-            `/workspaces/${this.workspaceId}/test/${automationSlug}`,
+            `/workspaces/${wsId}/test/${automationSlug}`,
             { payload }
         );
         return response.data;
     }
 
     // Search events
-    async search(query: SearchQuery): Promise<SearchResponse> {
+    async search(query: SearchQuery, workspaceId?: string): Promise<SearchResponse> {
+        const wsId = workspaceId || this.workspaceId;
         const response = await this.client.post(
-            `/workspaces/${this.workspaceId}/search`,
+            `/workspaces/${wsId}/search`,
             query
         );
         return response.data;
@@ -146,29 +151,32 @@ export class PrismeApiClient {
         return app;
     }
 
-    async publishVersion(name: string, description: string): Promise<any> {
+    async publishVersion(name: string, description: string, workspaceId?: string): Promise<any> {
+        const wsId = workspaceId || this.workspaceId;
         const response = await this.client.post(
-            `/workspaces/${this.workspaceId}/versions`,
+            `/workspaces/${wsId}/versions`,
             { name, description }
         );
         return response.data;
     }
 
-    async exportWorkspace(): Promise<Buffer> {
+    async exportWorkspace(workspaceId?: string): Promise<Buffer> {
+        const wsId = workspaceId || this.workspaceId;
         const response = await this.client.post(
-            `/workspaces/${this.workspaceId}/versions/current/export`,
+            `/workspaces/${wsId}/versions/current/export`,
             {},
             { responseType: 'arraybuffer' }
         );
         return Buffer.from(response.data);
     }
 
-    async importWorkspace(archive: Buffer, prune: boolean = true): Promise<any> {
+    async importWorkspace(archive: Buffer, prune: boolean = true, workspaceId?: string): Promise<any> {
+        const wsId = workspaceId || this.workspaceId;
         const formData = new FormData();
         formData.append('archive', archive, { filename: 'workspace.zip' });
 
         const response = await this.client.post(
-            `/workspaces/${this.workspaceId}/import?prune=${prune}`,
+            `/workspaces/${wsId}/import?prune=${prune}`,
             formData,
             { headers: formData.getHeaders() }
         );

@@ -40,6 +40,18 @@ A Model Context Protocol (MCP) server that provides AI assistants with tools to 
    PRISME_API_BASE_URL=https://api.staging.prisme.ai/v2
    ```
 
+   **Optional: Multi-Workspace Support**
+   ```
+   # Add workspace name mappings for easy reference
+   PRISME_WORKSPACES={"prod":"wks_123abc","staging":"wks_456def"}
+   ```
+
+   **Optional: Readonly Mode**
+   ```
+   # Block all write operations (useful for production)
+   PRISME_FORCE_READONLY=true
+   ```
+
 5. Build the project:
    ```bash
    npm run build
@@ -54,6 +66,7 @@ Add this configuration to your Claude Desktop config file:
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
 
+**Basic configuration:**
 ```json
 {
   "mcpServers": {
@@ -70,6 +83,25 @@ Add this configuration to your Claude Desktop config file:
 }
 ```
 
+**With multi-workspace support and readonly mode:**
+```json
+{
+  "mcpServers": {
+    "prisme-ai-builder": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp-prisme.ai/build/index.js"],
+      "env": {
+        "PRISME_API_KEY": "your_bearer_token_here",
+        "PRISME_WORKSPACE_ID": "your_default_workspace_id",
+        "PRISME_API_BASE_URL": "https://api.staging.prisme.ai/v2",
+        "PRISME_WORKSPACES": "{\"prod\":\"wks_123abc\",\"staging\":\"wks_456def\"}",
+        "PRISME_FORCE_READONLY": "false"
+      }
+    }
+  }
+}
+```
+
 Replace `/absolute/path/to/mcp-prisme.ai` with the actual path to this project.
 
 ### With Cursor
@@ -79,6 +111,7 @@ Add this configuration to your Cursor/Antigravity MCP settings file:
 **macOS/Linux**: `~/.cursor/mcp.json`
 **Windows**: `%APPDATA%\Cursor\mcp.json`
 
+**Basic configuration:**
 ```json
 {
   "mcpServers": {
@@ -89,6 +122,25 @@ Add this configuration to your Cursor/Antigravity MCP settings file:
         "PRISME_API_KEY": "your_bearer_token_here",
         "PRISME_WORKSPACE_ID": "your_workspace_id_here",
         "PRISME_API_BASE_URL": "https://api.staging.prisme.ai/v2"
+      }
+    }
+  }
+}
+```
+
+**With multi-workspace support and readonly mode:**
+```json
+{
+  "mcpServers": {
+    "prisme-ai-builder": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp-prisme.ai/build/index.js"],
+      "env": {
+        "PRISME_API_KEY": "your_bearer_token_here",
+        "PRISME_WORKSPACE_ID": "your_default_workspace_id",
+        "PRISME_API_BASE_URL": "https://api.staging.prisme.ai/v2",
+        "PRISME_WORKSPACES": "{\"prod\":\"wks_123abc\",\"staging\":\"wks_456def\"}",
+        "PRISME_FORCE_READONLY": "false"
       }
     }
   }
@@ -111,6 +163,89 @@ npm start
 npm run dev
 ```
 
+## Multi-Workspace Configuration
+
+The MCP server supports working with multiple Prisme.ai workspaces through two mechanisms:
+
+### Workspace Name Mappings
+
+Configure friendly names for your workspaces in the `PRISME_WORKSPACES` environment variable:
+
+```bash
+PRISME_WORKSPACES={"prod":"wks_123abc","staging":"wks_456def","dev":"wks_789ghi"}
+```
+
+**Usage in tools:**
+- Use `workspaceName` parameter with any tool: `{ "workspaceName": "prod", ... }`
+- Direct `workspaceId` parameter still works: `{ "workspaceId": "wks_123abc", ... }`
+- If neither is provided, uses `PRISME_WORKSPACE_ID` (default workspace)
+
+**Priority:** `workspaceId` parameter > `workspaceName` parameter > default workspace
+
+### Per-Tool Workspace Parameters
+
+All tools (except `get_prisme_documentation` and `lint_automation`) accept optional workspace parameters:
+
+```typescript
+{
+  "automationSlug": "my-automation",
+  "workspaceName": "staging"  // Use staging workspace instead of default
+}
+```
+
+Or use workspace ID directly:
+
+```typescript
+{
+  "automationSlug": "my-automation",
+  "workspaceId": "wks_specific_id"  // Override with specific workspace ID
+}
+```
+
+### Benefits
+
+- **Simplified CLI/Tool usage:** Use readable names instead of cryptic IDs
+- **Multi-environment workflows:** Easily switch between prod/staging/dev
+- **Backward compatible:** Existing configurations work unchanged
+
+## Readonly Mode
+
+Force readonly mode blocks all write operations, making the MCP server safe for production monitoring or read-only access.
+
+### Configuration
+
+```bash
+PRISME_FORCE_READONLY=true
+```
+
+### Blocked Operations
+
+When readonly mode is active, these tools will return clear error messages:
+- `create_automation`
+- `update_automation`
+- `delete_automation`
+- `execute_automation`
+- `push_workspace`
+- `pull_workspace` (blocks local file modifications)
+
+### Available Operations
+
+These readonly tools remain available:
+- `get_automation`
+- `list_automations`
+- `list_apps`
+- `get_app`
+- `search_events`
+- `get_prisme_documentation`
+- `lint_automation`
+
+### Use Cases
+
+- **Production monitoring:** Read events and automations without risk of modifications
+- **Read-only API keys:** Enforce read-only access at MCP level
+- **Audit/compliance:** Prevent accidental changes during audits
+- **Shared environments:** Safely share access without write permissions
+
 ## Tool Usage Examples
 
 ### Create Automation
@@ -131,6 +266,18 @@ npm run dev
 }
 ```
 
+**With workspace parameter:**
+```typescript
+{
+  "automation": {
+    "name": "My Automation",
+    "do": [{ "log": "Hello from staging" }],
+    "when": { "endpoint": true }
+  },
+  "workspaceName": "staging"  // Create in staging workspace
+}
+```
+
 ### Search Events
 
 Search for events by automation:
@@ -145,15 +292,16 @@ Search for events by automation:
     }
   },
   "limit": 10,
-  "sort": [{ "createdAt": { "order": "desc" } }]
+  "sort": [{ "@timestamp": { "order": "desc" } }]
 }
 ```
 
-Search for all events:
+**Search events in specific workspace:**
 ```typescript
 {
   "query": { "match_all": {} },
-  "limit": 50
+  "limit": 50,
+  "workspaceName": "prod"  // Search events in production workspace
 }
 ```
 
