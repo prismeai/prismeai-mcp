@@ -1,0 +1,159 @@
+slug: _doc
+name: readme
+blocks:
+  - slug: RichText
+    markdown: true
+    css: |-
+      :block {
+        padding: 20px;
+      }
+    content: >-
+      # README: Multi-Agent AI Powered LLM & Cloud Agnostic
+
+
+      ## Introduction
+
+
+      Welcome to this sample project designed to help you quickly set up a
+      multi-agent AI system powered by LLMs. This solution is LLM &
+      cloud-agnostic, enabling seamless integration with various platforms while
+      maintaining flexibility in automation and AI knowledge management.
+
+
+      ## Getting Started
+
+
+      ### 1. Initialize Your AI Agent
+
+
+      - Navigate to **Automations > Init Agent**.
+
+      - Click on **See Code**, then read the YAML configuration file.
+
+      - Click **Play** to create your agent within the AI Knowledge product.
+
+
+      ### 2. Verify Agent Creation
+
+
+      - Go to **AI Knowledge Product**.
+
+      - Confirm that your agent has been successfully created.
+
+
+      ### 3. Configure API Access
+
+
+      - Return to your workspace in **AI Builder**.
+
+      - Navigate to **Apps > Serper**.
+
+      - Enter and save your **API Key**.
+
+
+      ### 4. Synchronize AI Agent with Automation Tools
+
+
+      - Go to **Tools Synchronization**.
+
+      - Read the YAML file to observe how this automation synchronizes your AI
+      agent with labeled "tools".
+
+
+      ### 5. Edit Automation in the Tools Folder
+
+
+      - Open the **Web Browsing Tool** inside the **Tools** folder.
+
+      - Locate and edit the corresponding YAML file.
+
+      - For testing, make a minor change (e.g., adding a space) and save it.
+
+      - Navigate to **AI Knowledge > Your Agent > Tools** to see your updated
+      tool.
+
+      - You can modify the tool directly here or manage it through automation in
+      your workspace for production readiness and environment management.
+
+
+      ### 6. Test AI Agent in Chat
+
+
+      - Open a chat session.
+
+      - Ask your agent various queries about **news, patents, scholarly
+      research, or specific searches**.
+
+      - On the left menu, you have a **share link** to share the agent with your
+      end users or embed the chat into a specific product.
+
+
+      ### 7. Collaborate & Enhance AI Knowledge Agents
+
+
+      #### 7.1 Share AI Knowledge Agent with Non-Technical Teams
+
+      - Enable non-technical teams to enhance prompts, switch test models, and
+      add automatic tests.
+
+      - Integrate specific documents for the **RAG (Retrieval-Augmented
+      Generation) Tool** to improve knowledge retrieval and responses.
+
+
+      ### 8. Extend and Customize Your Agent
+
+
+      - Duplicate the tool to call:
+        - A specific **Prisme.ai App**.
+        - A **specific API**.
+        - Another **specific AI agent**.
+
+      ### 9. Enjoy Building Agentic Experiences!
+
+
+      Leverage this setup to create robust AI-driven workflows, automate
+      processes, and enhance decision-making capabilities within your
+      organization.
+
+
+      ---
+
+
+      **Happy Agentic Experience Building! 🚀**
+colorScheme: auto
+styles: >
+
+  body {
+    --color-accent: var(--pr-accent-color);
+    --color-accent-contrast: var(--pr-accent-color-contrast);
+    --color-text: var(--pr-main-text);
+    background-color: var(--pr-main-bg-color);
+  }
+
+  .page-blocks > .pr-block-blocks-list {
+    display: flex;
+    flex-direction: column;
+    min-width: 100%;
+    min-height: 100%;
+    flex: 1;
+    padding: 0 var(--pr-page-x-margin) 0 var(--pr-page-x-margin);
+  }
+
+
+  .page-blocks > .pr-block-blocks-list > .block-cards {
+    width: 100vw;
+    margin: 0 calc(-1 * var(--pr-page-x-margin));
+  }
+
+
+  .page-blocks > .pr-block-blocks-list > .block-cards
+  .cards-container__cards-container > div:first-child {
+    padding-left: var(--pr-page-x-margin);
+  }
+
+
+  .pr-poweredby {
+    position: fixed;
+    left: 1rem;
+    bottom: 1rem;
+  }

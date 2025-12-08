@@ -1,0 +1,18 @@
+version:
+  type: export
+  exportedAt: '2025-12-01T17:37:55.511Z'
+checksums:
+  automations:
+    sync-automations-tools: 625b31c46ce725aca51ad1ed0dcd9618
+    get-agent: 209b7d0c908c95d853196230b86f6728
+    aikWebhook: 1a8dab33f0e0d28850fe9976288923c4
+    create-agent: 2c33665bf57bf3a61368cf1df68d482b
+    getAutomation: 30569bb7a7f1f9525f235707f7b081fa
+    activitySearch: 182a273052875336f5026c18c0107170
+    getWorkspace: fffc51c01b469fb441ea4ef45bc7e601
+    delete-agent: e8698947dec10b40cd56ac5b52043566
+  imports:
+    Prismeai API: 4b2960f8f47a9d709f899dbd32db9572
+    MyAgent: 07cc8c7de173de5c5c3f4e3228e1d1ae
+  pages:
+    _doc: 91e231ed9cb332b3bb89f94c51fa921c

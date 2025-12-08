@@ -79,5 +79,3 @@ when:
   endpoint: true
 output: '{{output}}'
 
-
-

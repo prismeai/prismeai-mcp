@@ -1,0 +1,62 @@
+slug: getAutomation
+name: 03_Tools/getAutomation
+description: (MVP) Get an automations from a workspace
+arguments:
+  body:
+    type: object
+    properties:
+      arguments:
+        type: object
+        properties:
+          workspace:
+            type: string
+            description: >-
+              The workspace to search in. Can be one of: "AI Store", "AI
+              Knowledge", or a custom workspace ID (e.g., "cYUcA4C")
+          automationSlug:
+            type: string
+            description: id (slug) of the automation
+do:
+  - conditions:
+      '{{body.arguments.workspace}} = "AI Store"':
+        - set:
+            name: workspaceId
+            value: '{{global.workspacesRegistry["ai-store"].id}}'
+      '{{body.arguments.workspace}} = "AI Knowledge"':
+        - set:
+            name: workspaceId
+            value: '{{global.workspacesRegistry["ai-knowledge"].id}}'
+      default:
+        - set:
+            name: workspaceId
+            value: '{{body.arguments.workspace}}'
+  - conditions:
+      '!{{body.arguments.automationSlug}}':
+        - set:
+            name: returnedValue
+            value: |
+              Error: You haven't specified a any automationSlug.
+  - Prismeai API.getAutomation:
+      workspaceId: '{{workspaceId}}'
+      slug: '{{body.arguments.automationSlug}}'
+      output: automationContent
+  - conditions:
+      isObject({{automationContent}}):
+        - set:
+            name: stringifiedAutomation
+            value: '{% json({{automationContent}}) %}'
+        - Custom Code.run:
+            function: cleanYamlBrackets
+            parameters:
+              toClean: '{{stringifiedAutomation}}'
+            output: returnedValue
+      default:
+        - set:
+            name: returnedValue
+            value: |
+              Error: No automation found
+validateArguments: true
+output:
+  content:
+    - type: text
+      text: '{{returnedValue}}'

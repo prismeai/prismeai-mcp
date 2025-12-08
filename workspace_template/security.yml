@@ -1,0 +1,53 @@
+authorizations:
+  roles:
+    editor: {}
+  rules:
+    - role: editor
+      action:
+        - read
+        - get_usage
+        - aggregate_search
+        - update
+      subject: workspaces
+    - role: editor
+      action: manage
+      subject: files
+    - role: editor
+      action:
+        - read
+        - update
+      subject: pages
+    - role: editor
+      action:
+        - read
+        - update
+      subject: apps
+    - role: editor
+      action:
+        - read
+        - create
+      subject: events
+    - role: editor
+      inverted: true
+      action: read
+      subject: events
+      conditions:
+        type:
+          $regex: ^apikeys\.*$
+    - action: create
+      subject: events
+      reason: Anyone can create any events
+      conditions:
+        source.serviceTopic: topic:runtime:emit
+    - action: read
+      subject: events
+      conditions:
+        source.serviceTopic: topic:runtime:emit
+        source.sessionId: '{{session.id}}'
+      reason: Anyone can read any events from its own session
+    - action: create
+      subject: files
+      conditions:
+        mimetype:
+          $regex: ^(.*)$
+      reason: Anyone can upload any file

@@ -1,0 +1,11 @@
+slug: delete-agent
+name: 04_Clear/delete-agent
+description: This automation allows you to delete your AIK agent.
+do:
+  - MyAgent.Projects - Delete one project:
+      id: '{{config.agentCredentials.projectId}}'
+      output: response
+output: '{{response}}'
+validateArguments: true
+when:
+  endpoint: false

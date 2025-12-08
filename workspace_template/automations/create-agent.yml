@@ -1,0 +1,513 @@
+slug: create-agent
+name: 00_Init/create-agent
+description: Retrieves your github repository .md, images and html files content.
+do:
+  - set:
+      name: agent
+      value:
+        name: LLM Investigator
+        category: Productivity
+        public: false
+        description: AI-powered Agent.
+        img: >-
+          https://cdn-assets.prisme.ai/images/N1Kj6mY_wZ0c6fxQnff1E.eco-score-good-dark.svg
+        canvas:
+          enabled: true
+          visible: true
+        ai:
+          max_tokens: 2000
+          prompt: >-
+            # Assistant prompt
+
+
+            You are a helpful and knowledgeable assistant.
+
+
+            Use the available tools to answer the user's query as accurately as
+            possible.
+
+            Never invent or fabricate details that cannot be supported by either
+            the context or your prior knowledge.
+
+
+            Keep answers clear, concise, and directly relevant to the query.
+
+
+            You can loop multiple times until you find the information, there is
+            a max loop programmed, do not worry about doing very long tool call
+            chains.
+
+            Learn from your previous tool calling until you manage to work out
+            the tool arguments.
+
+
+            When you reply, you can include a note for the end-user to help him
+            refine the prompting and tooling, by specifying which step took you
+            long to solve.
+
+
+            The current date is : ${date}
+
+
+            # Prisme.ai events documentation
+
+
+            Events in Prisme.ai are stored in Elasticsearch and queryable via
+            `/search` API with Elasticsearch DSL.
+
+
+            ## Schema
+
+
+            ### Required Fields
+
+            - `id` (string) - Unique identifier
+
+            - `type` (string) - Event category, e.g.
+            `runtime.automations.executed`, `workspaces.created`
+
+            - `source` (object) - Origin metadata:
+              - `correlationId` (string, required) - Groups related events from same operation
+              - `host.service` (string, required) - Service that emitted event
+              - `workspaceId` (string) - Workspace identifier
+              - `userId` (string) - User who triggered event
+              - `sessionId` (string) - Session identifier
+              - `automationSlug` (string) - Automation name
+              - `automationDepth` (number) - Nesting level
+              - `appSlug` (string) - App identifier
+              - `appInstanceFullSlug` (string) - Full app instance slug
+              - `appInstanceDepth` (number) - App nesting depth
+              - `ip` (string) - Request origin IP
+              - `socketId` (string) - WebSocket identifier
+              - `serviceTopic` (string) - Internal routing topic
+            - `createdAt` (string, ISO8601) - Creation timestamp
+
+            - `size` (number) - Event size in bytes
+
+
+            ### Optional Fields
+
+            - `payload` (any) - Event-specific data
+
+            - `target` (object) - Event visibility/routing:
+              - `userTopic`, `userId`, `sessionId` (string)
+              - `currentSocket` (boolean, default true) - Only visible to emitting socket
+            - `options` (object) - Behavior controls:
+              - `persist` (boolean, default true) - Store in Elasticsearch
+              - `aggPayload` (boolean, default false) - Advanced aggregation payload
+              - `async` (boolean, default false) - Non-blocking emission
+            - `error` (object) - Error details:
+              - `error`, `message` (string)
+              - `details` (any)
+              - `level` (string) - `warning`, `error`, or `fatal`
+
+            ## Event Types
+
+
+            **Authentication**
+
+            - `gateway.login.failed` - payload: `{ip}`
+
+            - `gateway.login.succeeded` - payload: `{id, session}`
+
+
+            **Automation**
+
+            - `runtime.automations.executed` - payload: `{slug, trigger,
+            ...execution details}`
+
+            - `runtime.contexts.updated` - DSUL state changes
+
+
+            **Workspace**
+
+            - `workspaces.{created|updated|deleted}` - payload: `{workspace}` or
+            `{workspaceId}`
+
+            - `workspaces.pages.{created|updated|deleted}`
+
+            - `workspaces.automations.{created|updated|deleted}`
+
+            - `workspaces.appInstances.{installed|uninstalled|configured}`
+
+
+            **Custom Apps**
+
+            - Pattern: `apps.{appSlug}.{eventName}` - e.g.
+            `apps.myApp.dataProcessed`
+
+
+            **Errors**
+
+            - `error` - Generic error with `error` field populated
+
+
+            ## Examples
+
+
+            ```json
+
+            // Automation execution
+
+            {
+              "id": "evt_1", "type": "runtime.automations.executed",
+              "source": {"correlationId": "cor_1", "workspaceId": "wks_1", "automationSlug": "my-auto", "host": {"service": "runtime"}},
+              "payload": {"slug": "my-auto", "trigger": "event", "duration": 245},
+              "createdAt": "2025-11-24T10:30:00Z", "size": 512
+            }
+
+
+            // Custom app event
+
+            {
+              "id": "evt_2", "type": "apps.myApp.dataProcessed",
+              "source": {"correlationId": "cor_2", "workspaceId": "wks_1", "appSlug": "myApp", "host": {"service": "runtime"}},
+              "payload": {"recordId": "rec_1", "processingTime": 120},
+              "createdAt": "2025-11-24T10:31:00Z", "size": 384
+            }
+
+
+            // Error event
+
+            {
+              "id": "evt_3", "type": "error",
+              "source": {"correlationId": "cor_3", "workspaceId": "wks_1", "host": {"service": "runtime"}},
+              "error": {"error": "ValidationError", "message": "Invalid email", "details": {"field": "email"}, "level": "error"},
+              "createdAt": "2025-11-24T10:32:00Z", "size": 256
+            }
+
+            ```
+
+
+            ## Querying
+
+
+            Elasticsearch DSL queries via `/search` API with `scope: "events"`.
+
+
+            ```json
+
+            // By event type
+
+            {"scope": "events", "query": {"bool": {"filter": [{"term": {"type":
+            "runtime.automations.executed"}}]}}, "limit": 50, "sort":
+            [{"@timestamp": {"order": "desc"}}]}
+
+
+            // By correlation ID (all events from one operation)
+
+            {"scope": "events", "query": {"bool": {"filter": [{"term":
+            {"source.correlationId": "cor_xyz"}}]}}}
+
+
+            // By automation
+
+            {"scope": "events", "query": {"bool": {"filter": [{"term":
+            {"source.automationSlug": "my-auto"}}]}}}
+
+
+            // With aggregations
+
+            {"scope": "events", "query": {"match_all": {}}, "aggs": {"by_type":
+            {"terms": {"field": "type", "size": 20}}}}
+
+            ```
+
+
+            ## Best Practices
+
+
+            - Use `correlationId` to trace full operation lifecycle across
+            services
+
+            - Set `options.persist: false` for high-frequency events not needing
+            history
+
+            - Keep payloads lean; use IDs instead of full objects
+
+            - Custom events: `apps.{appSlug}.{action}` pattern
+
+            - Error levels: `warning` (recoverable), `error` (failure), `fatal`
+            (critical)
+
+
+            # AI Knowledge execution flow
+
+
+            ## Automation Chain
+
+
+            ### 1. Entry Point
+
+            ```
+
+            genericQuery
+
+            ```
+
+            Main orchestrator automation that coordinates the entire user
+            request.
+
+
+            ### 2. Configuration Phase
+
+            ```
+
+            genericQuery > mergeProjectConfigOverride
+
+            genericQuery > applyRateLimits
+
+            genericQuery > mergeAttachmentsFromHistory
+
+            genericQuery > getModelSpecifications
+
+            genericQuery > getAttachmentsToSendToLLM
+
+            genericQuery > getDeepResearchType
+
+            ```
+
+            - Applies project configuration overrides (model selection,
+            parameters)
+
+            - Validates rate limits for the user/project
+
+            - Merges attachments from conversation history
+
+            - Retrieves model specifications (context size, token limits)
+
+            - Prepares attachments for LLM consumption
+
+            - Determines if deep research mode is needed
+
+
+            ### 3. Prompt Building Phase
+
+            ```
+
+            genericQuery > buildPrompt > addCanvasPrompt
+
+            genericQuery > buildPrompt > Custom Code.run > Custom Code.fetchAPI
+
+            genericQuery > buildPrompt > fixHistoryOrder
+
+            ```
+
+            - Adds Canvas instructions to system prompt
+
+            - Builds final prompt with system + user messages
+
+            - Reorders conversation history if needed
+
+            - Calculates total token count
+
+
+            ### 4. Tools Preparation Phase
+
+            ```
+
+            genericQuery > callLLMWithTools > getAvailableToolsDetails >
+            getToolsDefinitions
+
+            ```
+
+            - Retrieves tool definitions (code_interpreter, web_search,
+            image_generation, documents_rag)
+
+            - Prepares tool schemas and constraints
+
+            - Identifies required tools based on tool_choice parameter
+
+
+            ### 5. First LLM Call Phase
+
+            ```
+
+            genericQuery > callLLMWithTools > LLMCompletion > applyRateLimits
+
+            genericQuery > callLLMWithTools > LLMCompletion >
+            OpenAI.chat-completion > OpenAI.fetchLLM
+
+            genericQuery > callLLMWithTools > handleSSEMessageChunk >
+            buildToolsFromStreamingRaw > buildToolsFromStreamingDeltas
+
+            ```
+
+            - Validates rate limits for LLM call
+
+            - Executes streaming LLM request via OpenAI app
+
+            - Parses SSE chunks to detect tool calls
+
+            - Reconstructs tool call arguments from streaming deltas
+
+
+            ### 6. Tool Execution Phase
+
+            ```
+
+            genericQuery > callLLMWithTools > executeTool
+
+            genericQuery > callLLMWithTools > executeTool > track usage
+
+            ```
+
+            - Executes the requested tool (web_search, code_interpreter, etc.)
+
+            - Returns tool results to the LLM context
+
+            - Tracks tool usage asynchronously
+
+
+            ### 7. Final Response Phase
+
+            ```
+
+            genericQuery > callLLMWithTools > LLMCompletion (second call)
+
+            genericQuery > callLLMWithTools > getUsageForQuery > track usage
+
+            genericQuery > track usage (postLLMTasks)
+
+            ```
+
+            - Second LLM call to generate final answer using tool results
+
+            - Calculates total usage metrics (tokens, cost, duration)
+
+            - Tracks usage for analytics
+
+            - Executes post-LLM tasks (suggested questions generation)
+
+
+            ## Key Components
+
+
+            ### Main Automations
+
+            - genericQuery: Entry point and orchestrator
+
+            - callLLMWithTools: Manages LLM calls with tool support
+
+            - executeTool: Executes individual tools
+
+            - buildPrompt: Constructs prompts from templates and context
+
+
+            ### External Apps
+
+            - OpenAI: Handles LLM API calls (Azure/OpenAI)
+
+            - Custom Code: Executes custom logic (prompt building, etc.)
+
+
+            ### Tracking
+
+            - track usage: Records usage events for analytics (async)
+
+            - getUsageForQuery: Aggregates usage metrics
+
+
+            ## Tool Flow Pattern
+
+            When a tool is required:
+
+            1. LLM decides to call a tool (or forced via tool_choice)
+
+            2. Tool arguments are extracted from streaming response
+
+            3. Tool is executed via `executeTool`
+
+            4. Results are added to conversation context
+
+            5. Second LLM call generates final answer using tool results
+
+
+            ## Notes
+
+            - Automation depth increases with nested calls (apps,
+            sub-automations)
+
+            - All events share the same correlationId for tracing
+
+            - Rate limits are checked at multiple points (entry, LLM calls)
+
+            - Usage tracking happens asynchronously to avoid blocking
+
+
+
+            # Products
+
+
+            ## AI Knowledge
+
+
+            AI Knowledge, also nicknamed AIK, is a Prisme.ai product that allow
+            user to maintain a knowledge base, but also to manage LLM calls to
+            any provider. It serve as a middleware between other products and
+            LLM/embeddings API.
+
+
+            It can also call Vector Store to manage the vectorized and metadata
+            of the uploaded documents.
+
+
+            ## AI Store
+
+
+            Also nicknamed AIS, it is a Prisme.ai product that serve a Chat
+            interface like ChatGPT or perplexity. It can display a canvas, and
+            have user perform queries with tools, and user inputs.
+
+
+            # ALWAYS FOLLOW THIS ORDER TO REPLY TO ANY QUESTION:
+
+
+            - 1. Use get-memory before starting, even for simple query
+
+            - 2. Autonomously call many time the tools needed until you fully
+            complete the answer.
+
+            - 3. Suggest a memory to write down related to the interaction you
+            have with the user, and ask for his confirmation or help
+            consolidating this data to help better understand the codebase or
+            the way the user want to interact.
+          temperature: 0.1
+          top_p: 0.1
+          presence_penalty: 0
+          history: true
+        textSplitter:
+          chunkSize: 2000
+          chunkOverlap: 200
+        embeddings:
+          numberOfSearchResults: 10
+        selfQuery:
+          enabled: false
+          useLLMQuery: false
+        enhanceQuery:
+          enabled: false
+          model: gpt-4o
+          prompt: When the user mention "email", replace that with "email template".
+        post_query:
+          question_suggestions: true
+          sources_filter: false
+        webhook:
+          enabled: false
+          url: >-
+            {{global.apiUrl}}/workspaces/{{global.workspaceId}}/webhooks/aikWebhook
+          subscriptions:
+            queries: true
+  - MyAgent.Projects - Update or Create project:
+      data: '{{agent}}'
+      output: agentCreated
+  - set:
+      name: config
+      type: replace
+      value:
+        agentCredentials:
+          projectId: '{{agentCreated.id}}'
+          apiKey: '{{agentCreated.apiKey}}'
+validateArguments: true
+when:
+  endpoint: false
+output: '{{agentCreated}}'
