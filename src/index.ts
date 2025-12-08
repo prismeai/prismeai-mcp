@@ -272,6 +272,54 @@ function enforceReadonlyMode(toolName: string): void {
     }
 }
 
+/**
+ * Truncates JSON output if it exceeds 10,000 characters.
+ * Returns an error response with the first 1000 lines if truncation occurs.
+ */
+function truncateJsonOutput(
+    data: any,
+    context: string
+): {
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: boolean;
+} {
+    const fullOutput = JSON.stringify(data, null, 2);
+    const MAX_CHARS = 10000;
+    const MAX_LINES = 1000;
+
+    // If output is within limits, return it normally
+    if (fullOutput.length <= MAX_CHARS) {
+        return {
+            content: [{ type: 'text', text: fullOutput }]
+        };
+    }
+
+    // Output exceeds limits - truncate to first 1000 lines
+    const allLines = fullOutput.split('\n');
+    const truncatedLines = allLines.slice(0, MAX_LINES);
+    const truncatedOutput = truncatedLines.join('\n');
+
+    const errorMessage = `Output Size Limit Exceeded
+
+The ${context} response is too large to display (${fullOutput.length.toLocaleString()} characters).
+Showing the first ${Math.min(MAX_LINES, allLines.length).toLocaleString()} lines of ${allLines.length.toLocaleString()} total lines.
+
+To retrieve all results, please use pagination:
+- Reduce the 'limit' parameter to fetch fewer documents per request
+- Use 'page' parameter to retrieve results in chunks (e.g., page: 1, 2, 3...)
+- Use 'source' parameter to include only necessary fields
+- Consider adding aggregations ('aggs') instead of retrieving all documents
+
+TRUNCATED OUTPUT (First ${Math.min(MAX_LINES, allLines.length)} lines):
+${'-'.repeat(70)}
+${truncatedOutput}`;
+
+    return {
+        content: [{ type: 'text', text: errorMessage }],
+        isError: true
+    };
+}
+
 // Initialize API client
 const apiClient = new PrismeApiClient({
     apiKey: PRISME_API_KEY,
@@ -923,14 +971,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const { workspaceId, workspaceName, environment, ...searchQuery } = args as any;
                 const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
                 const result = await apiClient.search(searchQuery, resolved.workspaceId, resolved.apiUrl);
-                return {
-                    content: [
-                        {
-                            type: 'text',
-                            text: JSON.stringify(result, null, 2)
-                        }
-                    ]
-                };
+                return truncateJsonOutput(result, 'search_events');
             }
 
             case 'get_prisme_documentation': {
