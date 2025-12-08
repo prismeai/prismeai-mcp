@@ -59,9 +59,13 @@ export interface App {
 export class PrismeApiClient {
     private client: AxiosInstance;
     private workspaceId: string;
+    private baseUrl: string;
+    private apiKey: string;
 
     constructor(config: PrismeConfig) {
         this.workspaceId = config.workspaceId;
+        this.baseUrl = config.baseUrl;
+        this.apiKey = config.apiKey;
         this.client = axios.create({
             baseURL: config.baseUrl,
             headers: {
@@ -71,53 +75,75 @@ export class PrismeApiClient {
         });
     }
 
+    // Helper to get client with potentially different base URL
+    private getClient(apiUrl?: string): AxiosInstance {
+        if (!apiUrl || apiUrl === this.baseUrl) {
+            return this.client;
+        }
+
+        // Create a new client instance for this specific request
+        return axios.create({
+            baseURL: apiUrl,
+            headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json',
+            },
+        });
+    }
+
     // Automation CRUD operations
-    async createAutomation(automation: Automation, workspaceId?: string): Promise<Automation> {
+    async createAutomation(automation: Automation, workspaceId?: string, apiUrl?: string): Promise<Automation> {
         const wsId = workspaceId || this.workspaceId;
-        const response = await this.client.post(
+        const client = this.getClient(apiUrl);
+        const response = await client.post(
             `/workspaces/${wsId}/automations`,
             automation
         );
         return response.data;
     }
 
-    async getAutomation(automationSlug: string, workspaceId?: string): Promise<Automation> {
+    async getAutomation(automationSlug: string, workspaceId?: string, apiUrl?: string): Promise<Automation> {
         const wsId = workspaceId || this.workspaceId;
-        const response = await this.client.get(
+        const client = this.getClient(apiUrl);
+        const response = await client.get(
             `/workspaces/${wsId}/automations/${automationSlug}`
         );
         return response.data;
     }
 
-    async updateAutomation(automationSlug: string, automation: Partial<Automation>, workspaceId?: string): Promise<Automation> {
+    async updateAutomation(automationSlug: string, automation: Partial<Automation>, workspaceId?: string, apiUrl?: string): Promise<Automation> {
         const wsId = workspaceId || this.workspaceId;
-        const response = await this.client.patch(
+        const client = this.getClient(apiUrl);
+        const response = await client.patch(
             `/workspaces/${wsId}/automations/${automationSlug}`,
             automation
         );
         return response.data;
     }
 
-    async deleteAutomation(automationSlug: string, workspaceId?: string): Promise<{ slug: string }> {
+    async deleteAutomation(automationSlug: string, workspaceId?: string, apiUrl?: string): Promise<{ slug: string }> {
         const wsId = workspaceId || this.workspaceId;
-        const response = await this.client.delete(
+        const client = this.getClient(apiUrl);
+        const response = await client.delete(
             `/workspaces/${wsId}/automations/${automationSlug}`
         );
         return response.data;
     }
 
-    async listAutomations(workspaceId?: string): Promise<Record<string, any>> {
+    async listAutomations(workspaceId?: string, apiUrl?: string): Promise<Record<string, any>> {
         const wsId = workspaceId || this.workspaceId;
-        const response = await this.client.get(
+        const client = this.getClient(apiUrl);
+        const response = await client.get(
             `/workspaces/${wsId}`
         );
         return response.data.automations || {};
     }
 
     // Automation execution
-    async testAutomation(automationSlug: string, payload?: any, workspaceId?: string): Promise<any> {
+    async testAutomation(automationSlug: string, payload?: any, workspaceId?: string, apiUrl?: string): Promise<any> {
         const wsId = workspaceId || this.workspaceId;
-        const response = await this.client.post(
+        const client = this.getClient(apiUrl);
+        const response = await client.post(
             `/workspaces/${wsId}/test/${automationSlug}`,
             { payload }
         );
@@ -125,9 +151,10 @@ export class PrismeApiClient {
     }
 
     // Search events
-    async search(query: SearchQuery, workspaceId?: string): Promise<SearchResponse> {
+    async search(query: SearchQuery, workspaceId?: string, apiUrl?: string): Promise<SearchResponse> {
         const wsId = workspaceId || this.workspaceId;
-        const response = await this.client.post(
+        const client = this.getClient(apiUrl);
+        const response = await client.post(
             `/workspaces/${wsId}/search`,
             query
         );
@@ -151,18 +178,20 @@ export class PrismeApiClient {
         return app;
     }
 
-    async publishVersion(name: string, description: string, workspaceId?: string): Promise<any> {
+    async publishVersion(name: string, description: string, workspaceId?: string, apiUrl?: string): Promise<any> {
         const wsId = workspaceId || this.workspaceId;
-        const response = await this.client.post(
+        const client = this.getClient(apiUrl);
+        const response = await client.post(
             `/workspaces/${wsId}/versions`,
             { name, description }
         );
         return response.data;
     }
 
-    async exportWorkspace(workspaceId?: string): Promise<Buffer> {
+    async exportWorkspace(workspaceId?: string, apiUrl?: string): Promise<Buffer> {
         const wsId = workspaceId || this.workspaceId;
-        const response = await this.client.post(
+        const client = this.getClient(apiUrl);
+        const response = await client.post(
             `/workspaces/${wsId}/versions/current/export`,
             {},
             { responseType: 'arraybuffer' }
@@ -170,12 +199,13 @@ export class PrismeApiClient {
         return Buffer.from(response.data);
     }
 
-    async importWorkspace(archive: Buffer, prune: boolean = true, workspaceId?: string): Promise<any> {
+    async importWorkspace(archive: Buffer, prune: boolean = true, workspaceId?: string, apiUrl?: string): Promise<any> {
         const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl);
         const formData = new FormData();
         formData.append('archive', archive, { filename: 'workspace.zip' });
 
-        const response = await this.client.post(
+        const response = await client.post(
             `/workspaces/${wsId}/import?prune=${prune}`,
             formData,
             { headers: formData.getHeaders() }

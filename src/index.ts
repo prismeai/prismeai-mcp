@@ -33,13 +33,76 @@ if (!PRISME_API_KEY || !PRISME_WORKSPACE_ID) {
     process.exit(1);
 }
 
-// Parse and validate workspace mappings
+// Parse and validate workspace mappings and environments
 interface WorkspaceMapping {
     [name: string]: string;
 }
 
+interface EnvironmentConfig {
+    apiUrl: string;
+    workspaces: WorkspaceMapping;
+}
+
+interface EnvironmentsConfig {
+    [environmentName: string]: EnvironmentConfig;
+}
+
+const PRISME_ENVIRONMENTS = process.env.PRISME_ENVIRONMENTS;
+const PRISME_DEFAULT_ENVIRONMENT = process.env.PRISME_DEFAULT_ENVIRONMENT || 'default';
+
 let workspaceMappings: WorkspaceMapping = {};
-if (PRISME_WORKSPACES) {
+let environmentsConfig: EnvironmentsConfig = {};
+
+// Parse PRISME_ENVIRONMENTS (new nested structure)
+if (PRISME_ENVIRONMENTS) {
+    try {
+        const parsed = JSON.parse(PRISME_ENVIRONMENTS);
+
+        // Validate format: object with environment configs
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+            throw new Error('Must be a JSON object');
+        }
+
+        for (const [envName, envConfig] of Object.entries(parsed)) {
+            const config = envConfig as any;
+
+            // Validate environment config structure
+            if (typeof config !== 'object' || config === null) {
+                throw new Error(`Environment "${envName}" must be an object`);
+            }
+
+            if (typeof config.apiUrl !== 'string') {
+                throw new Error(`Environment "${envName}" must have an "apiUrl" string`);
+            }
+
+            if (typeof config.workspaces !== 'object' || config.workspaces === null || Array.isArray(config.workspaces)) {
+                throw new Error(`Environment "${envName}" must have a "workspaces" object`);
+            }
+
+            // Validate workspace IDs are strings
+            for (const [wsName, wsId] of Object.entries(config.workspaces)) {
+                if (typeof wsId !== 'string') {
+                    throw new Error(`Workspace ID for "${envName}.${wsName}" must be a string`);
+                }
+            }
+        }
+
+        environmentsConfig = parsed;
+        console.error(`Loaded ${Object.keys(environmentsConfig).length} environments: ${Object.keys(environmentsConfig).join(', ')}`);
+
+        // If default environment exists in config, use its workspaces as legacy workspace mappings
+        if (environmentsConfig[PRISME_DEFAULT_ENVIRONMENT]) {
+            workspaceMappings = environmentsConfig[PRISME_DEFAULT_ENVIRONMENT].workspaces;
+        }
+    } catch (error) {
+        console.error('Error: PRISME_ENVIRONMENTS must be valid JSON with environment configs');
+        console.error('Example: {"sandbox":{"apiUrl":"https://api.sandbox.prisme.ai/v2","workspaces":{"aiKnowledge":"wks_123"}}}');
+        console.error(`Details: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        process.exit(1);
+    }
+}
+// Parse legacy PRISME_WORKSPACES (flat structure for backward compatibility)
+else if (PRISME_WORKSPACES) {
     try {
         const parsed = JSON.parse(PRISME_WORKSPACES);
 
@@ -64,27 +127,80 @@ if (PRISME_WORKSPACES) {
     }
 }
 
-// Workspace resolution helper
+// Workspace and environment resolution helper
 interface WorkspaceResolutionParams {
     workspaceId?: string;
     workspaceName?: string;
+    environment?: string;
 }
 
 interface WorkspaceResolutionResult {
     workspaceId: string;
-    source: 'parameter' | 'named' | 'default';
+    apiUrl: string;
+    source: 'parameter' | 'environment' | 'named' | 'default';
 }
 
-function resolveWorkspaceId(params: WorkspaceResolutionParams): WorkspaceResolutionResult {
-    // Priority: workspaceId parameter > workspaceName mapping > default
+function resolveWorkspaceAndEnvironment(params: WorkspaceResolutionParams): WorkspaceResolutionResult {
+    // Priority: workspaceId parameter > environment+workspaceName > workspaceName > default
+
+    // 1. Direct workspaceId parameter (use environment's API URL if available, else default)
     if (params.workspaceId) {
+        let apiUrl = PRISME_API_BASE_URL;
+
+        if (params.environment && environmentsConfig[params.environment]) {
+            apiUrl = environmentsConfig[params.environment].apiUrl;
+        }
+
         return {
             workspaceId: params.workspaceId,
+            apiUrl,
             source: 'parameter'
         };
     }
 
+    // 2. Environment + workspaceName (from PRISME_ENVIRONMENTS)
+    if (params.environment && params.workspaceName) {
+        const envConfig = environmentsConfig[params.environment];
+        if (!envConfig) {
+            const availableEnvs = Object.keys(environmentsConfig);
+            throw new Error(
+                `Unknown environment: "${params.environment}". ` +
+                `Available: ${availableEnvs.length > 0 ? availableEnvs.join(', ') : 'none configured'}`
+            );
+        }
+
+        const workspaceId = envConfig.workspaces[params.workspaceName];
+        if (!workspaceId) {
+            const availableWorkspaces = Object.keys(envConfig.workspaces);
+            throw new Error(
+                `Unknown workspace name: "${params.workspaceName}" in environment "${params.environment}". ` +
+                `Available: ${availableWorkspaces.length > 0 ? availableWorkspaces.join(', ') : 'none configured'}`
+            );
+        }
+
+        return {
+            workspaceId,
+            apiUrl: envConfig.apiUrl,
+            source: 'environment'
+        };
+    }
+
+    // 3. Just workspaceName (use default environment or legacy mappings)
     if (params.workspaceName) {
+        // Try default environment first if it exists
+        if (environmentsConfig[PRISME_DEFAULT_ENVIRONMENT]) {
+            const envConfig = environmentsConfig[PRISME_DEFAULT_ENVIRONMENT];
+            const workspaceId = envConfig.workspaces[params.workspaceName];
+            if (workspaceId) {
+                return {
+                    workspaceId,
+                    apiUrl: envConfig.apiUrl,
+                    source: 'environment'
+                };
+            }
+        }
+
+        // Fall back to legacy workspace mappings
         const resolvedId = workspaceMappings[params.workspaceName];
         if (!resolvedId) {
             const available = Object.keys(workspaceMappings);
@@ -95,12 +211,33 @@ function resolveWorkspaceId(params: WorkspaceResolutionParams): WorkspaceResolut
         }
         return {
             workspaceId: resolvedId,
+            apiUrl: PRISME_API_BASE_URL,
             source: 'named'
         };
     }
 
+    // 4. Just environment (use default workspace ID from that environment)
+    if (params.environment) {
+        const envConfig = environmentsConfig[params.environment];
+        if (!envConfig) {
+            const availableEnvs = Object.keys(environmentsConfig);
+            throw new Error(
+                `Unknown environment: "${params.environment}". ` +
+                `Available: ${availableEnvs.length > 0 ? availableEnvs.join(', ') : 'none configured'}`
+            );
+        }
+
+        return {
+            workspaceId: PRISME_WORKSPACE_ID!,
+            apiUrl: envConfig.apiUrl,
+            source: 'environment'
+        };
+    }
+
+    // 5. Default: use configured defaults
     return {
         workspaceId: PRISME_WORKSPACE_ID!,  // Non-null assertion: validated at startup
+        apiUrl: PRISME_API_BASE_URL,
         source: 'default'
     };
 }
@@ -200,7 +337,11 @@ const tools: Tool[] = [
                 },
                 workspaceName: {
                     type: 'string',
-                    description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping'
+                    description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace'
                 }
             },
             required: ['automation']
@@ -222,7 +363,11 @@ const tools: Tool[] = [
                 },
                 workspaceName: {
                     type: 'string',
-                    description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping'
+                    description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace'
                 }
             },
             required: ['automationSlug']
@@ -603,13 +748,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         switch (name) {
             case 'create_automation': {
                 enforceReadonlyMode('create_automation');
-                const { automation, workspaceId, workspaceName } = args as {
+                const { automation, workspaceId, workspaceName, environment } = args as {
                     automation: any;
                     workspaceId?: string;
                     workspaceName?: string;
+                    environment?: string;
                 };
-                const { workspaceId: resolvedWorkspaceId } = resolveWorkspaceId({ workspaceId, workspaceName });
-                const result = await apiClient.createAutomation(automation, resolvedWorkspaceId);
+                const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
+                const result = await apiClient.createAutomation(automation, resolved.workspaceId, resolved.apiUrl);
                 return {
                     content: [
                         {
@@ -621,13 +767,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'get_automation': {
-                const { automationSlug, workspaceId, workspaceName } = args as {
+                const { automationSlug, workspaceId, workspaceName, environment } = args as {
                     automationSlug: string;
                     workspaceId?: string;
                     workspaceName?: string;
+                    environment?: string;
                 };
-                const { workspaceId: resolvedWorkspaceId } = resolveWorkspaceId({ workspaceId, workspaceName });
-                const result = await apiClient.getAutomation(automationSlug, resolvedWorkspaceId);
+                const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
+                const result = await apiClient.getAutomation(automationSlug, resolved.workspaceId, resolved.apiUrl);
                 return {
                     content: [
                         {
@@ -640,14 +787,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
             case 'update_automation': {
                 enforceReadonlyMode('update_automation');
-                const { automationSlug, automation, workspaceId, workspaceName } = args as {
+                const { automationSlug, automation, workspaceId, workspaceName, environment } = args as {
                     automationSlug: string;
                     automation: any;
                     workspaceId?: string;
                     workspaceName?: string;
+                    environment?: string;
                 };
-                const { workspaceId: resolvedWorkspaceId } = resolveWorkspaceId({ workspaceId, workspaceName });
-                const result = await apiClient.updateAutomation(automationSlug, automation, resolvedWorkspaceId);
+                const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
+                const result = await apiClient.updateAutomation(automationSlug, automation, resolved.workspaceId, resolved.apiUrl);
                 return {
                     content: [
                         {
@@ -660,13 +808,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
             case 'delete_automation': {
                 enforceReadonlyMode('delete_automation');
-                const { automationSlug, workspaceId, workspaceName } = args as {
+                const { automationSlug, workspaceId, workspaceName, environment } = args as {
                     automationSlug: string;
                     workspaceId?: string;
                     workspaceName?: string;
+                    environment?: string;
                 };
-                const { workspaceId: resolvedWorkspaceId } = resolveWorkspaceId({ workspaceId, workspaceName });
-                const result = await apiClient.deleteAutomation(automationSlug, resolvedWorkspaceId);
+                const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
+                const result = await apiClient.deleteAutomation(automationSlug, resolved.workspaceId, resolved.apiUrl);
                 return {
                     content: [
                         {
@@ -678,12 +827,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'list_automations': {
-                const { workspaceId, workspaceName } = args as {
+                const { workspaceId, workspaceName, environment } = args as {
                     workspaceId?: string;
                     workspaceName?: string;
+                    environment?: string;
                 };
-                const { workspaceId: resolvedWorkspaceId } = resolveWorkspaceId({ workspaceId, workspaceName });
-                const result = await apiClient.listAutomations(resolvedWorkspaceId);
+                const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
+                const result = await apiClient.listAutomations(resolved.workspaceId, resolved.apiUrl);
                 return {
                     content: [
                         {
@@ -695,17 +845,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'list_apps': {
-                const { text, workspaceId, workspaceName, page, limit, labels } = args as {
+                const { text, workspaceId, workspaceName, environment, page, limit, labels } = args as {
                     text?: string;
                     workspaceId?: string;
                     workspaceName?: string;
+                    environment?: string;
                     page?: number;
                     limit?: number;
                     labels?: string;
                 };
-                // For list_apps, workspaceId is used for filtering, so we resolve it if workspaceName is provided
-                const resolvedFilterWorkspaceId = workspaceName && !workspaceId
-                    ? resolveWorkspaceId({ workspaceName }).workspaceId
+                // For list_apps, workspaceId is used for filtering, so we resolve it if workspaceName/environment is provided
+                const resolvedFilterWorkspaceId = (workspaceName || environment) && !workspaceId
+                    ? resolveWorkspaceAndEnvironment({ workspaceName, environment }).workspaceId
                     : workspaceId;
                 const result = await apiClient.listApps({ text, workspaceId: resolvedFilterWorkspaceId, page, limit, labels });
                 return {
@@ -749,14 +900,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
             case 'execute_automation': {
                 enforceReadonlyMode('execute_automation');
-                const { automationSlug, payload, workspaceId, workspaceName } = args as {
+                const { automationSlug, payload, workspaceId, workspaceName, environment } = args as {
                     automationSlug: string;
                     payload?: any;
                     workspaceId?: string;
                     workspaceName?: string;
+                    environment?: string;
                 };
-                const { workspaceId: resolvedWorkspaceId } = resolveWorkspaceId({ workspaceId, workspaceName });
-                const result = await apiClient.testAutomation(automationSlug, payload, resolvedWorkspaceId);
+                const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
+                const result = await apiClient.testAutomation(automationSlug, payload, resolved.workspaceId, resolved.apiUrl);
                 return {
                     content: [
                         {
@@ -768,9 +920,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'search_events': {
-                const { workspaceId, workspaceName, ...searchQuery } = args as any;
-                const { workspaceId: resolvedWorkspaceId } = resolveWorkspaceId({ workspaceId, workspaceName });
-                const result = await apiClient.search(searchQuery, resolvedWorkspaceId);
+                const { workspaceId, workspaceName, environment, ...searchQuery } = args as any;
+                const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
+                const result = await apiClient.search(searchQuery, resolved.workspaceId, resolved.apiUrl);
                 return {
                     content: [
                         {
@@ -924,15 +1076,16 @@ If no violations are found, return:
 
             case 'pull_workspace': {
                 enforceReadonlyMode('pull_workspace');
-                const { path: targetPath, workspaceId, workspaceName } = args as {
+                const { path: targetPath, workspaceId, workspaceName, environment } = args as {
                     path: string;
                     workspaceId?: string;
                     workspaceName?: string;
+                    environment?: string;
                 };
                 const resolvedPath = resolve(targetPath);
-                const { workspaceId: resolvedWorkspaceId } = resolveWorkspaceId({ workspaceId, workspaceName });
+                const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
 
-                const zipBuffer = await apiClient.exportWorkspace(resolvedWorkspaceId);
+                const zipBuffer = await apiClient.exportWorkspace(resolved.workspaceId, resolved.apiUrl);
                 const zip = new AdmZip(zipBuffer);
 
                 if (!existsSync(resolvedPath)) {
@@ -980,15 +1133,16 @@ If no violations are found, return:
 
             case 'push_workspace': {
                 enforceReadonlyMode('push_workspace');
-                const { path: sourcePath, message, prune = true, workspaceId, workspaceName } = args as {
+                const { path: sourcePath, message, prune = true, workspaceId, workspaceName, environment } = args as {
                     path: string;
                     message: string;
                     prune?: boolean;
                     workspaceId?: string;
                     workspaceName?: string;
+                    environment?: string;
                 };
                 const resolvedPath = resolve(sourcePath);
-                const { workspaceId: resolvedWorkspaceId } = resolveWorkspaceId({ workspaceId, workspaceName });
+                const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
 
                 if (!existsSync(resolvedPath)) {
                     return {
@@ -1026,7 +1180,7 @@ If no violations are found, return:
                     };
                 }
 
-                const backupResult = await apiClient.publishVersion(message, `Backup before MCP push: ${message}`, resolvedWorkspaceId);
+                const backupResult = await apiClient.publishVersion(message, `Backup before MCP push: ${message}`, resolved.workspaceId, resolved.apiUrl);
 
                 const zip = new AdmZip();
 
@@ -1048,7 +1202,7 @@ If no violations are found, return:
                 addDirectoryToZip(resolvedPath);
 
                 const zipBuffer = zip.toBuffer();
-                const importResult = await apiClient.importWorkspace(zipBuffer, prune, resolvedWorkspaceId);
+                const importResult = await apiClient.importWorkspace(zipBuffer, prune, resolved.workspaceId, resolved.apiUrl);
 
                 return {
                     content: [
@@ -1071,13 +1225,13 @@ If no violations are found, return:
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         const axiosError = error as any;
 
-        // Check for workspace resolution errors
-        if (errorMessage.includes('Unknown workspace name')) {
+        // Check for workspace/environment resolution errors
+        if (errorMessage.includes('Unknown workspace name') || errorMessage.includes('Unknown environment')) {
             return {
                 content: [
                     {
                         type: 'text',
-                        text: `Workspace Resolution Error: ${errorMessage}`
+                        text: `Resolution Error: ${errorMessage}`
                     }
                 ],
                 isError: true

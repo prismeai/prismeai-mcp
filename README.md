@@ -83,7 +83,26 @@ Add this configuration to your Claude Desktop config file:
 }
 ```
 
-**With multi-workspace support and readonly mode:**
+**With environment-based configuration:**
+```json
+{
+  "mcpServers": {
+    "prisme-ai-builder": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp-prisme.ai/build/index.js"],
+      "env": {
+        "PRISME_API_KEY": "your_bearer_token_here",
+        "PRISME_WORKSPACE_ID": "your_default_workspace_id",
+        "PRISME_ENVIRONMENTS": "{\"sandbox\":{\"apiUrl\":\"https://api.sandbox.prisme.ai/v2\",\"workspaces\":{\"aiKnowledge\":\"wks_123abc\",\"aiStore\":\"wks_456def\"}},\"production\":{\"apiUrl\":\"https://api.prisme.ai/v2\",\"workspaces\":{\"aiKnowledge\":\"wks_789ghi\"}}}",
+        "PRISME_DEFAULT_ENVIRONMENT": "sandbox",
+        "PRISME_FORCE_READONLY": "false"
+      }
+    }
+  }
+}
+```
+
+**Legacy workspace mappings (simpler for single API URL):**
 ```json
 {
   "mcpServers": {
@@ -128,7 +147,26 @@ Add this configuration to your Cursor/Antigravity MCP settings file:
 }
 ```
 
-**With multi-workspace support and readonly mode:**
+**With environment-based configuration:**
+```json
+{
+  "mcpServers": {
+    "prisme-ai-builder": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp-prisme.ai/build/index.js"],
+      "env": {
+        "PRISME_API_KEY": "your_bearer_token_here",
+        "PRISME_WORKSPACE_ID": "your_default_workspace_id",
+        "PRISME_ENVIRONMENTS": "{\"sandbox\":{\"apiUrl\":\"https://api.sandbox.prisme.ai/v2\",\"workspaces\":{\"aiKnowledge\":\"wks_123abc\",\"aiStore\":\"wks_456def\"}},\"production\":{\"apiUrl\":\"https://api.prisme.ai/v2\",\"workspaces\":{\"aiKnowledge\":\"wks_789ghi\"}}}",
+        "PRISME_DEFAULT_ENVIRONMENT": "sandbox",
+        "PRISME_FORCE_READONLY": "false"
+      }
+    }
+  }
+}
+```
+
+**Legacy workspace mappings (simpler for single API URL):**
 ```json
 {
   "mcpServers": {
@@ -163,49 +201,94 @@ npm start
 npm run dev
 ```
 
-## Multi-Workspace Configuration
+## Multi-Environment & Workspace Configuration
 
-The MCP server supports working with multiple Prisme.ai workspaces through two mechanisms:
+The MCP server supports working across multiple Prisme.ai environments and workspaces with flexible configuration options.
 
-### Workspace Name Mappings
+### Environment-Based Configuration (Recommended)
 
-Configure friendly names for your workspaces in the `PRISME_WORKSPACES` environment variable:
+Configure complete environments with custom API URLs and workspace mappings using `PRISME_ENVIRONMENTS`:
 
 ```bash
-PRISME_WORKSPACES={"prod":"wks_123abc","staging":"wks_456def","dev":"wks_789ghi"}
+PRISME_ENVIRONMENTS='{
+  "sandbox": {
+    "apiUrl": "https://api.sandbox.prisme.ai/v2",
+    "workspaces": {
+      "aiKnowledge": "wks_123abc",
+      "aiStore": "wks_456def"
+    }
+  },
+  "production": {
+    "apiUrl": "https://api.prisme.ai/v2",
+    "workspaces": {
+      "aiKnowledge": "wks_789ghi",
+      "aiStore": "wks_012jkl"
+    }
+  }
+}'
 ```
 
 **Usage in tools:**
-- Use `workspaceName` parameter with any tool: `{ "workspaceName": "prod", ... }`
-- Direct `workspaceId` parameter still works: `{ "workspaceId": "wks_123abc", ... }`
-- If neither is provided, uses `PRISME_WORKSPACE_ID` (default workspace)
-
-**Priority:** `workspaceId` parameter > `workspaceName` parameter > default workspace
-
-### Per-Tool Workspace Parameters
-
-All tools (except `get_prisme_documentation` and `lint_automation`) accept optional workspace parameters:
 
 ```typescript
+// Use environment + workspace name
 {
   "automationSlug": "my-automation",
-  "workspaceName": "staging"  // Use staging workspace instead of default
+  "environment": "sandbox",
+  "workspaceName": "aiKnowledge"
+}
+
+// Use just environment (uses default workspace ID)
+{
+  "automationSlug": "my-automation",
+  "environment": "production"
 }
 ```
 
-Or use workspace ID directly:
+**Default Environment:**
 
+Set `PRISME_DEFAULT_ENVIRONMENT` to specify which environment to use when only `workspaceName` is provided:
+
+```bash
+PRISME_DEFAULT_ENVIRONMENT=sandbox
+```
+
+### Legacy Workspace Mappings
+
+For simple setups without multiple API URLs, use `PRISME_WORKSPACES`:
+
+```bash
+PRISME_WORKSPACES={"prod":"wks_123abc","staging":"wks_456def"}
+```
+
+**Usage:**
 ```typescript
 {
   "automationSlug": "my-automation",
-  "workspaceId": "wks_specific_id"  // Override with specific workspace ID
+  "workspaceName": "prod"
 }
 ```
+
+### Per-Tool Parameters
+
+All tools (except `get_prisme_documentation` and `lint_automation`) accept optional parameters:
+
+- `environment`: Environment name from `PRISME_ENVIRONMENTS`
+- `workspaceName`: Workspace name from environment or legacy mappings
+- `workspaceId`: Direct workspace ID (overrides everything)
+
+**Resolution Priority:**
+1. Direct `workspaceId` parameter (with `environment` for API URL if provided)
+2. `environment` + `workspaceName` combination
+3. `workspaceName` alone (uses default environment or legacy mappings)
+4. `environment` alone (uses default workspace ID with environment's API URL)
+5. Default workspace and API URL
 
 ### Benefits
 
-- **Simplified CLI/Tool usage:** Use readable names instead of cryptic IDs
-- **Multi-environment workflows:** Easily switch between prod/staging/dev
+- **Environment isolation:** Separate sandbox/staging/production with different API endpoints
+- **Workspace organization:** Group related workspaces by product (aiKnowledge, aiStore, etc.)
+- **Simplified usage:** Reference workspaces by readable names
 - **Backward compatible:** Existing configurations work unchanged
 
 ## Readonly Mode
@@ -275,6 +358,19 @@ These readonly tools remain available:
     "when": { "endpoint": true }
   },
   "workspaceName": "staging"  // Create in staging workspace
+}
+```
+
+**With environment + workspace:**
+```typescript
+{
+  "automation": {
+    "name": "Sandbox Automation",
+    "do": [{ "log": "Hello from sandbox" }],
+    "when": { "endpoint": true }
+  },
+  "environment": "sandbox",
+  "workspaceName": "aiKnowledge"  // Create in sandbox environment's aiKnowledge workspace
 }
 ```
 
