@@ -7,26 +7,89 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_PATH="$PROJECT_DIR/build/index.js"
+CLAUDE_CONFIG_DIR="$HOME/.claude"
+API_KEY_HELPER_PATH="$CLAUDE_CONFIG_DIR/anthropic-api-key.sh"
 
 echo "=== Claude Code + Prisme.ai Setup ==="
 echo ""
 
 # 1. Check prerequisites
-echo "[1/4] Checking prerequisites..."
+echo "[1/5] Checking prerequisites..."
 command -v node >/dev/null || { echo "Error: Node.js required. Install from https://nodejs.org"; exit 1; }
 command -v npm >/dev/null || { echo "Error: npm required"; exit 1; }
 command -v claude >/dev/null || { echo "Error: Claude Code CLI required. Install: npm install -g @anthropic-ai/claude-code"; exit 1; }
 echo "  Node.js $(node --version)"
 echo "  Claude CLI installed"
 
-# 2. Build MCP server
+# 2. Configure Anthropic API key
 echo ""
-echo "[2/4] Building MCP server..."
+echo "[2/5] Configuring Anthropic API key..."
+echo "Retrieve it from https://studio.prisme.ai/fr/workspaces/wW3UZla/settings/advanced"
+read -sp "Enter your Anthropic API key (sk-ant-...): " ANTHROPIC_API_KEY
+echo ""
+
+if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+    echo "Error: Anthropic API key required"
+    exit 1
+fi
+
+# Create API key helper script
+mkdir -p "$CLAUDE_CONFIG_DIR"
+cat > "$API_KEY_HELPER_PATH" << EOF
+#!/bin/sh
+echo "$ANTHROPIC_API_KEY"
+EOF
+chmod 700 "$API_KEY_HELPER_PATH"
+echo "  API key helper created at $API_KEY_HELPER_PATH"
+
+# Configure Claude Code to use the helper via settings.json
+SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
+if [[ -f "$SETTINGS_FILE" ]]; then
+    # Merge apiKeyHelper into existing settings using jq or Python
+    if command -v jq >/dev/null; then
+        TMP_FILE=$(mktemp)
+        if jq --arg path "$API_KEY_HELPER_PATH" '. + {apiKeyHelper: $path}' "$SETTINGS_FILE" > "$TMP_FILE" && [[ -s "$TMP_FILE" ]]; then
+            mv "$TMP_FILE" "$SETTINGS_FILE"
+        else
+            rm -f "$TMP_FILE"
+            echo "  Error: Failed to update settings.json with jq"
+            exit 1
+        fi
+    elif command -v python3 >/dev/null; then
+        python3 -c "
+import json, sys
+try:
+    with open('$SETTINGS_FILE', 'r') as f:
+        data = json.load(f)
+    data['apiKeyHelper'] = '$API_KEY_HELPER_PATH'
+    with open('$SETTINGS_FILE', 'w') as f:
+        json.dump(data, f, indent=2)
+except Exception as e:
+    print(f'  Error: {e}', file=sys.stderr)
+    sys.exit(1)
+"
+    else
+        echo "  Warning: jq or python3 required to update existing settings.json"
+        echo "  Please manually add: \"apiKeyHelper\": \"$API_KEY_HELPER_PATH\" to $SETTINGS_FILE"
+    fi
+else
+    # Create new settings file
+    cat > "$SETTINGS_FILE" << EOF
+{
+  "apiKeyHelper": "$API_KEY_HELPER_PATH"
+}
+EOF
+fi
+echo "  Claude Code configured with apiKeyHelper in $SETTINGS_FILE"
+
+# 3. Build MCP server
+echo ""
+echo "[3/5] Building MCP server..."
 (cd "$PROJECT_DIR" && npm install && npm run build)
 
-# 3. Get API key
+# 4. Configure Prisme MCP server
 echo ""
-echo "[3/4] Configuring MCP server..."
+echo "[4/5] Configuring Prisme MCP server..."
 echo ""
 echo "Environment options:"
 echo "  sandbox - https://api.sandbox.prisme.ai"
@@ -87,9 +150,9 @@ claude mcp add prisme-ai-builder \
 
 echo "  MCP server configured"
 
-# 4. Install agent
+# 5. Install agent
 echo ""
-echo "[4/4] Installing Prisme assistant agent..."
+echo "[5/5] Installing Prisme assistant agent..."
 mkdir -p ~/.claude/agents
 cp "$SCRIPT_DIR/prisme-assistant.yml" ~/.claude/agents/
 echo "  Agent installed"

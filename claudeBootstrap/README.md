@@ -13,10 +13,19 @@ Requires: Node.js 18+, Claude Code CLI (`npm i -g @anthropic-ai/claude-code`)
 If you prefer not to run the script:
 
 ```bash
-# 1. Build
+# 1. Configure Anthropic API key (creates helper script + settings)
+mkdir -p ~/.claude
+echo '#!/bin/sh
+echo "your-anthropic-api-key"' > ~/.claude/anthropic-api-key.sh
+chmod 700 ~/.claude/anthropic-api-key.sh
+# Add apiKeyHelper to settings.json
+echo '{"apiKeyHelper": "~/.claude/anthropic-api-key.sh"}' > ~/.claude/settings.json
+# Or merge into existing: jq '. + {apiKeyHelper: "~/.claude/anthropic-api-key.sh"}' ~/.claude/settings.json
+
+# 2. Build
 npm install && npm run build
 
-# 2. Add MCP server (sandbox)
+# 3. Add MCP server (sandbox)
 claude mcp add prisme-ai-builder \
   -e PRISME_API_KEY="your-jwt-token" \
   -e PRISME_API_BASE_URL="https://api.sandbox.prisme.ai/v2" \
@@ -24,7 +33,7 @@ claude mcp add prisme-ai-builder \
   -e PRISME_ENVIRONMENTS='{"sandbox":{"apiUrl":"https://api.sandbox.prisme.ai/v2","workspaces":{"ai-knowledge":"gQxyd2S","ai-store":"K5boVst"}}}' \
   -- node "$(pwd)/build/index.js"
 
-# 3. Install agent
+# 4. Install agent
 cp claudeBootstrap/prisme-assistant.yml ~/.claude/agents/
 ```
 
