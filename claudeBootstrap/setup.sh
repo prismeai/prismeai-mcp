@@ -173,8 +173,9 @@ EOF
     # Remove existing server if present
     claude mcp remove prisme-ai-builder 2>/dev/null || true
 
-    # Add MCP server with environment variables
+    # Add MCP server with environment variables (user scope = globally available)
     claude mcp add prisme-ai-builder \
+        --scope user \
         -e PRISME_API_KEY="$PRISME_API_KEY" \
         -e PRISME_API_BASE_URL="$API_URL" \
         -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
@@ -184,8 +185,48 @@ EOF
     echo "  MCP server configured"
 else
     echo ""
-    echo "[4/5] Skipping Prisme MCP server configuration (update mode)"
-    echo "  Existing MCP server will continue to use previous configuration"
+    echo "[4/5] Updating Prisme MCP server configuration (update mode)"
+
+    # Extract existing MCP server configuration from ~/.claude.json
+    # Check user scope first (top-level mcpServers)
+    EXISTING_CONFIG=$(jq -r '.mcpServers."prisme-ai-builder" // null' ~/.claude.json 2>/dev/null)
+
+    # If not found in user scope, check local scope under .projects[path].mcpServers
+    if [[ "$EXISTING_CONFIG" == "null" || -z "$EXISTING_CONFIG" ]]; then
+        EXISTING_CONFIG=$(jq -r --arg proj "$PROJECT_DIR" '
+            .projects | to_entries[] | select(.key == $proj) | .value.mcpServers."prisme-ai-builder" // null
+        ' ~/.claude.json 2>/dev/null)
+    fi
+
+    if [[ "$EXISTING_CONFIG" == "null" || -z "$EXISTING_CONFIG" ]]; then
+        echo "  Warning: No existing prisme-ai-builder MCP server found"
+        echo "  Run in fresh install mode to configure from scratch"
+    else
+        # Extract environment variables from existing config
+        PRISME_API_KEY=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_KEY // empty')
+        API_URL=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_BASE_URL // empty')
+        DEFAULT_WORKSPACE=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_WORKSPACE_ID // empty')
+        ENVIRONMENTS_JSON=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_ENVIRONMENTS // empty')
+
+        if [[ -n "$PRISME_API_KEY" && -n "$API_URL" && -n "$DEFAULT_WORKSPACE" ]]; then
+            # Remove existing server
+            claude mcp remove prisme-ai-builder 2>/dev/null || true
+
+            # Re-add with user scope to ensure it's globally available
+            claude mcp add prisme-ai-builder \
+                --scope user \
+                -e PRISME_API_KEY="$PRISME_API_KEY" \
+                -e PRISME_API_BASE_URL="$API_URL" \
+                -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
+                -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
+                -- node "$BUILD_PATH"
+
+            echo "  MCP server updated with user scope (now globally available)"
+        else
+            echo "  Error: Could not extract configuration from existing MCP server"
+            echo "  Run in fresh install mode to reconfigure"
+        fi
+    fi
 fi
 
 # 5. Install agent
