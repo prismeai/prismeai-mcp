@@ -274,7 +274,7 @@ function enforceReadonlyMode(toolName: string): void {
 
 /**
  * Truncates JSON output if it exceeds 10,000 characters.
- * Returns an error response with the first 1000 lines if truncation occurs.
+ * Returns an error response with the truncated content.
  */
 function truncateJsonOutput(
     data: any,
@@ -285,7 +285,6 @@ function truncateJsonOutput(
 } {
     const fullOutput = JSON.stringify(data, null, 2);
     const MAX_CHARS = 10000;
-    const MAX_LINES = 1000;
 
     // If output is within limits, return it normally
     if (fullOutput.length <= MAX_CHARS) {
@@ -294,15 +293,12 @@ function truncateJsonOutput(
         };
     }
 
-    // Output exceeds limits - truncate to first 1000 lines
-    const allLines = fullOutput.split('\n');
-    const truncatedLines = allLines.slice(0, MAX_LINES);
-    const truncatedOutput = truncatedLines.join('\n');
+    // Output exceeds limits - truncate to MAX_CHARS
+    const truncatedOutput = fullOutput.substring(0, MAX_CHARS);
 
     const errorMessage = `Output Size Limit Exceeded
 
-The ${context} response is too large to display (${fullOutput.length.toLocaleString()} characters).
-Showing the first ${Math.min(MAX_LINES, allLines.length).toLocaleString()} lines of ${allLines.length.toLocaleString()} total lines.
+The ${context} response is too large to display (${fullOutput.length.toLocaleString()} characters, limit: ${MAX_CHARS.toLocaleString()}).
 
 To retrieve all results, please use pagination:
 - Reduce the 'limit' parameter to fetch fewer documents per request
@@ -310,7 +306,7 @@ To retrieve all results, please use pagination:
 - Use 'source' parameter to include only necessary fields
 - Consider adding aggregations ('aggs') instead of retrieving all documents
 
-TRUNCATED OUTPUT (First ${Math.min(MAX_LINES, allLines.length)} lines):
+TRUNCATED OUTPUT (First ${MAX_CHARS.toLocaleString()} characters):
 ${'-'.repeat(70)}
 ${truncatedOutput}`;
 
