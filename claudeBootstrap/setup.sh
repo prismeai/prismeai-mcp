@@ -13,6 +13,29 @@ API_KEY_HELPER_PATH="$CLAUDE_CONFIG_DIR/anthropic-api-key.sh"
 echo "=== Claude Code + Prisme.ai Setup ==="
 echo ""
 
+# 0. Select installation mode
+echo "Installation mode:"
+echo "  1) Fresh install - Configure API keys and install everything"
+echo "  2) Update - Rebuild and update agent configuration only"
+echo ""
+read -p "Select mode [1/2]: " MODE_CHOICE
+
+case "$MODE_CHOICE" in
+    1)
+        INSTALL_MODE="fresh"
+        echo "Mode: Fresh install"
+        ;;
+    2)
+        INSTALL_MODE="update"
+        echo "Mode: Update"
+        ;;
+    *)
+        echo "Invalid choice. Defaulting to fresh install."
+        INSTALL_MODE="fresh"
+        ;;
+esac
+echo ""
+
 # 1. Check prerequisites
 echo "[1/5] Checking prerequisites..."
 command -v node >/dev/null || { echo "Error: Node.js required. Install from https://nodejs.org"; exit 1; }
@@ -21,66 +44,75 @@ command -v claude >/dev/null || { echo "Error: Claude Code CLI required. Install
 echo "  Node.js $(node --version)"
 echo "  Claude CLI installed"
 
-# 2. Configure Anthropic API key
-echo ""
-echo "[2/5] Configuring Anthropic API key..."
-echo "Retrieve it from https://studio.prisme.ai/fr/workspaces/wW3UZla/settings/advanced"
-read -sp "Enter your Anthropic API key (sk-ant-...): " ANTHROPIC_API_KEY
-echo ""
-
-if [[ -z "$ANTHROPIC_API_KEY" ]]; then
-    echo "Error: Anthropic API key required"
-    exit 1
+# Install jq if not available (needed for JSON manipulation)
+if ! command -v jq >/dev/null; then
+    echo "  jq not found, installing..."
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        if command -v brew >/dev/null; then
+            brew install jq
+        else
+            echo "Error: Homebrew required to install jq on macOS"
+            echo "Install Homebrew: https://brew.sh"
+            exit 1
+        fi
+    elif command -v apt-get >/dev/null; then
+        sudo apt-get update && sudo apt-get install -y jq
+    elif command -v yum >/dev/null; then
+        sudo yum install -y jq
+    elif command -v apk >/dev/null; then
+        sudo apk add jq
+    else
+        echo "Error: Could not install jq. Please install it manually."
+        exit 1
+    fi
+    echo "  jq installed"
+else
+    echo "  jq available"
 fi
 
-# Create API key helper script
-mkdir -p "$CLAUDE_CONFIG_DIR"
-cat > "$API_KEY_HELPER_PATH" << EOF
+# 2. Configure Anthropic API key
+if [[ "$INSTALL_MODE" == "fresh" ]]; then
+    echo ""
+    echo "[2/5] Configuring Anthropic API key..."
+    echo "Retrieve it from https://studio.prisme.ai/fr/workspaces/wW3UZla/settings/advanced"
+    read -sp "Enter your Anthropic API key (sk-ant-...): " ANTHROPIC_API_KEY
+    echo ""
+
+    if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+        echo "Error: Anthropic API key required"
+        exit 1
+    fi
+
+    # Create API key helper script
+    mkdir -p "$CLAUDE_CONFIG_DIR"
+    cat > "$API_KEY_HELPER_PATH" << EOF
 #!/bin/sh
 echo "$ANTHROPIC_API_KEY"
 EOF
-chmod 700 "$API_KEY_HELPER_PATH"
-echo "  API key helper created at $API_KEY_HELPER_PATH"
+    chmod 700 "$API_KEY_HELPER_PATH"
+    echo "  API key helper created at $API_KEY_HELPER_PATH"
 
-# Configure Claude Code to use the helper via settings.json
-SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
-if [[ -f "$SETTINGS_FILE" ]]; then
-    # Merge apiKeyHelper into existing settings using jq or Python
-    if command -v jq >/dev/null; then
+    # Configure Claude Code to use the helper via settings.json
+    SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
+    if [[ -f "$SETTINGS_FILE" ]]; then
+        # Merge apiKeyHelper into existing settings
         TMP_FILE=$(mktemp)
         if jq --arg path "$API_KEY_HELPER_PATH" '. + {apiKeyHelper: $path}' "$SETTINGS_FILE" > "$TMP_FILE" && [[ -s "$TMP_FILE" ]]; then
             mv "$TMP_FILE" "$SETTINGS_FILE"
         else
             rm -f "$TMP_FILE"
-            echo "  Error: Failed to update settings.json with jq"
+            echo "  Error: Failed to update settings.json"
             exit 1
         fi
-    elif command -v python3 >/dev/null; then
-        python3 -c "
-import json, sys
-try:
-    with open('$SETTINGS_FILE', 'r') as f:
-        data = json.load(f)
-    data['apiKeyHelper'] = '$API_KEY_HELPER_PATH'
-    with open('$SETTINGS_FILE', 'w') as f:
-        json.dump(data, f, indent=2)
-except Exception as e:
-    print(f'  Error: {e}', file=sys.stderr)
-    sys.exit(1)
-"
     else
-        echo "  Warning: jq or python3 required to update existing settings.json"
-        echo "  Please manually add: \"apiKeyHelper\": \"$API_KEY_HELPER_PATH\" to $SETTINGS_FILE"
+        # Create new settings file
+        echo "{\"apiKeyHelper\": \"$API_KEY_HELPER_PATH\"}" | jq . > "$SETTINGS_FILE"
     fi
+    echo "  Claude Code configured with apiKeyHelper in $SETTINGS_FILE"
 else
-    # Create new settings file
-    cat > "$SETTINGS_FILE" << EOF
-{
-  "apiKeyHelper": "$API_KEY_HELPER_PATH"
-}
-EOF
+    echo ""
+    echo "[2/5] Skipping Anthropic API key configuration (update mode)"
 fi
-echo "  Claude Code configured with apiKeyHelper in $SETTINGS_FILE"
 
 # 3. Build MCP server
 echo ""
@@ -88,27 +120,28 @@ echo "[3/5] Building MCP server..."
 (cd "$PROJECT_DIR" && npm install && npm run build)
 
 # 4. Configure Prisme MCP server
-echo ""
-echo "[4/5] Configuring Prisme MCP server..."
-echo ""
-echo "Environment options:"
-echo "  sandbox - https://api.sandbox.prisme.ai"
-echo "  prod    - https://api.studio.prisme.ai"
-echo ""
-read -p "Select default environment (sandbox/prod) [sandbox]: " ENV_CHOICE
-ENV_CHOICE="${ENV_CHOICE:-sandbox}"
+if [[ "$INSTALL_MODE" == "fresh" ]]; then
+    echo ""
+    echo "[4/5] Configuring Prisme MCP server..."
+    echo ""
+    echo "Environment options:"
+    echo "  sandbox - https://api.sandbox.prisme.ai"
+    echo "  prod    - https://api.studio.prisme.ai"
+    echo ""
+    read -p "Select default environment (sandbox/prod) [sandbox]: " ENV_CHOICE
+    ENV_CHOICE="${ENV_CHOICE:-sandbox}"
 
-read -sp "Enter your Prisme.ai API key (JWT token): " PRISME_API_KEY
-echo ""
+    read -sp "Enter your Prisme.ai API key (JWT token): " PRISME_API_KEY
+    echo ""
 
-if [[ -z "$PRISME_API_KEY" ]]; then
-    echo "Error: API key required"
-    exit 1
-fi
+    if [[ -z "$PRISME_API_KEY" ]]; then
+        echo "Error: API key required"
+        exit 1
+    fi
 
-# Define environments configuration
-# Update these workspace IDs for your organization
-ENVIRONMENTS_JSON=$(cat <<'EOF'
+    # Define environments configuration
+    # Update these workspace IDs for your organization
+    ENVIRONMENTS_JSON=$(cat <<'EOF'
 {
   "sandbox": {
     "apiUrl": "https://api.sandbox.prisme.ai/v2",
@@ -128,27 +161,32 @@ ENVIRONMENTS_JSON=$(cat <<'EOF'
 EOF
 )
 
-# Set default workspace based on environment
-if [[ "$ENV_CHOICE" == "prod" ]]; then
-    DEFAULT_WORKSPACE="wW3UZla"
-    API_URL="https://api.studio.prisme.ai/v2"
+    # Set default workspace based on environment
+    if [[ "$ENV_CHOICE" == "prod" ]]; then
+        DEFAULT_WORKSPACE="wW3UZla"
+        API_URL="https://api.studio.prisme.ai/v2"
+    else
+        DEFAULT_WORKSPACE="gQxyd2S"
+        API_URL="https://api.sandbox.prisme.ai/v2"
+    fi
+
+    # Remove existing server if present
+    claude mcp remove prisme-ai-builder 2>/dev/null || true
+
+    # Add MCP server with environment variables
+    claude mcp add prisme-ai-builder \
+        -e PRISME_API_KEY="$PRISME_API_KEY" \
+        -e PRISME_API_BASE_URL="$API_URL" \
+        -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
+        -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
+        -- node "$BUILD_PATH"
+
+    echo "  MCP server configured"
 else
-    DEFAULT_WORKSPACE="gQxyd2S"
-    API_URL="https://api.sandbox.prisme.ai/v2"
+    echo ""
+    echo "[4/5] Skipping Prisme MCP server configuration (update mode)"
+    echo "  Existing MCP server will continue to use previous configuration"
 fi
-
-# Remove existing server if present
-claude mcp remove prisme-ai-builder 2>/dev/null || true
-
-# Add MCP server with environment variables
-claude mcp add prisme-ai-builder \
-    -e PRISME_API_KEY="$PRISME_API_KEY" \
-    -e PRISME_API_BASE_URL="$API_URL" \
-    -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
-    -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
-    -- node "$BUILD_PATH"
-
-echo "  MCP server configured"
 
 # 5. Install agent
 echo ""
@@ -161,11 +199,23 @@ echo "  Agent installed"
 echo ""
 echo "=== Setup Complete ==="
 echo ""
+
+if [[ "$INSTALL_MODE" == "fresh" ]]; then
+    echo "Fresh installation completed successfully!"
+    echo ""
+    echo "Workspaces available via workspaceName parameter:"
+    echo "  ai-knowledge, ai-store (for $ENV_CHOICE environment)"
+    echo ""
+else
+    echo "Update completed successfully!"
+    echo "  - MCP server rebuilt"
+    echo "  - Agent configuration updated"
+    echo "  - API keys preserved"
+    echo ""
+fi
+
 echo "Usage:"
 echo "  claude                          # Start Claude Code"
 echo "  claude --agent prisme-assistant # Use Prisme agent"
 echo ""
 echo "Test: Type '@' in Claude to see mcp__prisme-ai-builder__* tools"
-echo ""
-echo "Workspaces available via workspaceName parameter:"
-echo "  ai-knowledge, ai-store (for $ENV_CHOICE environment)"
