@@ -40,6 +40,7 @@ interface WorkspaceMapping {
 
 interface EnvironmentConfig {
     apiUrl: string;
+    apiKey?: string;
     workspaces: WorkspaceMapping;
 }
 
@@ -73,6 +74,10 @@ if (PRISME_ENVIRONMENTS) {
 
             if (typeof config.apiUrl !== 'string') {
                 throw new Error(`Environment "${envName}" must have an "apiUrl" string`);
+            }
+
+            if (config.apiKey !== undefined && typeof config.apiKey !== 'string') {
+                throw new Error(`Environment "${envName}" apiKey must be a string if provided`);
             }
 
             if (typeof config.workspaces !== 'object' || config.workspaces === null || Array.isArray(config.workspaces)) {
@@ -137,6 +142,7 @@ interface WorkspaceResolutionParams {
 interface WorkspaceResolutionResult {
     workspaceId: string;
     apiUrl: string;
+    environment?: string;
     source: 'parameter' | 'environment' | 'named' | 'default';
 }
 
@@ -154,6 +160,7 @@ function resolveWorkspaceAndEnvironment(params: WorkspaceResolutionParams): Work
         return {
             workspaceId: params.workspaceId,
             apiUrl,
+            environment: params.environment,
             source: 'parameter'
         };
     }
@@ -181,6 +188,7 @@ function resolveWorkspaceAndEnvironment(params: WorkspaceResolutionParams): Work
         return {
             workspaceId,
             apiUrl: envConfig.apiUrl,
+            environment: params.environment,
             source: 'environment'
         };
     }
@@ -195,6 +203,7 @@ function resolveWorkspaceAndEnvironment(params: WorkspaceResolutionParams): Work
                 return {
                     workspaceId,
                     apiUrl: envConfig.apiUrl,
+                    environment: PRISME_DEFAULT_ENVIRONMENT,
                     source: 'environment'
                 };
             }
@@ -212,6 +221,7 @@ function resolveWorkspaceAndEnvironment(params: WorkspaceResolutionParams): Work
         return {
             workspaceId: resolvedId,
             apiUrl: PRISME_API_BASE_URL,
+            environment: undefined,
             source: 'named'
         };
     }
@@ -230,6 +240,7 @@ function resolveWorkspaceAndEnvironment(params: WorkspaceResolutionParams): Work
         return {
             workspaceId: PRISME_WORKSPACE_ID!,
             apiUrl: envConfig.apiUrl,
+            environment: params.environment,
             source: 'environment'
         };
     }
@@ -238,6 +249,7 @@ function resolveWorkspaceAndEnvironment(params: WorkspaceResolutionParams): Work
     return {
         workspaceId: PRISME_WORKSPACE_ID!,  // Non-null assertion: validated at startup
         apiUrl: PRISME_API_BASE_URL,
+        environment: undefined,
         source: 'default'
     };
 }
@@ -321,6 +333,7 @@ const apiClient = new PrismeApiClient({
     apiKey: PRISME_API_KEY,
     workspaceId: PRISME_WORKSPACE_ID,
     baseUrl: PRISME_API_BASE_URL,
+    environments: environmentsConfig,
 });
 
 // Define available tools
@@ -724,6 +737,10 @@ Returns a structured list of violations with:
                 workspaceName: {
                     type: 'string',
                     description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace'
                 }
             },
             required: ['path']
@@ -756,6 +773,10 @@ Returns a structured list of violations with:
                 workspaceName: {
                     type: 'string',
                     description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace'
                 }
             },
             required: ['path', 'message']
@@ -799,7 +820,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     environment?: string;
                 };
                 const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
-                const result = await apiClient.createAutomation(automation, resolved.workspaceId, resolved.apiUrl);
+                const result = await apiClient.createAutomation(automation, resolved.workspaceId, resolved.apiUrl, resolved.environment);
                 return {
                     content: [
                         {
@@ -818,7 +839,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     environment?: string;
                 };
                 const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
-                const result = await apiClient.getAutomation(automationSlug, resolved.workspaceId, resolved.apiUrl);
+                const result = await apiClient.getAutomation(automationSlug, resolved.workspaceId, resolved.apiUrl, resolved.environment);
                 return {
                     content: [
                         {
@@ -839,7 +860,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     environment?: string;
                 };
                 const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
-                const result = await apiClient.updateAutomation(automationSlug, automation, resolved.workspaceId, resolved.apiUrl);
+                const result = await apiClient.updateAutomation(automationSlug, automation, resolved.workspaceId, resolved.apiUrl, resolved.environment);
                 return {
                     content: [
                         {
@@ -859,7 +880,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     environment?: string;
                 };
                 const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
-                const result = await apiClient.deleteAutomation(automationSlug, resolved.workspaceId, resolved.apiUrl);
+                const result = await apiClient.deleteAutomation(automationSlug, resolved.workspaceId, resolved.apiUrl, resolved.environment);
                 return {
                     content: [
                         {
@@ -877,7 +898,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     environment?: string;
                 };
                 const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
-                const result = await apiClient.listAutomations(resolved.workspaceId, resolved.apiUrl);
+                const result = await apiClient.listAutomations(resolved.workspaceId, resolved.apiUrl, resolved.environment);
                 return {
                     content: [
                         {
@@ -952,7 +973,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     environment?: string;
                 };
                 const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
-                const result = await apiClient.testAutomation(automationSlug, payload, resolved.workspaceId, resolved.apiUrl);
+                const result = await apiClient.testAutomation(automationSlug, payload, resolved.workspaceId, resolved.apiUrl, resolved.environment);
                 return {
                     content: [
                         {
@@ -966,7 +987,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'search_events': {
                 const { workspaceId, workspaceName, environment, ...searchQuery } = args as any;
                 const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
-                const result = await apiClient.search(searchQuery, resolved.workspaceId, resolved.apiUrl);
+                const result = await apiClient.search(searchQuery, resolved.workspaceId, resolved.apiUrl, resolved.environment);
                 return truncateJsonOutput(result, 'search_events');
             }
 
@@ -1122,7 +1143,7 @@ If no violations are found, return:
                 const resolvedPath = resolve(targetPath);
                 const resolved = resolveWorkspaceAndEnvironment({ workspaceId, workspaceName, environment });
 
-                const zipBuffer = await apiClient.exportWorkspace(resolved.workspaceId, resolved.apiUrl);
+                const zipBuffer = await apiClient.exportWorkspace(resolved.workspaceId, resolved.apiUrl, resolved.environment);
                 const zip = new AdmZip(zipBuffer);
 
                 if (!existsSync(resolvedPath)) {
@@ -1217,7 +1238,7 @@ If no violations are found, return:
                     };
                 }
 
-                const backupResult = await apiClient.publishVersion(message, `Backup before MCP push: ${message}`, resolved.workspaceId, resolved.apiUrl);
+                const backupResult = await apiClient.publishVersion(message, `Backup before MCP push: ${message}`, resolved.workspaceId, resolved.apiUrl, resolved.environment);
 
                 const zip = new AdmZip();
 
@@ -1239,7 +1260,7 @@ If no violations are found, return:
                 addDirectoryToZip(resolvedPath);
 
                 const zipBuffer = zip.toBuffer();
-                const importResult = await apiClient.importWorkspace(zipBuffer, prune, resolved.workspaceId, resolved.apiUrl);
+                const importResult = await apiClient.importWorkspace(zipBuffer, prune, resolved.workspaceId, resolved.apiUrl, resolved.environment);
 
                 return {
                     content: [

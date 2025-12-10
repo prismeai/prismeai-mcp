@@ -17,8 +17,9 @@ echo ""
 echo "Installation mode:"
 echo "  1) Fresh install - Configure API keys and install everything"
 echo "  2) Update - Rebuild and update agent configuration only"
+echo "  3) Update API key - Add or update a Prisme.ai environment API key"
 echo ""
-read -p "Select mode [1/2]: " MODE_CHOICE
+read -p "Select mode [1/2/3]: " MODE_CHOICE
 
 case "$MODE_CHOICE" in
     1)
@@ -28,6 +29,10 @@ case "$MODE_CHOICE" in
     2)
         INSTALL_MODE="update"
         echo "Mode: Update"
+        ;;
+    3)
+        INSTALL_MODE="update_key"
+        echo "Mode: Update API key"
         ;;
     *)
         echo "Invalid choice. Defaulting to fresh install."
@@ -124,50 +129,68 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
     echo ""
     echo "[4/5] Configuring Prisme MCP server..."
     echo ""
-    echo "Environment options:"
-    echo "  sandbox - https://api.sandbox.prisme.ai"
-    echo "  prod    - https://api.studio.prisme.ai"
-    echo ""
-    read -p "Select default environment (sandbox/prod) [sandbox]: " ENV_CHOICE
-    ENV_CHOICE="${ENV_CHOICE:-sandbox}"
-
-    read -sp "Enter your Prisme.ai API key (JWT token): " PRISME_API_KEY
+    echo "You can configure API keys for one or both environments."
+    echo "Press Enter to skip an environment if you don't have access."
     echo ""
 
-    if [[ -z "$PRISME_API_KEY" ]]; then
-        echo "Error: API key required"
+    # Ask for sandbox API key
+    read -sp "Enter your Prisme.ai SANDBOX API key (JWT token) [press Enter to skip]: " SANDBOX_API_KEY
+    echo ""
+
+    # Ask for prod API key
+    read -sp "Enter your Prisme.ai PROD API key (JWT token) [press Enter to skip]: " PROD_API_KEY
+    echo ""
+
+    # Validate at least one API key is provided
+    if [[ -z "$SANDBOX_API_KEY" && -z "$PROD_API_KEY" ]]; then
+        echo "Error: At least one API key (sandbox or prod) is required"
         exit 1
     fi
 
-    # Define environments configuration
-    # Update these workspace IDs for your organization
-    ENVIRONMENTS_JSON=$(cat <<'EOF'
+    # Build environments JSON with API keys
+    SANDBOX_ENV=$(cat <<EOF
 {
-  "sandbox": {
-    "apiUrl": "https://api.sandbox.prisme.ai/v2",
-    "workspaces": {
-      "ai-knowledge": "gQxyd2S",
-      "ai-store": "K5boVst"
-    }
-  },
-  "prod": {
-    "apiUrl": "https://api.studio.prisme.ai/v2",
-    "workspaces": {
-      "ai-knowledge": "wW3UZla",
-      "ai-store": "KgIMCs2"
-    }
-  }
+  "apiUrl": "https://api.sandbox.prisme.ai/v2",
+  "workspaces": {
+    "ai-knowledge": "gQxyd2S",
+    "ai-store": "K5boVst"
+  }$(if [[ -n "$SANDBOX_API_KEY" ]]; then echo ",
+  \"apiKey\": \"$SANDBOX_API_KEY\""; fi)
 }
 EOF
 )
 
-    # Set default workspace based on environment
-    if [[ "$ENV_CHOICE" == "prod" ]]; then
+    PROD_ENV=$(cat <<EOF
+{
+  "apiUrl": "https://api.studio.prisme.ai/v2",
+  "workspaces": {
+    "ai-knowledge": "wW3UZla",
+    "ai-store": "KgIMCs2"
+  }$(if [[ -n "$PROD_API_KEY" ]]; then echo ",
+  \"apiKey\": \"$PROD_API_KEY\""; fi)
+}
+EOF
+)
+
+    ENVIRONMENTS_JSON=$(cat <<EOF
+{
+  "sandbox": $SANDBOX_ENV,
+  "prod": $PROD_ENV
+}
+EOF
+)
+
+    # Determine default environment and credentials
+    if [[ -n "$PROD_API_KEY" ]]; then
         DEFAULT_WORKSPACE="wW3UZla"
         API_URL="https://api.studio.prisme.ai/v2"
+        PRISME_API_KEY="$PROD_API_KEY"
+        DEFAULT_ENV="prod"
     else
         DEFAULT_WORKSPACE="gQxyd2S"
         API_URL="https://api.sandbox.prisme.ai/v2"
+        PRISME_API_KEY="$SANDBOX_API_KEY"
+        DEFAULT_ENV="sandbox"
     fi
 
     # Remove existing server if present
@@ -180,9 +203,125 @@ EOF
         -e PRISME_API_BASE_URL="$API_URL" \
         -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
         -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
+        -e PRISME_DEFAULT_ENVIRONMENT="$DEFAULT_ENV" \
         -- node "$BUILD_PATH"
 
     echo "  MCP server configured"
+    echo "  Default environment: $DEFAULT_ENV"
+    if [[ -n "$SANDBOX_API_KEY" ]]; then
+        echo "  Sandbox environment: configured"
+    else
+        echo "  Sandbox environment: not configured"
+    fi
+    if [[ -n "$PROD_API_KEY" ]]; then
+        echo "  Prod environment: configured"
+    else
+        echo "  Prod environment: not configured"
+    fi
+elif [[ "$INSTALL_MODE" == "update_key" ]]; then
+    echo ""
+    echo "[4/5] Updating Prisme.ai API key..."
+
+    # Extract existing MCP server configuration from ~/.claude.json
+    EXISTING_CONFIG=$(jq -r '.mcpServers."prisme-ai-builder" // null' ~/.claude.json 2>/dev/null)
+
+    if [[ "$EXISTING_CONFIG" == "null" || -z "$EXISTING_CONFIG" ]]; then
+        echo "  Error: No existing prisme-ai-builder MCP server found"
+        echo "  Run in fresh install mode first"
+        exit 1
+    fi
+
+    # Extract existing environment variables
+    PRISME_API_KEY=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_KEY // empty')
+    API_URL=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_BASE_URL // empty')
+    DEFAULT_WORKSPACE=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_WORKSPACE_ID // empty')
+    ENVIRONMENTS_JSON=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_ENVIRONMENTS // empty')
+    DEFAULT_ENV=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DEFAULT_ENVIRONMENT // "sandbox"')
+
+    if [[ -z "$ENVIRONMENTS_JSON" ]]; then
+        echo "  Error: No environments configuration found"
+        echo "  Run in fresh install mode to reconfigure"
+        exit 1
+    fi
+
+    # Show current status
+    echo ""
+    echo "Current configuration:"
+    SANDBOX_HAS_KEY=$(echo "$ENVIRONMENTS_JSON" | jq -r '.sandbox.apiKey // empty')
+    PROD_HAS_KEY=$(echo "$ENVIRONMENTS_JSON" | jq -r '.prod.apiKey // empty')
+    if [[ -n "$SANDBOX_HAS_KEY" ]]; then
+        echo "  sandbox: configured"
+    else
+        echo "  sandbox: NOT configured"
+    fi
+    if [[ -n "$PROD_HAS_KEY" ]]; then
+        echo "  prod: configured"
+    else
+        echo "  prod: NOT configured"
+    fi
+    echo "  default: $DEFAULT_ENV"
+    echo ""
+
+    # Ask which environment to update
+    echo "Which environment API key do you want to update?"
+    echo "  1) sandbox"
+    echo "  2) prod"
+    echo ""
+    read -p "Select environment [1/2]: " ENV_CHOICE
+
+    case "$ENV_CHOICE" in
+        1)
+            TARGET_ENV="sandbox"
+            ;;
+        2)
+            TARGET_ENV="prod"
+            ;;
+        *)
+            echo "Invalid choice"
+            exit 1
+            ;;
+    esac
+
+    # Ask for new API key
+    read -sp "Enter your Prisme.ai $TARGET_ENV API key (JWT token): " NEW_API_KEY
+    echo ""
+
+    if [[ -z "$NEW_API_KEY" ]]; then
+        echo "Error: API key required"
+        exit 1
+    fi
+
+    # Update the environments JSON with the new API key
+    ENVIRONMENTS_JSON=$(echo "$ENVIRONMENTS_JSON" | jq --arg env "$TARGET_ENV" --arg key "$NEW_API_KEY" '.[$env].apiKey = $key')
+
+    # If updating the default environment or if it wasn't set, update default API key too
+    if [[ "$TARGET_ENV" == "$DEFAULT_ENV" ]] || [[ -z "$PRISME_API_KEY" ]]; then
+        PRISME_API_KEY="$NEW_API_KEY"
+        if [[ "$TARGET_ENV" == "prod" ]]; then
+            API_URL="https://api.studio.prisme.ai/v2"
+            DEFAULT_WORKSPACE="wW3UZla"
+            DEFAULT_ENV="prod"
+        else
+            API_URL="https://api.sandbox.prisme.ai/v2"
+            DEFAULT_WORKSPACE="gQxyd2S"
+            DEFAULT_ENV="sandbox"
+        fi
+    fi
+
+    # Remove existing server and re-add with updated config
+    claude mcp remove prisme-ai-builder 2>/dev/null || true
+
+    claude mcp add prisme-ai-builder \
+        --scope user \
+        -e PRISME_API_KEY="$PRISME_API_KEY" \
+        -e PRISME_API_BASE_URL="$API_URL" \
+        -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
+        -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
+        -e PRISME_DEFAULT_ENVIRONMENT="$DEFAULT_ENV" \
+        -- node "$BUILD_PATH"
+
+    echo "  API key for $TARGET_ENV updated successfully"
+    echo "  Default environment: $DEFAULT_ENV"
 else
     echo ""
     echo "[4/5] Updating Prisme MCP server configuration (update mode)"
@@ -207,6 +346,7 @@ else
         API_URL=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_BASE_URL // empty')
         DEFAULT_WORKSPACE=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_WORKSPACE_ID // empty')
         ENVIRONMENTS_JSON=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_ENVIRONMENTS // empty')
+        DEFAULT_ENV=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DEFAULT_ENVIRONMENT // empty')
 
         if [[ -n "$PRISME_API_KEY" && -n "$API_URL" && -n "$DEFAULT_WORKSPACE" ]]; then
             # Remove existing server
@@ -219,6 +359,7 @@ else
                 -e PRISME_API_BASE_URL="$API_URL" \
                 -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
                 -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
+                -e PRISME_DEFAULT_ENVIRONMENT="$DEFAULT_ENV" \
                 -- node "$BUILD_PATH"
 
             echo "  MCP server updated with user scope (now globally available)"
@@ -244,8 +385,21 @@ echo ""
 if [[ "$INSTALL_MODE" == "fresh" ]]; then
     echo "Fresh installation completed successfully!"
     echo ""
-    echo "Workspaces available via workspaceName parameter:"
-    echo "  ai-knowledge, ai-store (for $ENV_CHOICE environment)"
+    echo "Configured environments:"
+    if [[ -n "$SANDBOX_API_KEY" ]]; then
+        echo "  sandbox: ai-knowledge, ai-store"
+    fi
+    if [[ -n "$PROD_API_KEY" ]]; then
+        echo "  prod: ai-knowledge, ai-store"
+    fi
+    echo ""
+    echo "Default environment: $DEFAULT_ENV"
+    echo ""
+elif [[ "$INSTALL_MODE" == "update_key" ]]; then
+    echo "API key update completed successfully!"
+    echo ""
+    echo "Updated environment: $TARGET_ENV"
+    echo "Default environment: $DEFAULT_ENV"
     echo ""
 else
     echo "Update completed successfully!"
