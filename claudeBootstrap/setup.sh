@@ -374,7 +374,7 @@ fi
 echo ""
 echo "[5/5] Installing Prisme assistant agent..."
 mkdir -p ~/.claude/agents
-cp "$SCRIPT_DIR/prisme-assistant.yml" ~/.claude/agents/
+cp "$SCRIPT_DIR/prisme-assistant.md" ~/.claude/agents/
 echo "  Agent installed"
 
 # Done
