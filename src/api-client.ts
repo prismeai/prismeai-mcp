@@ -184,20 +184,22 @@ export class PrismeApiClient {
         return response.data;
     }
 
-    async listApps(params?: ListAppsParams): Promise<App[]> {
-        const response = await this.client.get('/apps', { params });
+    async listApps(params?: ListAppsParams, apiUrl?: string, environment?: string): Promise<App[]> {
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.get('/apps', { params });
         return response.data;
     }
 
-    async getApp(appSlug: string): Promise<any> {
-        const appResponse = await this.client.get(`/apps/${appSlug}`);
+    async getApp(appSlug: string, apiUrl?: string, environment?: string): Promise<any> {
+        const client = this.getClient(apiUrl, environment);
+        const appResponse = await client.get(`/apps/${appSlug}`);
         const app = appResponse.data;
-        
+
         if (app.workspaceId) {
-            const workspaceResponse = await this.client.get(`/workspaces/${app.workspaceId}`);
+            const workspaceResponse = await client.get(`/workspaces/${app.workspaceId}`);
             app.automations = workspaceResponse.data.automations || {};
         }
-        
+
         return app;
     }
 

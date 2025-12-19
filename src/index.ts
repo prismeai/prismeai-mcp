@@ -570,6 +570,10 @@ const tools: Tool[] = [
                 appSlug: {
                     type: 'string',
                     description: 'The slug of the app to retrieve from the app store'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL'
                 }
             },
             required: ['appSlug']
@@ -943,11 +947,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     limit?: number;
                     labels?: string;
                 };
-                // For list_apps, workspaceId is used for filtering, so we resolve it if workspaceName/environment is provided
-                const resolvedFilterWorkspaceId = (workspaceName || environment) && !workspaceId
-                    ? resolveWorkspaceAndEnvironment({ workspaceName, environment }).workspaceId
-                    : workspaceId;
-                const result = await apiClient.listApps({ text, workspaceId: resolvedFilterWorkspaceId, page, limit, labels });
+                // Resolve environment to get the correct API URL
+                const { workspaceId: resolvedWorkspaceId, apiUrl } = resolveWorkspaceAndEnvironment({ workspaceName, environment });
+                // For list_apps, workspaceId is used for filtering
+                const filterWorkspaceId = workspaceId || (workspaceName ? resolvedWorkspaceId : undefined);
+                const result = await apiClient.listApps({ text, workspaceId: filterWorkspaceId, page, limit, labels }, apiUrl, environment);
                 return {
                     content: [
                         {
@@ -959,8 +963,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
 
             case 'get_app': {
-                const { appSlug } = args as { appSlug: string };
-                const app = await apiClient.getApp(appSlug);
+                const { appSlug, environment } = args as { appSlug: string; environment?: string };
+                const { apiUrl } = resolveWorkspaceAndEnvironment({ environment });
+                const app = await apiClient.getApp(appSlug, apiUrl, environment);
                 const automations: Record<string, { description?: string; arguments?: Record<string, any> }> = {};
                 if (app.automations) {
                     for (const [slug, automation] of Object.entries(app.automations as Record<string, any>)) {
