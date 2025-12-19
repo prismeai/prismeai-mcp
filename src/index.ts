@@ -454,6 +454,10 @@ const tools: Tool[] = [
                 workspaceName: {
                     type: 'string',
                     description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace'
                 }
             },
             required: ['automationSlug', 'automation']
@@ -479,6 +483,10 @@ const tools: Tool[] = [
                 workspaceName: {
                     type: 'string',
                     description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace'
                 }
             },
             required: ['automationSlug']
@@ -500,6 +508,10 @@ const tools: Tool[] = [
                 workspaceName: {
                     type: 'string',
                     description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace'
                 }
             },
             required: []
@@ -525,6 +537,10 @@ const tools: Tool[] = [
                 workspaceName: {
                     type: 'string',
                     description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping (for filtering apps)'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL'
                 },
                 page: {
                     type: 'number',
@@ -583,6 +599,10 @@ const tools: Tool[] = [
                 workspaceName: {
                     type: 'string',
                     description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace'
                 }
             },
             required: ['automationSlug']
@@ -675,6 +695,10 @@ const tools: Tool[] = [
                 workspaceName: {
                     type: 'string',
                     description: 'Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace'
                 }
             },
             required: ['query']
