@@ -60,6 +60,25 @@ export interface ListAppsParams {
     labels?: string;
 }
 
+export interface SearchWorkspacesParams {
+    search?: string;
+    name?: string;
+    slug?: string;
+    page?: number;
+    limit?: number;
+    labels?: string;
+    ids?: string;
+    email?: string;
+    sort?: string;
+}
+
+export interface WorkspaceSearchResult {
+    id: string;
+    name: string;
+    slug?: string;
+    description?: string;
+}
+
 export interface App {
     slug: string;
     name: string | Record<string, string>;
@@ -201,6 +220,12 @@ export class PrismeApiClient {
         }
 
         return app;
+    }
+
+    async searchWorkspaces(params?: SearchWorkspacesParams, apiUrl?: string, environment?: string): Promise<WorkspaceSearchResult[]> {
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.get('/workspaces', { params });
+        return response.data;
     }
 
     async publishVersion(name: string, description: string, workspaceId?: string, apiUrl?: string, environment?: string): Promise<any> {

@@ -262,7 +262,8 @@ const READONLY_TOOLS = new Set([
     'get_app',
     'search_events',
     'get_prisme_documentation',
-    'lint_automation'
+    'lint_automation',
+    'search_workspaces'
 ]);
 
 const WRITE_TOOLS = new Set([
@@ -577,6 +578,47 @@ const tools: Tool[] = [
                 }
             },
             required: ['appSlug']
+        },
+        annotations: {
+            readOnlyHint: true
+        }
+    },
+    {
+        name: 'search_workspaces',
+        description: 'Search for workspaces by name, description, or slug. Returns workspace IDs and names. Use this to find a workspaceId from a text search.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                search: {
+                    type: 'string',
+                    description: 'Search text to find workspaces by name, description, or slug'
+                },
+                name: {
+                    type: 'string',
+                    description: 'Filter by exact workspace name'
+                },
+                slug: {
+                    type: 'string',
+                    description: 'Filter by exact workspace slug'
+                },
+                page: {
+                    type: 'number',
+                    description: 'Page number for pagination'
+                },
+                limit: {
+                    type: 'number',
+                    description: 'Number of results per page'
+                },
+                labels: {
+                    type: 'string',
+                    description: 'Comma-separated labels list to filter on'
+                },
+                environment: {
+                    type: 'string',
+                    description: 'Environment name (from PRISME_ENVIRONMENTS) to search workspaces in'
+                }
+            },
+            required: ['environment']
         },
         annotations: {
             readOnlyHint: true
@@ -982,6 +1024,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     configSchema: app.config?.schema || {},
                     automations
                 };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2)
+                        }
+                    ]
+                };
+            }
+
+            case 'search_workspaces': {
+                const { search, name, slug, page, limit, labels, environment } = args as {
+                    search?: string;
+                    name?: string;
+                    slug?: string;
+                    page?: number;
+                    limit?: number;
+                    labels?: string;
+                    environment: string;
+                };
+                const { apiUrl } = resolveWorkspaceAndEnvironment({ environment });
+                const result = await apiClient.searchWorkspaces(
+                    { search, name, slug, page, limit, labels },
+                    apiUrl,
+                    environment
+                );
                 return {
                     content: [
                         {
