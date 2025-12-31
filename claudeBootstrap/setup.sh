@@ -79,41 +79,54 @@ fi
 if [[ "$INSTALL_MODE" == "fresh" ]]; then
     echo ""
     echo "[2/5] Configuring Anthropic API key..."
-    echo "Retrieve it from https://studio.prisme.ai/fr/workspaces/wW3UZla/settings/advanced"
-    read -sp "Enter your Anthropic API key (sk-ant-...): " ANTHROPIC_API_KEY
     echo ""
+    echo "Do you want to configure an Anthropic API key?"
+    echo "(Required if you don't have Claude Max subscription)"
+    echo "  1) Yes - I want to use my own Anthropic API key"
+    echo "  2) No - I'll use Claude Max or another authentication method"
+    echo ""
+    read -p "Select option [1/2]: " ANTHROPIC_CHOICE
 
-    if [[ -z "$ANTHROPIC_API_KEY" ]]; then
-        echo "Error: Anthropic API key required"
-        exit 1
-    fi
+    if [[ "$ANTHROPIC_CHOICE" == "1" ]]; then
+        echo ""
+        echo "Retrieve it from https://studio.prisme.ai/fr/workspaces/wW3UZla/settings/advanced"
+        read -sp "Enter your Anthropic API key (sk-ant-...): " ANTHROPIC_API_KEY
+        echo ""
 
-    # Create API key helper script
-    mkdir -p "$CLAUDE_CONFIG_DIR"
-    cat > "$API_KEY_HELPER_PATH" << EOF
+        if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+            echo "Error: Anthropic API key required when option 1 is selected"
+            exit 1
+        fi
+
+        # Create API key helper script
+        mkdir -p "$CLAUDE_CONFIG_DIR"
+        cat > "$API_KEY_HELPER_PATH" << EOF
 #!/bin/sh
 echo "$ANTHROPIC_API_KEY"
 EOF
-    chmod 700 "$API_KEY_HELPER_PATH"
-    echo "  API key helper created at $API_KEY_HELPER_PATH"
+        chmod 700 "$API_KEY_HELPER_PATH"
+        echo "  API key helper created at $API_KEY_HELPER_PATH"
 
-    # Configure Claude Code to use the helper via settings.json
-    SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
-    if [[ -f "$SETTINGS_FILE" ]]; then
-        # Merge apiKeyHelper into existing settings
-        TMP_FILE=$(mktemp)
-        if jq --arg path "$API_KEY_HELPER_PATH" '. + {apiKeyHelper: $path}' "$SETTINGS_FILE" > "$TMP_FILE" && [[ -s "$TMP_FILE" ]]; then
-            mv "$TMP_FILE" "$SETTINGS_FILE"
+        # Configure Claude Code to use the helper via settings.json
+        SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
+        if [[ -f "$SETTINGS_FILE" ]]; then
+            # Merge apiKeyHelper into existing settings
+            TMP_FILE=$(mktemp)
+            if jq --arg path "$API_KEY_HELPER_PATH" '. + {apiKeyHelper: $path}' "$SETTINGS_FILE" > "$TMP_FILE" && [[ -s "$TMP_FILE" ]]; then
+                mv "$TMP_FILE" "$SETTINGS_FILE"
+            else
+                rm -f "$TMP_FILE"
+                echo "  Error: Failed to update settings.json"
+                exit 1
+            fi
         else
-            rm -f "$TMP_FILE"
-            echo "  Error: Failed to update settings.json"
-            exit 1
+            # Create new settings file
+            echo "{\"apiKeyHelper\": \"$API_KEY_HELPER_PATH\"}" | jq . > "$SETTINGS_FILE"
         fi
+        echo "  Claude Code configured with apiKeyHelper in $SETTINGS_FILE"
     else
-        # Create new settings file
-        echo "{\"apiKeyHelper\": \"$API_KEY_HELPER_PATH\"}" | jq . > "$SETTINGS_FILE"
+        echo "  Skipping Anthropic API key configuration"
     fi
-    echo "  Claude Code configured with apiKeyHelper in $SETTINGS_FILE"
 else
     echo ""
     echo "[2/5] Skipping Anthropic API key configuration (update mode)"
