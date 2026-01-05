@@ -688,4 +688,378 @@ Reports submitted here help improve the MCP tools and documentation, enabling yo
       destructiveHint: true,
     },
   },
+  // AI Knowledge tools
+  {
+    name: "ai_knowledge_query",
+    description: `Query an AI Knowledge agent with RAG or retrieve context only.
+
+Use method='query' (default) for full RAG response with LLM answer.
+Use method='context' to retrieve document chunks only without LLM response.
+
+Requires an AI Knowledge project API key (from AI Knowledge > API & Webhooks).`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        method: {
+          type: "string",
+          enum: ["query", "context"],
+          description: "query=RAG with LLM response, context=chunks only",
+        },
+        projectId: {
+          type: "string",
+          description: "AI Knowledge project ID",
+        },
+        text: {
+          type: "string",
+          description: "User question or query text",
+        },
+        apiKey: {
+          type: "string",
+          description: "AI Knowledge project API key (from AI Knowledge > API & Webhooks)",
+        },
+        filters: {
+          type: "array",
+          description: "Document filters for RAG context",
+          items: {
+            type: "object",
+            properties: {
+              field: { type: "string" },
+              type: { type: "string", enum: ["textSearch", "match", "in", "not in"] },
+              value: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+            },
+          },
+        },
+        numberOfSearchResults: {
+          type: "number",
+          description: "Number of chunks to retrieve (for context method)",
+        },
+        history: {
+          type: "object",
+          description: "Conversation history for context",
+          properties: {
+            id: { type: "string", description: "Conversation ID" },
+            messages: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  role: { type: "string", enum: ["system", "user", "assistant"] },
+                  content: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        tool_choice: {
+          type: "array",
+          items: { type: "string" },
+          description: "Force specific tools to be used",
+        },
+        environment: {
+          type: "string",
+          description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL",
+        },
+      },
+      required: ["projectId", "text", "apiKey"],
+    },
+  },
+  {
+    name: "ai_knowledge_completion",
+    description: `Direct LLM completion without RAG.
+
+Methods:
+- chat: Simple completion using project's configured prompt/model
+- openai: OpenAI-compatible chat completions endpoint
+- embeddings: Generate embeddings for text
+- models: List available models
+
+Requires an AI Knowledge project API key.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        method: {
+          type: "string",
+          enum: ["chat", "openai", "embeddings", "models"],
+          description: "Completion method to use",
+        },
+        projectId: {
+          type: "string",
+          description: "AI Knowledge project ID",
+        },
+        apiKey: {
+          type: "string",
+          description: "AI Knowledge project API key",
+        },
+        // chat method
+        prompt: {
+          type: "string",
+          description: "User prompt (for chat method)",
+        },
+        // openai method
+        messages: {
+          type: "array",
+          description: "Messages array (for openai method)",
+          items: {
+            type: "object",
+            properties: {
+              role: { type: "string", enum: ["system", "user", "assistant", "tool"] },
+              content: { oneOf: [{ type: "string" }, { type: "array" }] },
+            },
+          },
+        },
+        model: {
+          type: "string",
+          description: "Model name to use",
+        },
+        temperature: {
+          type: "number",
+          description: "Temperature for generation (0-2)",
+        },
+        max_tokens: {
+          type: "number",
+          description: "Maximum tokens to generate",
+        },
+        stream: {
+          type: "boolean",
+          description: "Enable streaming (not recommended for MCP)",
+        },
+        // embeddings method
+        input: {
+          oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }],
+          description: "Text input for embeddings",
+        },
+        dimensions: {
+          type: "number",
+          description: "Embedding dimensions",
+        },
+        environment: {
+          type: "string",
+          description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL",
+        },
+      },
+      required: ["method", "apiKey"],
+    },
+  },
+  {
+    name: "ai_knowledge_document",
+    description: `Document CRUD operations for AI Knowledge.
+
+Methods:
+- get: Get a document by ID
+- list: List documents in a project
+- create: Create a new document (text or URL)
+- update: Update document metadata/content
+- delete: Delete a document
+- reindex: Reprocess a document
+- download: Download original document file
+
+Requires an AI Knowledge project API key.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        method: {
+          type: "string",
+          enum: ["get", "list", "create", "update", "delete", "reindex", "download"],
+          description: "Document operation to perform",
+        },
+        projectId: {
+          type: "string",
+          description: "AI Knowledge project ID",
+        },
+        apiKey: {
+          type: "string",
+          description: "AI Knowledge project API key",
+        },
+        // get, update, delete, reindex, download
+        id: {
+          type: "string",
+          description: "Document ID",
+        },
+        externalId: {
+          type: "string",
+          description: "External ID for the document",
+        },
+        // list
+        page: {
+          type: "number",
+          description: "Page number (for list)",
+        },
+        limit: {
+          type: "number",
+          description: "Page size (for list)",
+        },
+        filters: {
+          type: "array",
+          description: "Document filters (for list)",
+          items: {
+            type: "object",
+            properties: {
+              field: { type: "string" },
+              type: { type: "string" },
+              value: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+            },
+          },
+        },
+        includeContent: {
+          type: "boolean",
+          description: "Include document content in response (for list)",
+        },
+        includeMetadata: {
+          type: "boolean",
+          description: "Include metadata in response (for list)",
+        },
+        // create, update
+        name: {
+          type: "string",
+          description: "Document name/title",
+        },
+        content: {
+          type: "object",
+          description: "Document content (text or URL)",
+          properties: {
+            text: { type: "string", description: "Text content" },
+            url: { type: "string", description: "URL to crawl or source URL" },
+          },
+        },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          description: "Document tags",
+        },
+        parser: {
+          type: "string",
+          enum: ["project", "tika", "unstructured", "llm"],
+          description: "Document parser to use",
+        },
+        // update
+        status: {
+          type: "string",
+          enum: ["pending", "published", "inactive"],
+          description: "Document status (for update)",
+        },
+        // reindex
+        recrawl: {
+          type: "boolean",
+          description: "Also recrawl source URL (for reindex)",
+        },
+        // create
+        replace: {
+          type: "boolean",
+          description: "Replace if document with same name exists",
+        },
+        flags: {
+          type: "array",
+          items: { type: "string", enum: ["withImages", "useOcr"] },
+          description: "Processing flags (for create)",
+        },
+        environment: {
+          type: "string",
+          description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL",
+        },
+      },
+      required: ["method", "projectId", "apiKey"],
+    },
+  },
+  {
+    name: "ai_knowledge_project",
+    description: `Project/Agent management for AI Knowledge.
+
+Methods requiring project apiKey (existing project):
+- get: Get a project by ID
+- update: Update project configuration
+- delete: Delete a project
+- tools: Get available tools for a project
+- datasources: Get available datasources for a project
+
+Methods using user's Bearer token (no apiKey needed):
+- list: List accessible projects
+- create: Create a new project (returns new project with apiKey)
+- categories: List project categories
+
+For methods using Bearer token, use workspaceName/environment to resolve credentials.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        method: {
+          type: "string",
+          enum: ["get", "list", "create", "update", "delete", "tools", "datasources", "categories"],
+          description: "Project operation to perform",
+        },
+        apiKey: {
+          type: "string",
+          description: "AI Knowledge project API key (required for: get, update, delete, tools, datasources)",
+        },
+        // get, update, delete, tools, datasources
+        id: {
+          type: "string",
+          description: "Project ID",
+        },
+        // list
+        page: {
+          type: "number",
+          description: "Page number",
+        },
+        perPage: {
+          type: "number",
+          description: "Results per page",
+        },
+        search: {
+          type: "string",
+          description: "Search by name/description",
+        },
+        category: {
+          type: "string",
+          description: "Filter by category",
+        },
+        owned: {
+          type: "boolean",
+          description: "Only return owned projects",
+        },
+        public: {
+          type: "boolean",
+          description: "Only return public projects",
+        },
+        withTools: {
+          type: "boolean",
+          description: "Include tools in response",
+        },
+        withDatasources: {
+          type: "boolean",
+          description: "Include datasources in response",
+        },
+        // create, update
+        name: {
+          type: "string",
+          description: "Project name",
+        },
+        description: {
+          type: "string",
+          description: "Project description",
+        },
+        ai: {
+          type: "object",
+          description: "AI configuration",
+          properties: {
+            model: { type: "string", description: "Model name" },
+            prompt: { type: "string", description: "System prompt" },
+            temperature: { type: "number", description: "Temperature (0-2)" },
+          },
+        },
+        // categories
+        all: {
+          type: "boolean",
+          description: "Return all categories",
+        },
+        workspaceName: {
+          type: "string",
+          description: "Workspace name for Bearer token auth (required for: list, create, categories)",
+        },
+        environment: {
+          type: "string",
+          description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL",
+        },
+      },
+      required: ["method"],
+    },
+  },
 ];

@@ -2,8 +2,8 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSy
 import { fileURLToPath } from "url";
 import { dirname, join, resolve } from "path";
 import AdmZip from "adm-zip";
-import { PrismeApiClient } from "../api-client.js";
-import { resolveWorkspaceAndEnvironment } from "../config.js";
+import { PrismeApiClient, AIKnowledgeQueryParams, AIKnowledgeCompletionParams, AIKnowledgeDocumentParams, AIKnowledgeProjectParams, AIKnowledgeAuth } from "../api-client.js";
+import { resolveWorkspaceAndEnvironment, environmentsConfig, PRISME_API_BASE_URL } from "../config.js";
 import { enforceReadonlyMode, truncateJsonOutput } from "../utils.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -648,6 +648,253 @@ export async function handleToolCall(
               null,
               2
             ),
+          },
+        ],
+      };
+    }
+
+    // AI Knowledge tools
+    case "ai_knowledge_query": {
+      const { apiKey, environment, method, projectId, text, filters, numberOfSearchResults, history, tool_choice } = args as {
+        apiKey: string;
+        environment?: string;
+        method?: 'query' | 'context';
+        projectId: string;
+        text: string;
+        filters?: Array<{ field: string; type: string; value: string | string[] }>;
+        numberOfSearchResults?: number;
+        history?: { id?: string; messages?: Array<{ role: string; content: string }> };
+        tool_choice?: string[];
+      };
+
+      // Get API URL from environment if provided
+      let apiUrl = PRISME_API_BASE_URL;
+      if (environment && environmentsConfig[environment]) {
+        apiUrl = environmentsConfig[environment].apiUrl;
+      }
+
+      const params: AIKnowledgeQueryParams = {
+        method,
+        projectId,
+        text,
+        filters,
+        numberOfSearchResults,
+        history,
+        tool_choice,
+      };
+
+      const result = await apiClient.aiKnowledgeQuery(params, apiKey, apiUrl);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
+    case "ai_knowledge_completion": {
+      const { apiKey, environment, method, projectId, prompt, messages, model, temperature, max_tokens, stream, input, dimensions } = args as {
+        apiKey: string;
+        environment?: string;
+        method: 'chat' | 'openai' | 'embeddings' | 'models';
+        projectId?: string;
+        prompt?: string;
+        messages?: Array<{ role: string; content: string | any[] }>;
+        model?: string;
+        temperature?: number;
+        max_tokens?: number;
+        stream?: boolean;
+        input?: string | string[];
+        dimensions?: number;
+      };
+
+      let apiUrl = PRISME_API_BASE_URL;
+      if (environment && environmentsConfig[environment]) {
+        apiUrl = environmentsConfig[environment].apiUrl;
+      }
+
+      const params: AIKnowledgeCompletionParams = {
+        method,
+        projectId,
+        prompt,
+        messages,
+        model,
+        temperature,
+        max_tokens,
+        stream,
+        input,
+        dimensions,
+      };
+
+      const result = await apiClient.aiKnowledgeCompletion(params, apiKey, apiUrl);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
+    case "ai_knowledge_document": {
+      const { apiKey, environment, method, projectId, id, externalId, page, limit, filters, includeContent, includeMetadata, name, content, tags, parser, status, recrawl, replace, flags } = args as {
+        apiKey: string;
+        environment?: string;
+        method: 'get' | 'list' | 'create' | 'update' | 'delete' | 'reindex' | 'download';
+        projectId: string;
+        id?: string;
+        externalId?: string;
+        page?: number;
+        limit?: number;
+        filters?: Array<{ field: string; type: string; value: string | string[] }>;
+        includeContent?: boolean;
+        includeMetadata?: boolean;
+        name?: string;
+        content?: { text?: string; url?: string };
+        tags?: string[];
+        parser?: 'project' | 'tika' | 'unstructured' | 'llm';
+        status?: 'pending' | 'published' | 'inactive';
+        recrawl?: boolean;
+        replace?: boolean;
+        flags?: string[];
+      };
+
+      // Enforce readonly mode for write operations
+      if (['create', 'update', 'delete', 'reindex'].includes(method)) {
+        enforceReadonlyMode(`ai_knowledge_document:${method}`);
+      }
+
+      let apiUrl = PRISME_API_BASE_URL;
+      if (environment && environmentsConfig[environment]) {
+        apiUrl = environmentsConfig[environment].apiUrl;
+      }
+
+      const params: AIKnowledgeDocumentParams = {
+        method,
+        projectId,
+        id,
+        externalId,
+        page,
+        limit,
+        filters,
+        includeContent,
+        includeMetadata,
+        name,
+        content,
+        tags,
+        parser,
+        status,
+        recrawl,
+        replace,
+        flags,
+      };
+
+      const result = await apiClient.aiKnowledgeDocument(params, apiKey, apiUrl);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
+    case "ai_knowledge_project": {
+      const { apiKey, environment, workspaceName, method, id, page, perPage, search, category, owned, public: isPublic, withTools, withDatasources, name, description, ai, all } = args as {
+        apiKey?: string;
+        environment?: string;
+        workspaceName?: string;
+        method: 'get' | 'list' | 'create' | 'update' | 'delete' | 'tools' | 'datasources' | 'categories';
+        id?: string;
+        page?: number;
+        perPage?: number;
+        search?: string;
+        category?: string;
+        owned?: boolean;
+        public?: boolean;
+        withTools?: boolean;
+        withDatasources?: boolean;
+        name?: string;
+        description?: string;
+        ai?: { model?: string; prompt?: string; temperature?: number };
+        all?: boolean;
+      };
+
+      // Enforce readonly mode for write operations
+      if (['create', 'update', 'delete'].includes(method)) {
+        enforceReadonlyMode(`ai_knowledge_project:${method}`);
+      }
+
+      // Methods that use Bearer token vs apiKey
+      const usesBearerToken = ['list', 'create', 'categories'].includes(method);
+
+      let auth: AIKnowledgeAuth;
+      let apiUrl = PRISME_API_BASE_URL;
+      let resolvedEnvironment: string | undefined = environment;
+
+      if (usesBearerToken) {
+        // These methods need Bearer token auth via workspaceName/environment
+        if (!workspaceName && !environment) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error: Method "${method}" requires workspaceName or environment for Bearer token auth`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        const resolved = resolveWorkspaceAndEnvironment({ workspaceName, environment });
+        apiUrl = resolved.apiUrl;
+        resolvedEnvironment = resolved.environment;
+        auth = { type: 'bearer' };
+      } else {
+        // These methods need project apiKey
+        if (!apiKey) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error: Method "${method}" requires apiKey parameter`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        if (environment && environmentsConfig[environment]) {
+          apiUrl = environmentsConfig[environment].apiUrl;
+        }
+        auth = { type: 'apiKey', apiKey };
+      }
+
+      const params: AIKnowledgeProjectParams = {
+        method,
+        id,
+        page,
+        perPage,
+        search,
+        category,
+        owned,
+        public: isPublic,
+        withTools,
+        withDatasources,
+        name,
+        description,
+        ai,
+        all,
+      };
+
+      const result = await apiClient.aiKnowledgeProject(params, auth, apiUrl, resolvedEnvironment);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
           },
         ],
       };
