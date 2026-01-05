@@ -80,7 +80,7 @@ Type `@` in Claude to see `mcp__prisme-ai-builder__*` tools.
 | `search_workspaces` | Search workspaces by name/description |
 | `pull_workspace` | Download workspace to local directory |
 | `push_workspace` | Upload local workspace to Prisme.ai |
-| `lint_automation` | Lint automation YAML for common mistakes |
+| `lint_doc` | Get automation linting rules document |
 
 ## Environments
 

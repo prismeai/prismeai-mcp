@@ -197,7 +197,7 @@ PRISME_FORCE_READONLY=true
 - `search_events`
 - `search_workspaces`
 - `get_prisme_documentation`
-- `lint_automation`
+- `lint_doc`
 
 ### Use Cases
 

@@ -6,7 +6,6 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   Tool,
-  CreateMessageRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 import dotenv from "dotenv";
 import { PrismeApiClient } from "./api-client.js";
@@ -328,7 +327,7 @@ const READONLY_TOOLS = new Set([
   "get_app",
   "search_events",
   "get_prisme_documentation",
-  "lint_automation",
+  "lint_doc",
   "search_workspaces",
 ]);
 
@@ -655,13 +654,14 @@ const tools: Tool[] = [
   {
     name: "get_app",
     description:
-      "Get an app from the Prisme.ai app store with its configuration schema and automations. Use this to understand what config an app requires before installing it in the imports folder.",
+      "Get an app from the Prisme.ai app store with its configuration schema and automations. Use this to understand what config an app requires before installing it in the imports folder. The appSlug is case-sensitive.",
     inputSchema: {
       type: "object",
       properties: {
         appSlug: {
           type: "string",
-          description: "The slug of the app to retrieve from the app store",
+          description:
+            "The slug of the app to retrieve from the app store (case-sensitive)",
         },
         environment: {
           type: "string",
@@ -914,25 +914,13 @@ SECTIONS:
     },
   },
   {
-    name: "lint_automation",
-    description: `Lint a Prisme.ai automation YAML to check for common mistakes.
-        
-This tool performs LLM-based linting via MCP sampling to analyze the automation without cluttering the main conversation context.
-
-Returns a structured list of violations with:
-- Line references
-- Error descriptions  
-- Suggested fixes
-- Severity levels (error/warning)`,
+    name: "lint_doc",
+    description:
+      "Get the Prisme.ai automation linting rules document. Returns guidelines and common mistakes to check when reviewing automation YAML.",
     inputSchema: {
       type: "object",
-      properties: {
-        automationYaml: {
-          type: "string",
-          description: "The automation YAML content to lint",
-        },
-      },
-      required: ["automationYaml"],
+      properties: {},
+      required: [],
     },
     annotations: {
       readOnlyHint: true,
@@ -1412,123 +1400,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
-      case "lint_automation": {
-        try {
-          const { automationYaml } = args as { automationYaml: string };
-          const lintingPath = join(__dirname, "..", "linting.mdx");
-          const lintingRules = readFileSync(lintingPath, "utf-8");
-
-          const systemPrompt = `You are a Prisme.ai automation linter. Analyze YAML automations against the provided linting rules and return ONLY a valid JSON response.
-
-${lintingRules}`;
-
-          const userPrompt = `Analyze this automation YAML and return a JSON object with linting results:
-
-\`\`\`yaml
-${automationYaml}
-\`\`\`
-
-Return ONLY valid JSON in this exact format (no markdown, no explanation):
-{
-  "violations": [
-    {
-      "line": <line_number or null if unknown>,
-      "severity": "error" | "warning",
-      "rule": "<rule_id>",
-      "message": "<description of the issue>",
-      "original": "<the problematic code snippet>",
-      "fix": "<the corrected code snippet>"
-    }
-  ],
-  "summary": {
-    "errors": <count>,
-    "warnings": <count>,
-    "passed": <boolean>
-  }
-}
-
-If no violations are found, return:
-{"violations": [], "summary": {"errors": 0, "warnings": 0, "passed": true}}`;
-
-          const samplingParams: CreateMessageRequest["params"] = {
-            messages: [
-              {
-                role: "user",
-                content: {
-                  type: "text",
-                  text: userPrompt,
-                },
-              },
-            ],
-            systemPrompt,
-            maxTokens: 10000,
-            includeContext: "none",
-          };
-
-          const result = await server.createMessage(samplingParams);
-
-          let responseText = "";
-          if (result.content.type === "text") {
-            responseText = result.content.text;
-          }
-
-          try {
-            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              const lintResult = JSON.parse(jsonMatch[0]);
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: JSON.stringify(lintResult, null, 2),
-                  },
-                ],
-              };
-            }
-          } catch {
-            // If JSON parsing fails, return raw response
-          }
-
-          return {
-            content: [
-              {
-                type: "text",
-                text: responseText,
-              },
-            ],
-          };
-        } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : "Unknown error";
-          const isSamplingNotSupported =
-            errorMessage.includes("sampling") ||
-            errorMessage.includes("createMessage") ||
-            errorMessage.includes("Method not found") ||
-            errorMessage.includes("-32601");
-
-          if (isSamplingNotSupported) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Sampling not supported by client. Falling back to returning linting rules.\n\nThe client (e.g., Cursor) may not support MCP sampling yet. Please analyze the automation manually using these rules:\n\n${readFileSync(
-                    join(__dirname, "..", "linting.mdx"),
-                    "utf-8"
-                  )}`,
-                },
-              ],
-            };
-          }
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error during linting: ${errorMessage}`,
-              },
-            ],
-            isError: true,
-          };
-        }
+      case "lint_doc": {
+        const lintingPath = join(__dirname, "..", "linting.mdx");
+        const lintingRules = readFileSync(lintingPath, "utf-8");
+        return {
+          content: [
+            {
+              type: "text",
+              text: lintingRules,
+            },
+          ],
+        };
       }
 
       case "pull_workspace": {
