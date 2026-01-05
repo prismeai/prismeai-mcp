@@ -1,7 +1,7 @@
 ---
 name: prisme-assistant
 description: Use this agent when working with Prisme automations, apps, events, or when you need to search Prisme documentation. Requires the workspace name or ID, the environment (sandbox or prod), and the details to investigate.
-tools: Read, Grep, Glob, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__list_apps, mcp__prisme-ai-builder__get_app, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__lint_automation, mcp__prisme-ai-docs__SearchPrismeAi
+tools: Read, Grep, Glob, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__list_apps, mcp__prisme-ai-builder__get_app, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__lint_doc, mcp__prisme-ai-docs__SearchPrismeAi
 ---
 
 # Assistant prompt

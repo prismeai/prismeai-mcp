@@ -291,7 +291,101 @@ meta:
     blocks:
       - block: RichText
         content: "..."
+  activities:  # Tool execution history
+    - type: toolCall
+      title: { key: "executing_tool", params: { tool: "web_search" } }
+      raw: { role: "assistant", tool_calls: [...] }
+    - type: toolResult
+      title: { key: "tool_result", params: { tool: "web_search" } }
+      raw: { role: "tool", tool_call_id: "...", content: "..." }
 ```
+
+### SSE Message Processing (`handleSSEMessage.yml`)
+
+AI Store processes streaming responses from AI Knowledge through several payload types:
+
+```
+AI Knowledge (SSE Stream)
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│              handleSSEMessage.yml                        │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │ payload.error      → Display toast, mark as error   │ │
+│  │ payload.activity   → Add to meta.activities[]       │ │
+│  │ payload.answer     → Update message content         │ │
+│  │ payload.search     → Set sources for citations      │ │
+│  │ payload.blocks     → Send via Dialog Box.SendBlock  │ │
+│  │ payload.suggestions→ Store for UI display           │ │
+│  │ payload.end        → Finalize message, persist      │ │
+│  └─────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### Key SSE Payload Types
+
+| Payload Field | Handler | Effect |
+|---------------|---------|--------|
+| `error` | Toast + error state | Shows error message, stops processing |
+| `activity` | `meta.activities[]` | Displays tool execution progress |
+| `answer` | Message content | Updates streamed response text |
+| `search.results` | `meta.aiknowledge.sources` | Populates citations panel |
+| `suggestedQuestions` | `meta.suggestions` | Shows follow-up question buttons |
+| `blocks` | `Dialog Box.SendBlock` | **Injects interactive UI blocks** |
+| `end` | `updateMessage` | Persists final message to database |
+
+#### Interactive Blocks via SSE
+
+AI Knowledge can inject interactive blocks into the conversation via the `blocks` payload:
+
+```yaml
+# In handleSSEMessage.yml
+- conditions:
+    '{{payload.blocks}} and isArray({{payload.blocks}})':
+      - repeat:
+          'on': '{{payload.blocks}}'
+          do:
+            - set:
+                name: item
+                type: merge
+                value:
+                  from: '{{meta.dialogBox.from}}'
+                  target:
+                    userTopic: conversation:{{conversationId}}
+            - Dialog Box.SendBlock: '{{item}}'
+```
+
+**Supported block types:**
+- `RichText` - Formatted text/HTML
+- `Action` - Buttons with event triggers
+- `Form` - Input forms with validation
+- `DataTable` - Tabular data display
+- Any custom block defined in the workspace
+
+#### Activities Display
+
+Tool activities are accumulated and stored for display:
+
+```yaml
+# Activity accumulation
+- conditions:
+    '{{payload.activity}}':
+      - conditions:
+          isArray({{payload.activity}}):
+            - set:
+                name: meta.activities
+                type: merge
+                value: '{{payload.activity}}'
+          default:
+            - set:
+                name: meta.activities
+                type: push
+                value: '{{payload.activity}}'
+```
+
+The `AssistantMessage` custom block renders these activities as collapsible sections showing tool calls and results.
+
+---
 
 ### Real-time Updates
 

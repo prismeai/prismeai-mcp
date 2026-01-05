@@ -202,6 +202,53 @@ mcp_server:
               type: string
 ```
 
+#### Streaming Activities to Frontend
+
+During tool execution, AI Knowledge streams **activity events** to the frontend via SSE. This is handled in `callLLMWithTools.yml`:
+
+```yaml
+# When a tool is about to execute
+- set:
+    name: $http
+    value:
+      chunk:
+        activity:
+          - title:
+              key: executing_tool
+              params: '{{toolParams}}'
+            type: toolCall
+            raw:
+              role: assistant
+              tool_calls:
+                - '{{item}}'
+              content: null
+
+# After tool execution
+- set:
+    name: $http
+    value:
+      chunk:
+        activity:
+          - title:
+              key: tool_result
+              params: '{{toolParams}}'
+            type: toolResult
+            raw:
+              role: tool
+              tool_call_id: '{{item.id}}'
+              content: '{{toolContentForActivity}}'
+```
+
+**Activity types:**
+| Type | Purpose |
+|------|---------|
+| `toolCall` | Tool is about to be executed |
+| `toolResult` | Tool has returned a result |
+| `activity` | Generic progress indicator |
+| `error` | Error occurred |
+
+These activities are captured by AI Store's `handleSSEMessage.yml` and stored in `meta.activities` for display.
+
 ---
 
 ### Document Ingestion Flow
