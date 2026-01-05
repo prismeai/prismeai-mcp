@@ -172,7 +172,22 @@ repositories:
       auth:
         user: 'your git user'
         password: '{{secret.gitPassword}}'
+    pull:
+      exclude:
+        - path: security
+        - path: index
+        - path: imports/My App
 ```
+
+**Pull Exclude Configuration**:
+
+Use `pull.exclude` to prevent specific files or folders from being overwritten when pulling from the repository. This is useful for preserving environment-specific configurations:
+
+- `security`: Keep local security/RBAC settings
+- `index`: Preserve workspace configuration
+- `imports/*`: Protect app configurations with local secrets
+
+> **Note**: The `pull.exclude` configuration also applies to `.zip` imports (used by the push_workspace MCP tool). Files matching the exclude paths will be preserved during import operations.
 
 ---
 
@@ -707,6 +722,47 @@ Example:
       userId: "{{user.id}}"
       action: "profile-update"
       timestamp: "{{now}}"
+```
+
+**Custom Code**:
+
+The Custom Code app allows you to execute JavaScript code within your automations. This is useful for complex data transformations, calculations, or logic that cannot be easily expressed using standard automation instructions.
+
+**Basic Usage**:
+```yaml
+- Custom Code.run:
+    function: extractCorpusId
+    parameters:
+      fullName: '{{corpusFullName}}'
+    output: corpusId
+```
+
+**Parameters**:
+- `function`: The name of the JavaScript function to execute (must be defined in the Custom Code app configuration)
+- `parameters`: An object containing key-value pairs to pass to the function
+- `output`: The variable name where the function's return value will be stored
+
+**Parameter Injection**:
+
+The parameters you define are automatically injected into the JavaScript code as variables. They behave as if they were declared with `let` before your script runs.
+
+For example, if you call:
+```yaml
+- Custom Code.run:
+    function: processData
+    parameters:
+      userName: 'John'
+      userAge: 30
+      items: '{{myItemsList}}'
+    output: result
+```
+
+In your JavaScript function, the variables `userName`, `userAge`, and `items` are directly available:
+```javascript
+const greeting = `Hello ${userName}, you are ${userAge} years old`;
+const itemCount = items.length;
+
+return { greeting, itemCount };
 ```
 
 ---

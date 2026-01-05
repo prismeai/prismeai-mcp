@@ -863,11 +863,50 @@ const tools: Tool[] = [
   },
   {
     name: "get_prisme_documentation",
-    description:
-      "Returns the complete Prisme.ai documentation covering automation syntax, event handling, and API usage. Always call this before updating/editing local automations.",
+    description: `Returns Prisme.ai documentation by section. Call with 'index' first to see available sections.
+
+SECTIONS:
+- index: Table of contents and quick reference guide
+- automations: Backend logic - triggers (webhook/event/schedule), instructions (set/fetch/emit/repeat/conditions), expressions, memory scopes
+- pages-blocks: UI components - Form, DataTable, RichText, Action, Chat, Charts, Carousel, Tabs, etc.
+- workspace-config: Secrets management, RBAC security rules, native events, versioning with Git
+- advanced-features: Web crawler, Custom Code (JS), tool-calling agents, RAG pipelines
+- products-overview: Platform architecture - SecureChat, Store, Knowledge, Builder, Collection, Governance, Insights
+- agent-creation: Prompt engineering patterns, agent types (simple/RAG/tool-using/multi-agent)
+- api-selfhosting: REST API reference, microservices, self-hosting deployment
+- product-securechat: SecureChat product details
+- product-store: Agent marketplace details
+- product-knowledge: Knowledge/RAG management details
+- product-builder: Builder orchestration details
+- product-governance: Platform administration details
+- product-insights: Conversation analytics details
+- product-collection: Tabular data + AI details`,
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: {
+        section: {
+          type: "string",
+          enum: [
+            "index",
+            "automations",
+            "pages-blocks",
+            "workspace-config",
+            "advanced-features",
+            "products-overview",
+            "agent-creation",
+            "api-selfhosting",
+            "product-securechat",
+            "product-store",
+            "product-knowledge",
+            "product-builder",
+            "product-governance",
+            "product-insights",
+            "product-collection",
+          ],
+          description:
+            "Documentation section to retrieve. Use 'index' to see all available sections.",
+        },
+      },
       required: [],
     },
     annotations: {
@@ -1314,8 +1353,41 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_prisme_documentation": {
         try {
-          // Read documentation file from project root
-          const docPath = join(__dirname, "..", "ai-optimized-doc.mdx");
+          const { section = "index" } = args as { section?: string };
+
+          // Map section to file path
+          const sectionToFile: Record<string, string> = {
+            index: "README.md",
+            automations: "01-automations.md",
+            "pages-blocks": "02-pages-blocks.md",
+            "workspace-config": "03-workspace-config.md",
+            "advanced-features": "04-advanced-features.md",
+            "products-overview": "05-products-overview.md",
+            "agent-creation": "06-agent-creation.md",
+            "api-selfhosting": "07-api-selfhosting.md",
+            "product-securechat": "products/ai-securechat.md",
+            "product-store": "products/ai-store.md",
+            "product-knowledge": "products/ai-knowledge.md",
+            "product-builder": "products/ai-builder.md",
+            "product-governance": "products/ai-governance.md",
+            "product-insights": "products/ai-insights.md",
+            "product-collection": "products/ai-collection.md",
+          };
+
+          const fileName = sectionToFile[section];
+          if (!fileName) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Unknown section: ${section}. Valid sections: ${Object.keys(sectionToFile).join(", ")}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const docPath = join(__dirname, "..", "llmDoc", fileName);
           const documentation = readFileSync(docPath, "utf-8");
           return {
             content: [
