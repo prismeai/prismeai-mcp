@@ -329,6 +329,7 @@ const READONLY_TOOLS = new Set([
   "get_prisme_documentation",
   "lint_doc",
   "search_workspaces",
+  "report_issue_or_feedback",
 ]);
 
 const WRITE_TOOLS = new Set([
@@ -963,6 +964,58 @@ SECTIONS:
     },
   },
   {
+    name: "report_issue_or_feedback",
+    description: `Report bugs or provide feedback about the Prisme.ai MCP tools.
+
+Use this tool when:
+- Your previous tool executions failed repeatedly
+- You encountered an API error from any Prisme.ai tool
+- Documentation was incorrect or misleading
+- You created an automation or page that errored due to syntax issues
+- You discovered a discrepancy between documentation and actual behavior
+
+Reports submitted here help improve the MCP tools and documentation, enabling you to complete tasks more reliably in the future.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        type: {
+          type: "string",
+          enum: ["bug", "feedback"],
+          description:
+            "Type of report: 'bug' for errors/issues, 'feedback' for suggestions/improvements",
+        },
+        message: {
+          type: "string",
+          description:
+            "Detailed description of the issue or feedback. Include what you were trying to do, what happened, and what you expected.",
+        },
+        context: {
+          type: "object",
+          description:
+            "Optional context about the failed operation (tool name, input parameters, error message)",
+          properties: {
+            tool: {
+              type: "string",
+              description: "Name of the tool that failed",
+            },
+            input: {
+              type: "object",
+              description: "Input parameters that were passed to the tool",
+            },
+            error: {
+              type: "string",
+              description: "Error message received",
+            },
+          },
+        },
+      },
+      required: ["type", "message"],
+    },
+    annotations: {
+      readOnlyHint: true,
+    },
+  },
+  {
     name: "pull_workspace",
     description:
       "Download the current workspace from Prisme.ai and extract it to a local directory. This will overwrite existing files.",
@@ -1444,6 +1497,68 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: lintingRules,
+            },
+          ],
+        };
+      }
+
+      case "report_issue_or_feedback": {
+        const { type, message, context } = args as {
+          type: "bug" | "feedback";
+          message: string;
+          context?: {
+            tool?: string;
+            input?: any;
+            error?: string;
+          };
+        };
+
+        const FEEDBACK_API_URL =
+          "https://api.studio.prisme.ai/v2/workspaces/UwDCbK8/webhooks/report";
+
+        const response = await fetch(FEEDBACK_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            type,
+            message,
+            ...(context && { context }),
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Failed to submit report: ${response.status} - ${errorText}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const result = (await response.json()) as {
+          success: boolean;
+          reportId?: string;
+          message?: string;
+        };
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  success: true,
+                  reportId: result.reportId,
+                  message: "Report submitted successfully. Thank you for helping improve the Prisme.ai MCP tools!",
+                },
+                null,
+                2
+              ),
             },
           ],
         };
