@@ -460,23 +460,23 @@ const tools: Tool[] = [
           },
           required: ["name", "do"],
         },
-        workspaceId: {
-          type: "string",
-          description:
-            "Optional workspace ID to use (overrides default workspace)",
-        },
         workspaceName: {
           type: "string",
           description:
-            "Optional workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
         },
         environment: {
           type: "string",
           description:
             "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
         },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
       },
-      required: ["automation"],
+      required: ["automation", "workspaceName"],
     },
   },
   {
@@ -490,23 +490,23 @@ const tools: Tool[] = [
           type: "string",
           description: "The slug of the automation to retrieve",
         },
-        workspaceId: {
-          type: "string",
-          description:
-            "Optional workspace ID to retrieve the automation from (defaults to configured workspace)",
-        },
         workspaceName: {
           type: "string",
           description:
-            "Optional workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
         },
         environment: {
           type: "string",
           description:
             "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
         },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
       },
-      required: ["automationSlug"],
+      required: ["automationSlug", "workspaceName"],
     },
     annotations: {
       readOnlyHint: true,
@@ -524,25 +524,61 @@ const tools: Tool[] = [
         },
         automation: {
           type: "object",
-          description: "Partial automation object with fields to update",
-        },
-        workspaceId: {
-          type: "string",
           description:
-            "Optional workspace ID to use (overrides default workspace)",
+            "Automation object with fields to update. IMPORTANT: 'name' and 'do' are always required even for partial updates.",
+          properties: {
+            name: {
+              description: "Automation name (REQUIRED even for updates)",
+              oneOf: [
+                { type: "string" },
+                { type: "object", additionalProperties: { type: "string" } },
+              ],
+            },
+            do: {
+              type: "array",
+              description: "List of instructions to execute (REQUIRED)",
+              items: { type: "object", additionalProperties: true },
+            },
+            description: {
+              description: "Automation description",
+              oneOf: [
+                { type: "string" },
+                { type: "object", additionalProperties: { type: "string" } },
+              ],
+            },
+            when: {
+              type: "object",
+              description: "Trigger conditions",
+            },
+            arguments: {
+              type: "object",
+              description: "Automation arguments schema",
+            },
+            output: {
+              description: "Automation result expression",
+            },
+            disabled: { type: "boolean" },
+            private: { type: "boolean" },
+          },
+          required: ["name", "do"],
         },
         workspaceName: {
           type: "string",
           description:
-            "Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping",
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
         },
         environment: {
           type: "string",
           description:
             "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
         },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
       },
-      required: ["automationSlug", "automation"],
+      required: ["automationSlug", "automation", "workspaceName"],
     },
     annotations: {
       destructiveHint: true,
@@ -558,23 +594,23 @@ const tools: Tool[] = [
           type: "string",
           description: "The slug of the automation to delete",
         },
-        workspaceId: {
-          type: "string",
-          description:
-            "Optional workspace ID to use (overrides default workspace)",
-        },
         workspaceName: {
           type: "string",
           description:
-            "Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping",
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
         },
         environment: {
           type: "string",
           description:
             "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
         },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
       },
-      required: ["automationSlug"],
+      required: ["automationSlug", "workspaceName"],
     },
     annotations: {
       destructiveHint: true,
@@ -586,23 +622,23 @@ const tools: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        workspaceId: {
-          type: "string",
-          description:
-            "Optional workspace ID to list automations from (defaults to configured workspace)",
-        },
         workspaceName: {
           type: "string",
           description:
-            "Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping",
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
         },
         environment: {
           type: "string",
           description:
             "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
         },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
       },
-      required: [],
+      required: ["workspaceName"],
     },
     annotations: {
       readOnlyHint: true,
@@ -734,23 +770,23 @@ const tools: Tool[] = [
           type: "object",
           description: "Optional payload to pass to the automation",
         },
-        workspaceId: {
-          type: "string",
-          description:
-            "Optional workspace ID to use (overrides default workspace)",
-        },
         workspaceName: {
           type: "string",
           description:
-            "Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping",
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
         },
         environment: {
           type: "string",
           description:
             "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
         },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
       },
-      required: ["automationSlug"],
+      required: ["automationSlug", "workspaceName"],
     },
     annotations: {
       openWorldHint: true,
@@ -839,23 +875,23 @@ const tools: Tool[] = [
           description:
             "Get real total count instead of capped at 10000 (may impact performance)",
         },
-        workspaceId: {
-          type: "string",
-          description:
-            "Optional workspace ID to use (overrides default workspace)",
-        },
         workspaceName: {
           type: "string",
           description:
-            "Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping",
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
         },
         environment: {
           type: "string",
           description:
             "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
         },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
       },
-      required: ["query"],
+      required: ["query", "workspaceName"],
     },
     annotations: {
       readOnlyHint: true,
@@ -938,23 +974,23 @@ SECTIONS:
           description:
             'Local directory path to extract workspace to (e.g., "." for current directory)',
         },
-        workspaceId: {
-          type: "string",
-          description:
-            "Optional workspace ID to use (overrides default workspace)",
-        },
         workspaceName: {
           type: "string",
           description:
-            "Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping",
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
         },
         environment: {
           type: "string",
           description:
             "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
         },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
       },
-      required: ["path"],
+      required: ["path", "workspaceName"],
     },
   },
   {
@@ -981,23 +1017,23 @@ SECTIONS:
           description:
             "Delete remote files not present locally (default: true)",
         },
-        workspaceId: {
-          type: "string",
-          description:
-            "Optional workspace ID to use (overrides default workspace)",
-        },
         workspaceName: {
           type: "string",
           description:
-            "Optional workspace name that resolves to ID via PRISME_WORKSPACES mapping",
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
         },
         environment: {
           type: "string",
           description:
             "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
         },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
       },
-      required: ["path", "message"],
+      required: ["path", "message", "workspaceName"],
     },
     annotations: {
       destructiveHint: true,
