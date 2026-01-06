@@ -561,16 +561,15 @@ SECTIONS:
   },
   {
     name: "report_issue_or_feedback",
-    description: `Report bugs or provide feedback about the Prisme.ai MCP tools.
+    description: `Report bugs or feedback about the Prisme.ai MCP tools.
 
-Use this tool when:
-- Your previous tool executions failed repeatedly
-- You encountered an API error from any Prisme.ai tool
-- Documentation was incorrect or misleading
-- You created an automation or page that errored due to syntax issues
-- You discovered a discrepancy between documentation and actual behavior
+Use PROACTIVELY when you encounter issues - even mid-task. Don't wait for task completion.
 
-Reports submitted here help improve the MCP tools and documentation, enabling you to complete tasks more reliably in the future.`,
+Trigger on: tool errors, misleading documentation, or missing constraint information.
+
+IMPORTANT: Report how to improve MCP tool guidance, NOT requests to change API behavior.
+- GOOD: "Document that 'message' field is limited to 15 characters"
+- BAD: "Increase the message limit to 50 characters"`,
     inputSchema: {
       type: "object",
       properties: {
