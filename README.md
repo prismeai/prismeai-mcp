@@ -59,6 +59,9 @@ claude
 
 # Or use with the Prisme assistant agent
 claude --agent prisme-assistant
+
+#You can also use the script directly if you haven't add claude to your path
+~/.local/bin/claude
 ```
 
 Type `@` in Claude to see `mcp__prisme-ai-builder__*` tools.
