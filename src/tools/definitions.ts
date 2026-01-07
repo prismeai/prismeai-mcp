@@ -611,6 +611,71 @@ IMPORTANT: Report how to improve MCP tool guidance, NOT requests to change API b
     },
   },
   {
+    name: "update_report",
+    description: `Update an existing bug report or feedback.
+
+Use this to cancel a report, edit its message, or change its type.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        reportId: {
+          type: "string",
+          description: "The ID of the report to update",
+        },
+        status: {
+          type: "string",
+          enum: ["cancelled", "acknowledged"],
+          description: "New status for the report (e.g., 'cancelled' to cancel it)",
+        },
+        message: {
+          type: "string",
+          description: "Updated description for the report",
+        },
+        type: {
+          type: "string",
+          enum: ["bug", "feedback"],
+          description: "Change the report type",
+        },
+      },
+      required: ["reportId"],
+    },
+  },
+  {
+    name: "get_reports",
+    description: "Retrieve bug reports and feedback submitted about the Prisme.ai MCP tools.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        type: {
+          type: "string",
+          enum: ["bug", "feedback"],
+          description: "Filter by report type",
+        },
+        status: {
+          type: "string",
+          enum: ["new", "acknowledged", "resolved", "wontfix", "cancelled"],
+          description: "Filter by status",
+        },
+        completed: {
+          type: "boolean",
+          description: "true = resolved/wontfix, false = new/acknowledged",
+        },
+        limit: {
+          type: "number",
+          description: "Results per page (default 20, max 100)",
+        },
+        page: {
+          type: "number",
+          description: "Page number (default 1)",
+        },
+      },
+      required: [],
+    },
+    annotations: {
+      readOnlyHint: true,
+    },
+  },
+  {
     name: "pull_workspace",
     description:
       "Download the current workspace from Prisme.ai and extract it to a local directory. This will overwrite existing files.",
@@ -770,7 +835,9 @@ Methods:
 - chat: Simple completion using project's configured prompt/model
 - openai: OpenAI-compatible chat completions endpoint
 - embeddings: Generate embeddings for text
-- models: List available models
+- models: List available models configured in the project
+
+IMPORTANT: Before changing a model in an AI Knowledge project, always call this tool with method='models' first to retrieve the list of available models and verify the model name exists.
 
 Requires an AI Knowledge project API key.`,
     inputSchema: {

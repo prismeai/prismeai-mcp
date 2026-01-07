@@ -465,6 +465,119 @@ export async function handleToolCall(
       };
     }
 
+    case "update_report": {
+      const { reportId, status, message, type } = args as {
+        reportId: string;
+        status?: "cancelled" | "acknowledged";
+        message?: string;
+        type?: "bug" | "feedback";
+      };
+
+      const UPDATE_REPORT_API_URL =
+        "https://api.studio.prisme.ai/v2/workspaces/UwDCbK8/webhooks/update-report";
+
+      const response = await fetch(UPDATE_REPORT_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          reportId,
+          ...(status && { status }),
+          ...(message && { message }),
+          ...(type && { type }),
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Failed to update report: ${response.status} - ${errorText}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const result = (await response.json()) as {
+        success: boolean;
+        message?: string;
+      };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                success: true,
+                reportId,
+                message: result.message || "Report updated successfully.",
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+
+    case "get_reports": {
+      const { type, status, completed, limit, page } = args as {
+        type?: "bug" | "feedback";
+        status?: "new" | "acknowledged" | "resolved" | "wontfix" | "cancelled";
+        completed?: boolean;
+        limit?: number;
+        page?: number;
+      };
+
+      const GET_REPORTS_API_URL =
+        "https://api.studio.prisme.ai/v2/workspaces/UwDCbK8/webhooks/get-reports";
+
+      const params = new URLSearchParams();
+      if (type) params.append("type", type);
+      if (status) params.append("status", status);
+      if (completed !== undefined) params.append("completed", String(completed));
+      if (limit) params.append("limit", String(limit));
+      if (page) params.append("page", String(page));
+
+      const url = params.toString()
+        ? `${GET_REPORTS_API_URL}?${params.toString()}`
+        : GET_REPORTS_API_URL;
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Failed to retrieve reports: ${response.status} - ${errorText}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const result = await response.json();
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
     case "pull_workspace": {
       enforceReadonlyMode("pull_workspace");
       const {
