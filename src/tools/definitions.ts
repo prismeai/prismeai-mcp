@@ -869,8 +869,29 @@ Requires an AI Knowledge project API key.`,
             type: "object",
             properties: {
               role: { type: "string", enum: ["system", "user", "assistant", "tool"] },
-              content: { oneOf: [{ type: "string" }, { type: "array" }] },
+              content: {
+                oneOf: [
+                  { type: "string" },
+                  {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        type: { type: "string", enum: ["text", "image_url"] },
+                        text: { type: "string" },
+                        image_url: {
+                          type: "object",
+                          properties: {
+                            url: { type: "string" },
+                          },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
             },
+            required: ["role", "content"],
           },
         },
         model: {
