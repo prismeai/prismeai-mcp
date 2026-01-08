@@ -317,12 +317,14 @@ conditions:
 ```yaml
 # ❌ WRONG
 value: "{{user.name.toUpperCase()}}"
-value: "{{items.length}}"
 value: "{{data.toString()}}"
 
 # ✅ CORRECT
 value: "{% upper({{user.name}}) %}"
-# For array length, access it as a property (if supported) or count in repeat
+## Special case for array length, access it as a property
+value: "{{items.length}}"
+
+
 ```
 
 ### Mistake 2: JavaScript Logical Operators in Interpolation
