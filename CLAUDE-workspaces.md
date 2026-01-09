@@ -140,8 +140,8 @@ Before creating or updating automations, check for common mistakes using `lint_d
 - Read the documentation of the relevant products, automations, before anything
 - Edit the automations in local
 - Once completed read the lint_doc to check for common mistakes
-- Execute a sub-task to review the code changed and give a list of eventual issues rated MAJOR | NEED_HUMAN.
-  - Solve the MAJOR issues
-  - Ask the human for the NEED_HUMAN issues
+- Execute a sub-task to review the code changed and give a list of eventual issues rated MAJOR | NEED_HUMAN Format using emoji in bulleted-list.
+  - 🔴 Solve the MAJOR issues
+  - 🟠 Ask the human for the NEED_HUMAN issues
 
 If you encounter any issue, prisme.ai api give you an error, use the report feedback tool so we can enhance you.
