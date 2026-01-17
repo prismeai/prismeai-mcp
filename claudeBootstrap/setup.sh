@@ -142,7 +142,7 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
     echo ""
     echo "[4/5] Configuring Prisme MCP server..."
     echo ""
-    echo "You can configure API keys for one or both environments."
+    echo "You can configure API keys for one or more environments."
     echo "Press Enter to skip an environment if you don't have access."
     echo ""
 
@@ -150,13 +150,17 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
     read -sp "Enter your Prisme.ai SANDBOX API key (JWT token) [press Enter to skip]: " SANDBOX_API_KEY
     echo ""
 
+    # Ask for staging API key
+    read -sp "Enter your Prisme.ai STAGING API key (JWT token) [press Enter to skip]: " STAGING_API_KEY
+    echo ""
+
     # Ask for prod API key
     read -sp "Enter your Prisme.ai PROD API key (JWT token) [press Enter to skip]: " PROD_API_KEY
     echo ""
 
     # Validate at least one API key is provided
-    if [[ -z "$SANDBOX_API_KEY" && -z "$PROD_API_KEY" ]]; then
-        echo "Error: At least one API key (sandbox or prod) is required"
+    if [[ -z "$SANDBOX_API_KEY" && -z "$STAGING_API_KEY" && -z "$PROD_API_KEY" ]]; then
+        echo "Error: At least one API key (sandbox, staging, or prod) is required"
         exit 1
     fi
 
@@ -169,6 +173,18 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
     "ai-store": "K5boVst"
   }$(if [[ -n "$SANDBOX_API_KEY" ]]; then echo ",
   \"apiKey\": \"$SANDBOX_API_KEY\""; fi)
+}
+EOF
+)
+
+    STAGING_ENV=$(cat <<EOF
+{
+  "apiUrl": "https://api.staging.prisme.ai/v2",
+  "workspaces": {
+    "ai-knowledge": "2AZ1OCD",
+    "ai-store": "A8hvYhU"
+  }$(if [[ -n "$STAGING_API_KEY" ]]; then echo ",
+  \"apiKey\": \"$STAGING_API_KEY\""; fi)
 }
 EOF
 )
@@ -188,22 +204,28 @@ EOF
     ENVIRONMENTS_JSON=$(cat <<EOF
 {
   "sandbox": $SANDBOX_ENV,
+  "staging": $STAGING_ENV,
   "prod": $PROD_ENV
 }
 EOF
 )
 
-    # Determine default environment and credentials
-    if [[ -n "$PROD_API_KEY" ]]; then
-        DEFAULT_WORKSPACE="wW3UZla"
-        API_URL="https://api.studio.prisme.ai/v2"
-        PRISME_API_KEY="$PROD_API_KEY"
-        DEFAULT_ENV="prod"
-    else
+    # Determine default environment and credentials (priority: sandbox > staging > prod)
+    if [[ -n "$SANDBOX_API_KEY" ]]; then
         DEFAULT_WORKSPACE="gQxyd2S"
         API_URL="https://api.sandbox.prisme.ai/v2"
         PRISME_API_KEY="$SANDBOX_API_KEY"
         DEFAULT_ENV="sandbox"
+    elif [[ -n "$STAGING_API_KEY" ]]; then
+        DEFAULT_WORKSPACE="2AZ1OCD"
+        API_URL="https://api.staging.prisme.ai/v2"
+        PRISME_API_KEY="$STAGING_API_KEY"
+        DEFAULT_ENV="staging"
+    else
+        DEFAULT_WORKSPACE="wW3UZla"
+        API_URL="https://api.studio.prisme.ai/v2"
+        PRISME_API_KEY="$PROD_API_KEY"
+        DEFAULT_ENV="prod"
     fi
 
     # Remove existing server if present
@@ -225,6 +247,11 @@ EOF
         echo "  Sandbox environment: configured"
     else
         echo "  Sandbox environment: not configured"
+    fi
+    if [[ -n "$STAGING_API_KEY" ]]; then
+        echo "  Staging environment: configured"
+    else
+        echo "  Staging environment: not configured"
     fi
     if [[ -n "$PROD_API_KEY" ]]; then
         echo "  Prod environment: configured"
@@ -261,11 +288,17 @@ elif [[ "$INSTALL_MODE" == "update_key" ]]; then
     echo ""
     echo "Current configuration:"
     SANDBOX_HAS_KEY=$(echo "$ENVIRONMENTS_JSON" | jq -r '.sandbox.apiKey // empty')
+    STAGING_HAS_KEY=$(echo "$ENVIRONMENTS_JSON" | jq -r '.staging.apiKey // empty')
     PROD_HAS_KEY=$(echo "$ENVIRONMENTS_JSON" | jq -r '.prod.apiKey // empty')
     if [[ -n "$SANDBOX_HAS_KEY" ]]; then
         echo "  sandbox: configured"
     else
         echo "  sandbox: NOT configured"
+    fi
+    if [[ -n "$STAGING_HAS_KEY" ]]; then
+        echo "  staging: configured"
+    else
+        echo "  staging: NOT configured"
     fi
     if [[ -n "$PROD_HAS_KEY" ]]; then
         echo "  prod: configured"
@@ -278,15 +311,19 @@ elif [[ "$INSTALL_MODE" == "update_key" ]]; then
     # Ask which environment to update
     echo "Which environment API key do you want to update?"
     echo "  1) sandbox"
-    echo "  2) prod"
+    echo "  2) staging"
+    echo "  3) prod"
     echo ""
-    read -p "Select environment [1/2]: " ENV_CHOICE
+    read -p "Select environment [1/2/3]: " ENV_CHOICE
 
     case "$ENV_CHOICE" in
         1)
             TARGET_ENV="sandbox"
             ;;
         2)
+            TARGET_ENV="staging"
+            ;;
+        3)
             TARGET_ENV="prod"
             ;;
         *)
@@ -314,6 +351,10 @@ elif [[ "$INSTALL_MODE" == "update_key" ]]; then
             API_URL="https://api.studio.prisme.ai/v2"
             DEFAULT_WORKSPACE="wW3UZla"
             DEFAULT_ENV="prod"
+        elif [[ "$TARGET_ENV" == "staging" ]]; then
+            API_URL="https://api.staging.prisme.ai/v2"
+            DEFAULT_WORKSPACE="2AZ1OCD"
+            DEFAULT_ENV="staging"
         else
             API_URL="https://api.sandbox.prisme.ai/v2"
             DEFAULT_WORKSPACE="gQxyd2S"
@@ -401,6 +442,9 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
     echo "Configured environments:"
     if [[ -n "$SANDBOX_API_KEY" ]]; then
         echo "  sandbox: ai-knowledge, ai-store"
+    fi
+    if [[ -n "$STAGING_API_KEY" ]]; then
+        echo "  staging: ai-knowledge, ai-store"
     fi
     if [[ -n "$PROD_API_KEY" ]]; then
         echo "  prod: ai-knowledge, ai-store"

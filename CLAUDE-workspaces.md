@@ -2,10 +2,11 @@
 
 ## Environment Configuration
 
-| Environment | Aliases | Default Workspace |
-|-------------|---------|-------------------|
-| `sandbox` | sb | ai-knowledge |
-| `prod` | production | - |
+| Environment | Aliases | API URL | Default Workspace |
+|-------------|---------|---------|-------------------|
+| `sandbox` | sb | api.sandbox.prisme.ai | ai-knowledge |
+| `staging` | stg | api.staging.prisme.ai | ai-knowledge |
+| `prod` | production | api.studio.prisme.ai | - |
 
 **Default behavior**: Search on `ai-knowledge` workspace in `sandbox` environment unless specified otherwise.
 

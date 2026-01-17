@@ -346,6 +346,7 @@ export class PrismeApiClient {
     // AI Knowledge workspace IDs per environment
     private static readonly AIK_WORKSPACE_IDS: Record<string, string> = {
         'sandbox': 'gQxyd2S',
+        'staging': '2AZ1OCD',
         'prod': 'wW3UZla',
     };
 
@@ -354,6 +355,9 @@ export class PrismeApiClient {
         const url = apiUrl || this.baseUrl;
         if (url.includes('sandbox.prisme.ai')) {
             return PrismeApiClient.AIK_WORKSPACE_IDS['sandbox'];
+        }
+        if (url.includes('staging.prisme.ai')) {
+            return PrismeApiClient.AIK_WORKSPACE_IDS['staging'];
         }
         // Default to prod for studio.prisme.ai or any other
         return PrismeApiClient.AIK_WORKSPACE_IDS['prod'];

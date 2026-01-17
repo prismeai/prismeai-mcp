@@ -65,7 +65,7 @@ Config file location:
       "env": {
         "PRISME_API_KEY": "your_bearer_token_here",
         "PRISME_WORKSPACE_ID": "your_default_workspace_id",
-        "PRISME_ENVIRONMENTS": "{\"sandbox\":{\"apiUrl\":\"https://api.sandbox.prisme.ai/v2\",\"apiKey\":\"sandbox_token\",\"workspaces\":{\"ai-knowledge\":\"gQxyd2S\",\"ai-store\":\"K5boVst\"}},\"prod\":{\"apiUrl\":\"https://api.studio.prisme.ai/v2\",\"apiKey\":\"prod_token\",\"workspaces\":{\"ai-knowledge\":\"wW3UZla\",\"ai-store\":\"KgIMCs2\"}}}",
+        "PRISME_ENVIRONMENTS": "{\"sandbox\":{\"apiUrl\":\"https://api.sandbox.prisme.ai/v2\",\"apiKey\":\"sandbox_token\",\"workspaces\":{\"ai-knowledge\":\"gQxyd2S\",\"ai-store\":\"K5boVst\"}},\"staging\":{\"apiUrl\":\"https://api.staging.prisme.ai/v2\",\"apiKey\":\"staging_token\",\"workspaces\":{\"ai-knowledge\":\"2AZ1OCD\",\"ai-store\":\"A8hvYhU\"}},\"prod\":{\"apiUrl\":\"https://api.studio.prisme.ai/v2\",\"apiKey\":\"prod_token\",\"workspaces\":{\"ai-knowledge\":\"wW3UZla\",\"ai-store\":\"KgIMCs2\"}}}",
         "PRISME_DEFAULT_ENVIRONMENT": "sandbox"
       }
     }
@@ -116,6 +116,14 @@ After configuration, restart Cursor to load the MCP server.
     "workspaces": {
       "ai-knowledge": "gQxyd2S",
       "ai-store": "K5boVst"
+    }
+  },
+  "staging": {
+    "apiUrl": "https://api.staging.prisme.ai/v2",
+    "apiKey": "optional_env_specific_key",
+    "workspaces": {
+      "ai-knowledge": "2AZ1OCD",
+      "ai-store": "A8hvYhU"
     }
   },
   "prod": {
