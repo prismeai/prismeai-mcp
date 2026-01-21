@@ -26,6 +26,23 @@ when:
   endpoint: true
 ```
 
+**Webhook URL Format:**
+```
+https://api.{instance}.prisme.ai/v2/workspaces/{workspaceId}/webhooks/{automationSlug}
+```
+
+| Instance | API Base URL |
+|----------|--------------|
+| `studio` (production) | `https://api.studio.prisme.ai` |
+| `sandbox` | `https://api.sandbox.prisme.ai` |
+| Custom instance | `https://api.{instance}.prisme.ai` |
+
+**Examples:**
+- Production: `https://api.studio.prisme.ai/v2/workspaces/wW3UZla/webhooks/query`
+- Sandbox: `https://api.sandbox.prisme.ai/v2/workspaces/wW4YNTa/webhooks/query`
+
+**Note:** The `workspaceId` is found in the workspace URL or settings. The `automationSlug` is the automation's slug field.
+
 **Variables:** `body`, `headers`, `method`, `query`
 **File uploads:** `body.<fileKey>` with `originalname`, `encoding`, `mimetype`, `size`, `base64`
 
@@ -340,13 +357,22 @@ Min frequency: 15 minutes. Emits `runtime.automations.scheduled`.
 ```
 
 ### Wait
+Use `wait` for simple delays or to wait for specific events.
+
+**Simple delay/sleep:**
+```yaml
+- wait:
+    timeout: 120  # Wait 120 seconds
+```
+
+**Wait for events with timeout:**
 ```yaml
 - wait:
     oneOf:
       - event: processing-complete
         filters:
           payload.documentId: "{{documentId}}"
-    timeout: 30  # Default 20s
+    timeout: 30  # Optional timeout (default 20s), returns after timeout even if no event received
     output: processingResult
 ```
 
