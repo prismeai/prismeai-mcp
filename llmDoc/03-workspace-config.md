@@ -140,6 +140,105 @@ when:
 
 ---
 
+## App Imports
+
+Apps are installed via YAML files in the `imports/` folder. Each file defines one app instance with its configuration.
+
+### File Structure
+
+```
+workspace/
+├── imports/
+│   ├── MyCollection.yml
+│   ├── Knowledge Client.yml
+│   └── Custom Code.yml
+├── automations/
+├── pages/
+└── index.yml
+```
+
+### Import Format
+
+```yaml
+appSlug: <AppSlugFromStore>   # App name in the App Store (case-sensitive)
+slug: <InstanceName>          # Name referenced by automations in this workspace
+config:                       # App-specific configuration
+  # ... config fields based on app's configSchema
+```
+
+### Example: Collection App
+
+```yaml
+appSlug: Collection
+slug: Messages
+config:
+  collectionName: Messages
+  indexes:
+    - properties:
+        - conversationId
+        - createdAt
+  uniques:
+    - properties: conversationId
+  properties:
+    conversationId:
+      type: text
+      nullable: false
+    content:
+      type: text
+    from:
+      type: json
+      nullable: false
+    createdAt:
+      type: datetime
+      nullable: false
+```
+
+### Collection App Config Schema
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `collectionName` | string | Internal collection name |
+| `properties` | object | Column definitions with `type` and `nullable` |
+| `indexes` | array | Fields to index for query performance |
+| `uniques` | array | Fields with unique constraints |
+
+**Property types:** `string`, `text`, `date`, `time`, `datetime`, `number`, `double`, `float`, `integer`, `decimal`, `boolean`, `uint8array`, `array`, `enum`, `enumArray`, `json`, `blob`
+
+### Accessing Imported App Config
+
+From automations, access imported app configuration:
+```yaml
+{{$workspace.imports.Messages.config}}
+{{$workspace.imports.Messages.config.collectionName}}
+```
+
+### Calling App Automations
+
+```yaml
+# Pattern: <slug>.<automation>:
+- Messages.find:
+    query:
+      conversationId: "{{conversationId}}"
+    output: messages
+
+- Messages.insert:
+    data:
+      conversationId: "{{conversationId}}"
+      content: "{{content}}"
+      createdAt: '{% now() %}'
+```
+
+### Getting App Config Schema
+
+To find an app's available config options, use the `get_app` MCP tool:
+```
+mcp__prisme-ai-builder__get_app(appSlug: "Collection")
+```
+
+The response includes `configSchema` with all available configuration fields.
+
+---
+
 ## Native Events
 
 ### Workspace
