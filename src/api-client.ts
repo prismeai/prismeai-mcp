@@ -4,7 +4,8 @@ import FormData from 'form-data';
 export interface EnvironmentConfig {
     apiUrl: string;
     apiKey?: string;
-    workspaces: Record<string, string>;
+    workspaces?: Record<string, string>;
+    default?: boolean;
 }
 
 export interface EnvironmentsConfig {

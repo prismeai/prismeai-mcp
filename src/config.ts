@@ -4,25 +4,22 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Environment variable exports
-export const PRISME_API_KEY = process.env.PRISME_API_KEY;
-export const PRISME_WORKSPACE_ID = process.env.PRISME_WORKSPACE_ID;
-export const PRISME_API_BASE_URL =
-  process.env.PRISME_API_BASE_URL || "https://api.staging.prisme.ai/v2";
 export const PRISME_FORCE_READONLY = process.env.PRISME_FORCE_READONLY === "true";
 // Disable feedback/reporting tools (these communicate with Prisme.ai servers)
 export const PRISME_DISABLE_FEEDBACK_TOOLS = process.env.PRISME_DISABLE_FEEDBACK_TOOLS === "true";
 const PRISME_WORKSPACES = process.env.PRISME_WORKSPACES;
 const PRISME_ENVIRONMENTS = process.env.PRISME_ENVIRONMENTS;
-const PRISME_DEFAULT_ENVIRONMENT =
-  process.env.PRISME_DEFAULT_ENVIRONMENT || "default";
+const PRISME_DEFAULT_ENVIRONMENT = process.env.PRISME_DEFAULT_ENVIRONMENT;
 
-// Validate required environment variables
-if (!PRISME_API_KEY || !PRISME_WORKSPACE_ID) {
-  console.error(
-    "Error: PRISME_API_KEY and PRISME_WORKSPACE_ID must be set in environment variables"
-  );
-  process.exit(1);
-}
+// Legacy environment variables (deprecated, use PRISME_ENVIRONMENTS instead)
+const LEGACY_PRISME_API_KEY = process.env.PRISME_API_KEY;
+const LEGACY_PRISME_WORKSPACE_ID = process.env.PRISME_WORKSPACE_ID;
+const LEGACY_PRISME_API_BASE_URL = process.env.PRISME_API_BASE_URL;
+
+// Default values derived from environments config (set during parsing)
+export let PRISME_API_KEY: string | undefined;
+export let PRISME_WORKSPACE_ID: string | undefined;
+export let PRISME_API_BASE_URL: string = "https://api.staging.prisme.ai/v2";
 
 // Type definitions
 export interface WorkspaceMapping {
@@ -32,7 +29,8 @@ export interface WorkspaceMapping {
 export interface EnvironmentConfig {
   apiUrl: string;
   apiKey?: string;
-  workspaces: WorkspaceMapping;
+  workspaces?: WorkspaceMapping;
+  default?: boolean;
 }
 
 export interface EnvironmentsConfig {
@@ -55,6 +53,9 @@ export interface WorkspaceResolutionResult {
 // Parse and validate workspace mappings and environments
 let workspaceMappings: WorkspaceMapping = {};
 export let environmentsConfig: EnvironmentsConfig = {};
+
+// Track the resolved default environment name
+let defaultEnvironmentName: string | undefined;
 
 // Parse PRISME_ENVIRONMENTS (new nested structure)
 if (PRISME_ENVIRONMENTS) {
@@ -90,44 +91,76 @@ if (PRISME_ENVIRONMENTS) {
         );
       }
 
-      if (
-        typeof config.workspaces !== "object" ||
-        config.workspaces === null ||
-        Array.isArray(config.workspaces)
-      ) {
-        throw new Error(
-          `Environment "${envName}" must have a "workspaces" object`
-        );
-      }
-
-      // Validate workspace IDs are strings
-      for (const [wsName, wsId] of Object.entries(config.workspaces)) {
-        if (typeof wsId !== "string") {
+      // workspaces is optional
+      if (config.workspaces !== undefined) {
+        if (
+          typeof config.workspaces !== "object" ||
+          config.workspaces === null ||
+          Array.isArray(config.workspaces)
+        ) {
           throw new Error(
-            `Workspace ID for "${envName}.${wsName}" must be a string`
+            `Environment "${envName}" workspaces must be an object if provided`
           );
         }
+
+        // Validate workspace IDs are strings
+        for (const [wsName, wsId] of Object.entries(config.workspaces)) {
+          if (typeof wsId !== "string") {
+            throw new Error(
+              `Workspace ID for "${envName}.${wsName}" must be a string`
+            );
+          }
+        }
+      }
+
+      // Track environment with default: true
+      if (config.default === true) {
+        if (defaultEnvironmentName) {
+          console.error(
+            `Warning: Multiple environments marked as default. Using "${envName}" instead of "${defaultEnvironmentName}"`
+          );
+        }
+        defaultEnvironmentName = envName;
       }
     }
 
     environmentsConfig = parsed;
-    console.error(
-      `Loaded ${
-        Object.keys(environmentsConfig).length
-      } environments: ${Object.keys(environmentsConfig).join(", ")}`
-    );
 
-    // If default environment exists in config, use its workspaces as legacy workspace mappings
-    if (environmentsConfig[PRISME_DEFAULT_ENVIRONMENT]) {
-      workspaceMappings =
-        environmentsConfig[PRISME_DEFAULT_ENVIRONMENT].workspaces;
+    // Determine default environment: explicit default field > PRISME_DEFAULT_ENVIRONMENT > first environment
+    if (!defaultEnvironmentName && PRISME_DEFAULT_ENVIRONMENT) {
+      if (environmentsConfig[PRISME_DEFAULT_ENVIRONMENT]) {
+        defaultEnvironmentName = PRISME_DEFAULT_ENVIRONMENT;
+      }
     }
+    if (!defaultEnvironmentName && Object.keys(environmentsConfig).length > 0) {
+      defaultEnvironmentName = Object.keys(environmentsConfig)[0];
+    }
+
+    // Set exports from default environment
+    if (defaultEnvironmentName && environmentsConfig[defaultEnvironmentName]) {
+      const defaultEnv = environmentsConfig[defaultEnvironmentName];
+      PRISME_API_KEY = defaultEnv.apiKey;
+      PRISME_API_BASE_URL = defaultEnv.apiUrl;
+      if (defaultEnv.workspaces) {
+        workspaceMappings = defaultEnv.workspaces;
+        // Use first workspace as default if available
+        const firstWorkspace = Object.values(defaultEnv.workspaces)[0];
+        if (firstWorkspace) {
+          PRISME_WORKSPACE_ID = firstWorkspace;
+        }
+      }
+    }
+
+    console.error(
+      `Loaded ${Object.keys(environmentsConfig).length} environments: ${Object.keys(environmentsConfig).join(", ")}` +
+        (defaultEnvironmentName ? ` (default: ${defaultEnvironmentName})` : "")
+    );
   } catch (error) {
     console.error(
       "Error: PRISME_ENVIRONMENTS must be valid JSON with environment configs"
     );
     console.error(
-      'Example: {"sandbox":{"apiUrl":"https://api.sandbox.prisme.ai/v2","workspaces":{"aiKnowledge":"wks_123"}}}'
+      'Example: {"sandbox":{"apiUrl":"https://api.sandbox.prisme.ai/v2","apiKey":"ey...","default":true}}'
     );
     console.error(
       `Details: ${error instanceof Error ? error.message : "Unknown error"}`
@@ -173,6 +206,31 @@ else if (PRISME_WORKSPACES) {
   }
 }
 
+// Fallback to legacy environment variables if not set from PRISME_ENVIRONMENTS
+if (!PRISME_API_KEY && LEGACY_PRISME_API_KEY) {
+  PRISME_API_KEY = LEGACY_PRISME_API_KEY;
+}
+if (!PRISME_WORKSPACE_ID && LEGACY_PRISME_WORKSPACE_ID) {
+  PRISME_WORKSPACE_ID = LEGACY_PRISME_WORKSPACE_ID;
+}
+if (LEGACY_PRISME_API_BASE_URL && PRISME_API_BASE_URL === "https://api.staging.prisme.ai/v2") {
+  PRISME_API_BASE_URL = LEGACY_PRISME_API_BASE_URL;
+}
+
+// Validate that we have at least environments configured or legacy fallback
+if (Object.keys(environmentsConfig).length === 0 && !PRISME_API_KEY) {
+  console.error(
+    "Error: PRISME_ENVIRONMENTS must be configured with at least one environment"
+  );
+  console.error(
+    'Example: {"sandbox":{"apiUrl":"https://api.sandbox.prisme.ai/v2","apiKey":"ey...","default":true}}'
+  );
+  process.exit(1);
+}
+
+// Export the resolved default environment name
+export { defaultEnvironmentName };
+
 // Workspace and environment resolution helper
 export function resolveWorkspaceAndEnvironment(
   params: WorkspaceResolutionParams
@@ -210,6 +268,13 @@ export function resolveWorkspaceAndEnvironment(
       );
     }
 
+    if (!envConfig.workspaces) {
+      throw new Error(
+        `Environment "${params.environment}" has no workspace mappings configured. ` +
+          `Provide workspaceId directly instead of workspaceName.`
+      );
+    }
+
     const workspaceId = envConfig.workspaces[params.workspaceName];
     if (!workspaceId) {
       const availableWorkspaces = Object.keys(envConfig.workspaces);
@@ -233,15 +298,15 @@ export function resolveWorkspaceAndEnvironment(
 
   // 3. Just workspaceName (use default environment or legacy mappings)
   if (params.workspaceName) {
-    // Try default environment first if it exists
-    if (environmentsConfig[PRISME_DEFAULT_ENVIRONMENT]) {
-      const envConfig = environmentsConfig[PRISME_DEFAULT_ENVIRONMENT];
-      const workspaceId = envConfig.workspaces[params.workspaceName];
+    // Try default environment first if it exists and has workspaces
+    if (defaultEnvironmentName && environmentsConfig[defaultEnvironmentName]?.workspaces) {
+      const envConfig = environmentsConfig[defaultEnvironmentName];
+      const workspaceId = envConfig.workspaces![params.workspaceName];
       if (workspaceId) {
         return {
           workspaceId,
           apiUrl: envConfig.apiUrl,
-          environment: PRISME_DEFAULT_ENVIRONMENT,
+          environment: defaultEnvironmentName,
           source: "environment",
         };
       }
@@ -266,7 +331,7 @@ export function resolveWorkspaceAndEnvironment(
     };
   }
 
-  // 4. Just environment (use default workspace ID from that environment)
+  // 4. Just environment (use environment's API URL, but workspaceId must be provided or available)
   if (params.environment) {
     const envConfig = environmentsConfig[params.environment];
     if (!envConfig) {
@@ -281,19 +346,39 @@ export function resolveWorkspaceAndEnvironment(
       );
     }
 
+    // Try to get a default workspace from this environment
+    const envWorkspaceId = envConfig.workspaces
+      ? Object.values(envConfig.workspaces)[0]
+      : undefined;
+    const workspaceId = envWorkspaceId || PRISME_WORKSPACE_ID;
+
+    if (!workspaceId) {
+      throw new Error(
+        `Environment "${params.environment}" has no default workspace. ` +
+          `Please provide workspaceId or workspaceName parameter.`
+      );
+    }
+
     return {
-      workspaceId: PRISME_WORKSPACE_ID!,
+      workspaceId,
       apiUrl: envConfig.apiUrl,
       environment: params.environment,
       source: "environment",
     };
   }
 
-  // 5. Default: use configured defaults
+  // 5. Default: use configured defaults from default environment
+  if (!PRISME_WORKSPACE_ID) {
+    throw new Error(
+      `No default workspace configured. ` +
+        `Please provide workspaceId, workspaceName, or environment parameter.`
+    );
+  }
+
   return {
-    workspaceId: PRISME_WORKSPACE_ID!, // Non-null assertion: validated at startup
+    workspaceId: PRISME_WORKSPACE_ID,
     apiUrl: PRISME_API_BASE_URL,
-    environment: undefined,
+    environment: defaultEnvironmentName,
     source: "default",
   };
 }

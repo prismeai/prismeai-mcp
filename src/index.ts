@@ -17,10 +17,10 @@ import {
 import { tools } from "./tools/definitions.js";
 import { handleToolCall } from "./tools/handlers.js";
 
-// Initialize API client
+// Initialize API client (API key and workspace ID may be undefined if using per-environment config)
 const apiClient = new PrismeApiClient({
-  apiKey: PRISME_API_KEY!,
-  workspaceId: PRISME_WORKSPACE_ID!,
+  apiKey: PRISME_API_KEY || "",
+  workspaceId: PRISME_WORKSPACE_ID || "",
   baseUrl: PRISME_API_BASE_URL,
   environments: environmentsConfig,
 });

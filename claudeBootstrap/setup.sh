@@ -43,8 +43,9 @@ echo "  2) Update - Rebuild and update agent configuration only"
 echo "  3) Update API key - Add or update a Prisme.ai environment API key"
 echo "  4) Toggle feedback tools - Enable/disable bug reporting tools"
 echo "  5) Delete environment - Remove a configured environment"
+echo "  6) Migrate - Fix old configuration format (run this if MCP server fails to start)"
 echo ""
-read -p "Select mode [1/2/3/4/5]: " MODE_CHOICE
+read -p "Select mode [1/2/3/4/5/6]: " MODE_CHOICE
 
 case "$MODE_CHOICE" in
     1)
@@ -66,6 +67,10 @@ case "$MODE_CHOICE" in
     5)
         INSTALL_MODE="delete_env"
         echo "Mode: Delete environment"
+        ;;
+    6)
+        INSTALL_MODE="migrate"
+        echo "Mode: Migrate configuration"
         ;;
     *)
         echo "Invalid choice. Defaulting to fresh install."
@@ -245,21 +250,22 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
             fi
         fi
 
-        # Build environment JSON object
-        ENV_OBJ=$(jq -n \
-            --arg apiUrl "$ENV_API_URL" \
-            --arg apiKey "$ENV_API_KEY" \
-            '{"apiUrl": $apiUrl, "apiKey": $apiKey}')
+        # Build environment JSON object (first environment gets default: true)
+        if [[ $ENV_COUNT -eq 0 ]]; then
+            ENV_OBJ=$(jq -n \
+                --arg apiUrl "$ENV_API_URL" \
+                --arg apiKey "$ENV_API_KEY" \
+                '{"apiUrl": $apiUrl, "apiKey": $apiKey, "default": true}')
+            FIRST_ENV_NAME="$ENV_NAME"
+        else
+            ENV_OBJ=$(jq -n \
+                --arg apiUrl "$ENV_API_URL" \
+                --arg apiKey "$ENV_API_KEY" \
+                '{"apiUrl": $apiUrl, "apiKey": $apiKey}')
+        fi
 
         # Add to environments JSON
         ENVIRONMENTS_JSON=$(echo "$ENVIRONMENTS_JSON" | jq --arg name "$ENV_NAME" --argjson env "$ENV_OBJ" '.[$name] = $env')
-
-        # Track first environment for defaults
-        if [[ $ENV_COUNT -eq 0 ]]; then
-            FIRST_ENV_NAME="$ENV_NAME"
-            FIRST_API_URL="$ENV_API_URL"
-            FIRST_API_KEY="$ENV_API_KEY"
-        fi
 
         CONFIGURED_ENVS+=("$ENV_NAME")
         ((ENV_COUNT++))
@@ -276,9 +282,6 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
 
     # Set default environment (first configured)
     DEFAULT_ENV="$FIRST_ENV_NAME"
-    API_URL="$FIRST_API_URL"
-    PRISME_API_KEY="$FIRST_API_KEY"
-    DEFAULT_WORKSPACE=""
 
     # Ask about feedback tools
     echo ""
@@ -305,9 +308,6 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
     # Add MCP server with environment variables (user scope = globally available)
     claude mcp add prisme-ai-builder \
         --scope user \
-        -e PRISME_API_KEY="$PRISME_API_KEY" \
-        -e PRISME_API_BASE_URL="$API_URL" \
-        -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
         -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
         -e PRISME_DEFAULT_ENVIRONMENT="$DEFAULT_ENV" \
         -e PRISME_DISABLE_FEEDBACK_TOOLS="$DISABLE_FEEDBACK_TOOLS" \
@@ -334,11 +334,7 @@ elif [[ "$INSTALL_MODE" == "update_key" ]]; then
     fi
 
     # Extract existing environment variables
-    PRISME_API_KEY=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_KEY // empty')
-    API_URL=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_BASE_URL // empty')
-    DEFAULT_WORKSPACE=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_WORKSPACE_ID // empty')
     ENVIRONMENTS_JSON=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_ENVIRONMENTS // empty')
-    DEFAULT_ENV=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DEFAULT_ENVIRONMENT // empty')
     DISABLE_FEEDBACK_TOOLS=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DISABLE_FEEDBACK_TOOLS // "false"')
 
     if [[ -z "$ENVIRONMENTS_JSON" || "$ENVIRONMENTS_JSON" == "{}" ]]; then
@@ -356,13 +352,20 @@ elif [[ "$INSTALL_MODE" == "update_key" ]]; then
         exit 1
     fi
 
+    # Find the default environment (one with default: true)
+    DEFAULT_ENV=$(echo "$ENVIRONMENTS_JSON" | jq -r 'to_entries[] | select(.value.default == true) | .key' | head -1)
+    if [[ -z "$DEFAULT_ENV" ]]; then
+        DEFAULT_ENV="${ENV_NAMES[0]}"
+    fi
+
     # Show current status
     echo ""
     echo "Current configuration:"
     for env in "${ENV_NAMES[@]}"; do
         HAS_KEY=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg e "$env" '.[$e].apiKey // empty')
+        IS_DEFAULT=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg e "$env" '.[$e].default // false')
         if [[ -n "$HAS_KEY" ]]; then
-            if [[ "$env" == "$DEFAULT_ENV" ]]; then
+            if [[ "$IS_DEFAULT" == "true" ]]; then
                 echo "  $env: configured (default)"
             else
                 echo "  $env: configured"
@@ -462,16 +465,6 @@ elif [[ "$INSTALL_MODE" == "update_key" ]]; then
 
         # Update the environment's API key
         ENVIRONMENTS_JSON=$(echo "$ENVIRONMENTS_JSON" | jq --arg env "$TARGET_ENV" --arg key "$NEW_API_KEY" '.[$env].apiKey = $key')
-
-        TARGET_URL=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg env "$TARGET_ENV" '.[$env].apiUrl')
-        TARGET_KEY="$NEW_API_KEY"
-    fi
-
-    # If updating the default environment or if default wasn't set, update defaults
-    if [[ "$TARGET_ENV" == "$DEFAULT_ENV" ]] || [[ -z "$DEFAULT_ENV" ]] || [[ -z "$PRISME_API_KEY" ]]; then
-        PRISME_API_KEY="$TARGET_KEY"
-        API_URL="$TARGET_URL"
-        DEFAULT_ENV="$TARGET_ENV"
     fi
 
     # Remove existing server and re-add with updated config
@@ -479,11 +472,7 @@ elif [[ "$INSTALL_MODE" == "update_key" ]]; then
 
     claude mcp add prisme-ai-builder \
         --scope user \
-        -e PRISME_API_KEY="$PRISME_API_KEY" \
-        -e PRISME_API_BASE_URL="$API_URL" \
-        -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
         -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
-        -e PRISME_DEFAULT_ENVIRONMENT="$DEFAULT_ENV" \
         -e PRISME_DISABLE_FEEDBACK_TOOLS="$DISABLE_FEEDBACK_TOOLS" \
         -- node "$BUILD_PATH"
 
@@ -511,25 +500,17 @@ elif [[ "$INSTALL_MODE" == "update" ]]; then
         echo "  Run in fresh install mode to configure from scratch"
     else
         # Extract environment variables from existing config
-        PRISME_API_KEY=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_KEY // empty')
-        API_URL=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_BASE_URL // empty')
-        DEFAULT_WORKSPACE=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_WORKSPACE_ID // empty')
         ENVIRONMENTS_JSON=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_ENVIRONMENTS // empty')
-        DEFAULT_ENV=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DEFAULT_ENVIRONMENT // empty')
         DISABLE_FEEDBACK_TOOLS=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DISABLE_FEEDBACK_TOOLS // "false"')
 
-        if [[ -n "$PRISME_API_KEY" && -n "$API_URL" && -n "$DEFAULT_WORKSPACE" ]]; then
+        if [[ -n "$ENVIRONMENTS_JSON" && "$ENVIRONMENTS_JSON" != "{}" ]]; then
             # Remove existing server
             claude mcp remove prisme-ai-builder 2>/dev/null || true
 
             # Re-add with user scope to ensure it's globally available
             claude mcp add prisme-ai-builder \
                 --scope user \
-                -e PRISME_API_KEY="$PRISME_API_KEY" \
-                -e PRISME_API_BASE_URL="$API_URL" \
-                -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
                 -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
-                -e PRISME_DEFAULT_ENVIRONMENT="$DEFAULT_ENV" \
                 -e PRISME_DISABLE_FEEDBACK_TOOLS="$DISABLE_FEEDBACK_TOOLS" \
                 -- node "$BUILD_PATH"
 
@@ -554,11 +535,7 @@ elif [[ "$INSTALL_MODE" == "toggle_feedback" ]]; then
     fi
 
     # Extract existing environment variables
-    PRISME_API_KEY=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_KEY // empty')
-    API_URL=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_BASE_URL // empty')
-    DEFAULT_WORKSPACE=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_WORKSPACE_ID // empty')
     ENVIRONMENTS_JSON=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_ENVIRONMENTS // empty')
-    DEFAULT_ENV=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DEFAULT_ENVIRONMENT // empty')
     CURRENT_FEEDBACK_SETTING=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DISABLE_FEEDBACK_TOOLS // "false"')
 
     echo ""
@@ -588,11 +565,7 @@ elif [[ "$INSTALL_MODE" == "toggle_feedback" ]]; then
 
     claude mcp add prisme-ai-builder \
         --scope user \
-        -e PRISME_API_KEY="$PRISME_API_KEY" \
-        -e PRISME_API_BASE_URL="$API_URL" \
-        -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
         -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
-        -e PRISME_DEFAULT_ENVIRONMENT="$DEFAULT_ENV" \
         -e PRISME_DISABLE_FEEDBACK_TOOLS="$DISABLE_FEEDBACK_TOOLS" \
         -- node "$BUILD_PATH"
 
@@ -613,11 +586,7 @@ elif [[ "$INSTALL_MODE" == "delete_env" ]]; then
     fi
 
     # Extract existing environment variables
-    PRISME_API_KEY=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_KEY // empty')
-    API_URL=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_BASE_URL // empty')
-    DEFAULT_WORKSPACE=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_WORKSPACE_ID // empty')
     ENVIRONMENTS_JSON=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_ENVIRONMENTS // empty')
-    DEFAULT_ENV=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DEFAULT_ENVIRONMENT // empty')
     DISABLE_FEEDBACK_TOOLS=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DISABLE_FEEDBACK_TOOLS // "false"')
 
     if [[ -z "$ENVIRONMENTS_JSON" || "$ENVIRONMENTS_JSON" == "{}" ]]; then
@@ -640,12 +609,19 @@ elif [[ "$INSTALL_MODE" == "delete_env" ]]; then
         exit 1
     fi
 
+    # Find the default environment (one with default: true)
+    DEFAULT_ENV=$(echo "$ENVIRONMENTS_JSON" | jq -r 'to_entries[] | select(.value.default == true) | .key' | head -1)
+    if [[ -z "$DEFAULT_ENV" ]]; then
+        DEFAULT_ENV="${ENV_NAMES[0]}"
+    fi
+
     # Show current environments
     echo ""
     echo "Configured environments:"
     idx=1
     for env in "${ENV_NAMES[@]}"; do
-        if [[ "$env" == "$DEFAULT_ENV" ]]; then
+        IS_DEFAULT=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg e "$env" '.[$e].default // false')
+        if [[ "$IS_DEFAULT" == "true" ]]; then
             echo "  $idx) $env (default)"
         else
             echo "  $idx) $env"
@@ -673,17 +649,18 @@ elif [[ "$INSTALL_MODE" == "delete_env" ]]; then
         exit 0
     fi
 
+    # Check if deleting the default environment
+    IS_DELETING_DEFAULT=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg e "$TARGET_ENV" '.[$e].default // false')
+
     # Remove the environment from JSON
     ENVIRONMENTS_JSON=$(echo "$ENVIRONMENTS_JSON" | jq --arg env "$TARGET_ENV" 'del(.[$env])')
 
-    # If deleting the default environment, pick a new default
-    if [[ "$TARGET_ENV" == "$DEFAULT_ENV" ]]; then
+    # If deleting the default environment, set default: true on the first remaining environment
+    if [[ "$IS_DELETING_DEFAULT" == "true" ]]; then
         NEW_DEFAULT=$(echo "$ENVIRONMENTS_JSON" | jq -r 'keys[0]')
-        DEFAULT_ENV="$NEW_DEFAULT"
-        PRISME_API_KEY=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg env "$NEW_DEFAULT" '.[$env].apiKey // empty')
-        API_URL=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg env "$NEW_DEFAULT" '.[$env].apiUrl // empty')
+        ENVIRONMENTS_JSON=$(echo "$ENVIRONMENTS_JSON" | jq --arg env "$NEW_DEFAULT" '.[$env].default = true')
         echo ""
-        echo "  Default environment changed to: $DEFAULT_ENV"
+        echo "  Default environment changed to: $NEW_DEFAULT"
     fi
 
     # Remove existing server and re-add with updated config
@@ -691,16 +668,193 @@ elif [[ "$INSTALL_MODE" == "delete_env" ]]; then
 
     claude mcp add prisme-ai-builder \
         --scope user \
-        -e PRISME_API_KEY="$PRISME_API_KEY" \
-        -e PRISME_API_BASE_URL="$API_URL" \
-        -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
         -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
-        -e PRISME_DEFAULT_ENVIRONMENT="$DEFAULT_ENV" \
         -e PRISME_DISABLE_FEEDBACK_TOOLS="$DISABLE_FEEDBACK_TOOLS" \
         -- node "$BUILD_PATH"
 
     echo ""
     echo "  Environment '$TARGET_ENV' deleted successfully"
+elif [[ "$INSTALL_MODE" == "migrate" ]]; then
+    echo ""
+    echo "[4/5] Migrating old configuration..."
+
+    # Extract existing MCP server configuration from ~/.claude.json
+    EXISTING_CONFIG=$(jq -r '.mcpServers."prisme-ai-builder" // null' ~/.claude.json 2>/dev/null)
+
+    if [[ "$EXISTING_CONFIG" == "null" || -z "$EXISTING_CONFIG" ]]; then
+        echo "  Error: No existing prisme-ai-builder MCP server found"
+        echo "  Run in fresh install mode instead"
+        exit 1
+    fi
+
+    # Extract all existing environment variables
+    OLD_ENVIRONMENTS_JSON=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_ENVIRONMENTS // empty')
+    OLD_API_KEY=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_KEY // empty')
+    OLD_API_URL=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_BASE_URL // empty')
+    OLD_WORKSPACE_ID=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_WORKSPACE_ID // empty')
+    OLD_DEFAULT_ENV=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DEFAULT_ENVIRONMENT // empty')
+    DISABLE_FEEDBACK_TOOLS=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DISABLE_FEEDBACK_TOOLS // "false"')
+
+    echo ""
+    echo "Analyzing existing configuration..."
+
+    # Known API URLs for environments (used for migration)
+    declare -A KNOWN_API_URLS
+    KNOWN_API_URLS["sandbox"]="https://api.sandbox.prisme.ai/v2"
+    KNOWN_API_URLS["staging"]="https://api.staging.prisme.ai/v2"
+    KNOWN_API_URLS["prod"]="https://api.studio.prisme.ai/v2"
+    KNOWN_API_URLS["production"]="https://api.studio.prisme.ai/v2"
+
+    # Initialize new environments JSON
+    NEW_ENVIRONMENTS_JSON="{}"
+    MIGRATED_COUNT=0
+    FIRST_ENV=""
+
+    if [[ -n "$OLD_ENVIRONMENTS_JSON" && "$OLD_ENVIRONMENTS_JSON" != "{}" ]]; then
+        # Parse existing environments and fix them
+        ENV_NAMES=($(echo "$OLD_ENVIRONMENTS_JSON" | jq -r 'keys[]' 2>/dev/null))
+
+        if [[ ${#ENV_NAMES[@]} -gt 0 ]]; then
+            echo "  Found ${#ENV_NAMES[@]} environment(s) to migrate"
+            echo ""
+
+            for env in "${ENV_NAMES[@]}"; do
+                echo "  Processing environment: $env"
+
+                # Extract existing values
+                ENV_API_URL=$(echo "$OLD_ENVIRONMENTS_JSON" | jq -r --arg e "$env" '.[$e].apiUrl // empty')
+                ENV_API_KEY=$(echo "$OLD_ENVIRONMENTS_JSON" | jq -r --arg e "$env" '.[$e].apiKey // empty')
+                ENV_IS_DEFAULT=$(echo "$OLD_ENVIRONMENTS_JSON" | jq -r --arg e "$env" '.[$e].default // false')
+
+                # If apiUrl is missing, try to infer from environment name or ask user
+                if [[ -z "$ENV_API_URL" ]]; then
+                    echo "    Missing apiUrl for '$env'"
+
+                    # Try to use known URL
+                    if [[ -n "${KNOWN_API_URLS[$env]}" ]]; then
+                        ENV_API_URL="${KNOWN_API_URLS[$env]}"
+                        echo "    Using known URL: $ENV_API_URL"
+                    else
+                        # Ask user
+                        echo "    Enter the API URL for '$env'"
+                        echo "    Examples:"
+                        echo "      - https://api.sandbox.prisme.ai/v2"
+                        echo "      - https://api.staging.prisme.ai/v2"
+                        echo "      - https://api.studio.prisme.ai/v2 (prod)"
+                        read -p "    API URL: " ENV_API_URL
+
+                        if [[ -z "$ENV_API_URL" ]]; then
+                            echo "    Skipping '$env' (no URL provided)"
+                            continue
+                        fi
+                    fi
+                fi
+
+                # If apiKey is missing, try to use legacy root key or ask user
+                if [[ -z "$ENV_API_KEY" ]]; then
+                    echo "    Missing apiKey for '$env'"
+
+                    # If this is the default env and we have a legacy key, use it
+                    if [[ "$env" == "$OLD_DEFAULT_ENV" && -n "$OLD_API_KEY" ]]; then
+                        ENV_API_KEY="$OLD_API_KEY"
+                        echo "    Using legacy API key from root config"
+                    else
+                        echo "    Enter your JWT token for '$env'"
+                        echo "    (You can find it in your browser: Inspect > Application > Cookies > access-token)"
+                        read -sp "    JWT token (or press Enter to skip): " ENV_API_KEY
+                        echo ""
+
+                        if [[ -z "$ENV_API_KEY" ]]; then
+                            echo "    Warning: No API key for '$env' - you'll need to add it later"
+                        fi
+                    fi
+                fi
+
+                # Build environment object
+                if [[ $MIGRATED_COUNT -eq 0 ]]; then
+                    # First environment gets default: true
+                    if [[ -n "$ENV_API_KEY" ]]; then
+                        ENV_OBJ=$(jq -n \
+                            --arg apiUrl "$ENV_API_URL" \
+                            --arg apiKey "$ENV_API_KEY" \
+                            '{"apiUrl": $apiUrl, "apiKey": $apiKey, "default": true}')
+                    else
+                        ENV_OBJ=$(jq -n \
+                            --arg apiUrl "$ENV_API_URL" \
+                            '{"apiUrl": $apiUrl, "default": true}')
+                    fi
+                    FIRST_ENV="$env"
+                else
+                    if [[ -n "$ENV_API_KEY" ]]; then
+                        ENV_OBJ=$(jq -n \
+                            --arg apiUrl "$ENV_API_URL" \
+                            --arg apiKey "$ENV_API_KEY" \
+                            '{"apiUrl": $apiUrl, "apiKey": $apiKey}')
+                    else
+                        ENV_OBJ=$(jq -n \
+                            --arg apiUrl "$ENV_API_URL" \
+                            '{"apiUrl": $apiUrl}')
+                    fi
+                fi
+
+                NEW_ENVIRONMENTS_JSON=$(echo "$NEW_ENVIRONMENTS_JSON" | jq --arg name "$env" --argjson env "$ENV_OBJ" '.[$name] = $env')
+                ((MIGRATED_COUNT++))
+                echo "    Migrated '$env' successfully"
+            done
+        fi
+    fi
+
+    # If no environments were migrated but we have legacy vars, create one from them
+    if [[ $MIGRATED_COUNT -eq 0 && -n "$OLD_API_KEY" && -n "$OLD_API_URL" ]]; then
+        echo ""
+        echo "  No environments found, but legacy configuration detected"
+        echo "  Creating environment from legacy config..."
+
+        ENV_NAME="${OLD_DEFAULT_ENV:-default}"
+        ENV_OBJ=$(jq -n \
+            --arg apiUrl "$OLD_API_URL" \
+            --arg apiKey "$OLD_API_KEY" \
+            '{"apiUrl": $apiUrl, "apiKey": $apiKey, "default": true}')
+        NEW_ENVIRONMENTS_JSON=$(echo "$NEW_ENVIRONMENTS_JSON" | jq --arg name "$ENV_NAME" --argjson env "$ENV_OBJ" '.[$name] = $env')
+        FIRST_ENV="$ENV_NAME"
+        ((MIGRATED_COUNT++))
+        echo "  Created environment '$ENV_NAME'"
+    fi
+
+    if [[ $MIGRATED_COUNT -eq 0 ]]; then
+        echo ""
+        echo "  Error: No valid configuration found to migrate"
+        echo "  Run in fresh install mode instead"
+        exit 1
+    fi
+
+    echo ""
+    echo "Migration summary:"
+    echo "  Migrated $MIGRATED_COUNT environment(s)"
+    echo "  Default environment: $FIRST_ENV"
+    echo ""
+    echo "New configuration:"
+    echo "$NEW_ENVIRONMENTS_JSON" | jq '.'
+    echo ""
+
+    read -p "Apply this configuration? [y/n]: " CONFIRM
+    if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+        echo "Migration cancelled"
+        exit 0
+    fi
+
+    # Remove existing server and re-add with migrated config
+    claude mcp remove prisme-ai-builder 2>/dev/null || true
+
+    claude mcp add prisme-ai-builder \
+        --scope user \
+        -e PRISME_ENVIRONMENTS="$NEW_ENVIRONMENTS_JSON" \
+        -e PRISME_DISABLE_FEEDBACK_TOOLS="$DISABLE_FEEDBACK_TOOLS" \
+        -- node "$BUILD_PATH"
+
+    echo ""
+    echo "  Migration completed successfully"
+    echo "  Legacy variables (PRISME_API_KEY, PRISME_WORKSPACE_ID, etc.) have been removed"
 fi
 
 # 5. Install agent
