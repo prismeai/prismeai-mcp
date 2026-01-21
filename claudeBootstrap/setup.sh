@@ -42,8 +42,9 @@ echo "  1) Fresh install - Configure API keys and install everything"
 echo "  2) Update - Rebuild and update agent configuration only"
 echo "  3) Update API key - Add or update a Prisme.ai environment API key"
 echo "  4) Toggle feedback tools - Enable/disable bug reporting tools"
+echo "  5) Delete environment - Remove a configured environment"
 echo ""
-read -p "Select mode [1/2/3/4]: " MODE_CHOICE
+read -p "Select mode [1/2/3/4/5]: " MODE_CHOICE
 
 case "$MODE_CHOICE" in
     1)
@@ -61,6 +62,10 @@ case "$MODE_CHOICE" in
     4)
         INSTALL_MODE="toggle_feedback"
         echo "Mode: Toggle feedback tools"
+        ;;
+    5)
+        INSTALL_MODE="delete_env"
+        echo "Mode: Delete environment"
         ;;
     *)
         echo "Invalid choice. Defaulting to fresh install."
@@ -486,7 +491,7 @@ elif [[ "$INSTALL_MODE" == "update_key" ]]; then
     echo "  Environment '$TARGET_ENV' updated successfully"
     echo "  Default environment: $DEFAULT_ENV"
     echo "  Feedback tools: $([ "$DISABLE_FEEDBACK_TOOLS" == "true" ] && echo "disabled" || echo "enabled")"
-else
+elif [[ "$INSTALL_MODE" == "update" ]]; then
     echo ""
     echo "[4/5] Updating Prisme MCP server configuration (update mode)"
 
@@ -594,6 +599,108 @@ elif [[ "$INSTALL_MODE" == "toggle_feedback" ]]; then
     echo ""
     echo "  Feedback tools setting updated"
     echo "  Feedback tools: $([ "$DISABLE_FEEDBACK_TOOLS" == "true" ] && echo "disabled" || echo "enabled")"
+elif [[ "$INSTALL_MODE" == "delete_env" ]]; then
+    echo ""
+    echo "[4/5] Deleting a Prisme.ai environment..."
+
+    # Extract existing MCP server configuration from ~/.claude.json
+    EXISTING_CONFIG=$(jq -r '.mcpServers."prisme-ai-builder" // null' ~/.claude.json 2>/dev/null)
+
+    if [[ "$EXISTING_CONFIG" == "null" || -z "$EXISTING_CONFIG" ]]; then
+        echo "  Error: No existing prisme-ai-builder MCP server found"
+        echo "  Run in fresh install mode first"
+        exit 1
+    fi
+
+    # Extract existing environment variables
+    PRISME_API_KEY=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_KEY // empty')
+    API_URL=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_API_BASE_URL // empty')
+    DEFAULT_WORKSPACE=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_WORKSPACE_ID // empty')
+    ENVIRONMENTS_JSON=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_ENVIRONMENTS // empty')
+    DEFAULT_ENV=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DEFAULT_ENVIRONMENT // empty')
+    DISABLE_FEEDBACK_TOOLS=$(echo "$EXISTING_CONFIG" | jq -r '.env.PRISME_DISABLE_FEEDBACK_TOOLS // "false"')
+
+    if [[ -z "$ENVIRONMENTS_JSON" || "$ENVIRONMENTS_JSON" == "{}" ]]; then
+        echo "  Error: No environments configuration found"
+        echo "  Nothing to delete"
+        exit 1
+    fi
+
+    # Get list of configured environments
+    ENV_NAMES=($(echo "$ENVIRONMENTS_JSON" | jq -r 'keys[]'))
+
+    if [[ ${#ENV_NAMES[@]} -eq 0 ]]; then
+        echo "  Error: No environments found in configuration"
+        exit 1
+    fi
+
+    if [[ ${#ENV_NAMES[@]} -eq 1 ]]; then
+        echo "  Error: Cannot delete the only configured environment"
+        echo "  You must have at least one environment configured"
+        exit 1
+    fi
+
+    # Show current environments
+    echo ""
+    echo "Configured environments:"
+    idx=1
+    for env in "${ENV_NAMES[@]}"; do
+        if [[ "$env" == "$DEFAULT_ENV" ]]; then
+            echo "  $idx) $env (default)"
+        else
+            echo "  $idx) $env"
+        fi
+        ((idx++))
+    done
+    echo ""
+
+    # Ask which environment to delete
+    read -p "Select environment to delete [1-${#ENV_NAMES[@]}]: " DELETE_CHOICE
+
+    # Validate choice
+    if ! [[ "$DELETE_CHOICE" =~ ^[0-9]+$ ]] || [[ "$DELETE_CHOICE" -lt 1 ]] || [[ "$DELETE_CHOICE" -gt ${#ENV_NAMES[@]} ]]; then
+        echo "Invalid choice"
+        exit 1
+    fi
+
+    TARGET_ENV="${ENV_NAMES[$((DELETE_CHOICE-1))]}"
+
+    # Confirm deletion
+    echo ""
+    read -p "Are you sure you want to delete '$TARGET_ENV'? [y/n]: " CONFIRM
+    if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+        echo "Cancelled"
+        exit 0
+    fi
+
+    # Remove the environment from JSON
+    ENVIRONMENTS_JSON=$(echo "$ENVIRONMENTS_JSON" | jq --arg env "$TARGET_ENV" 'del(.[$env])')
+
+    # If deleting the default environment, pick a new default
+    if [[ "$TARGET_ENV" == "$DEFAULT_ENV" ]]; then
+        NEW_DEFAULT=$(echo "$ENVIRONMENTS_JSON" | jq -r 'keys[0]')
+        DEFAULT_ENV="$NEW_DEFAULT"
+        PRISME_API_KEY=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg env "$NEW_DEFAULT" '.[$env].apiKey // empty')
+        API_URL=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg env "$NEW_DEFAULT" '.[$env].apiUrl // empty')
+        echo ""
+        echo "  Default environment changed to: $DEFAULT_ENV"
+    fi
+
+    # Remove existing server and re-add with updated config
+    claude mcp remove prisme-ai-builder 2>/dev/null || true
+
+    claude mcp add prisme-ai-builder \
+        --scope user \
+        -e PRISME_API_KEY="$PRISME_API_KEY" \
+        -e PRISME_API_BASE_URL="$API_URL" \
+        -e PRISME_WORKSPACE_ID="$DEFAULT_WORKSPACE" \
+        -e PRISME_ENVIRONMENTS="$ENVIRONMENTS_JSON" \
+        -e PRISME_DEFAULT_ENVIRONMENT="$DEFAULT_ENV" \
+        -e PRISME_DISABLE_FEEDBACK_TOOLS="$DISABLE_FEEDBACK_TOOLS" \
+        -- node "$BUILD_PATH"
+
+    echo ""
+    echo "  Environment '$TARGET_ENV' deleted successfully"
 fi
 
 # 5. Install agent
@@ -640,6 +747,19 @@ elif [[ "$INSTALL_MODE" == "toggle_feedback" ]]; then
         echo "Claude can now send bug reports and feedback to Prisme.ai servers."
     fi
     echo ""
+elif [[ "$INSTALL_MODE" == "delete_env" ]]; then
+    echo "Environment deleted successfully!"
+    echo ""
+    echo "Deleted environment: $TARGET_ENV"
+    echo "Default environment: $DEFAULT_ENV"
+    echo ""
+    # Show remaining environments
+    REMAINING_ENVS=($(echo "$ENVIRONMENTS_JSON" | jq -r 'keys[]'))
+    echo "Remaining environments:"
+    for env in "${REMAINING_ENVS[@]}"; do
+        echo "  - $env"
+    done
+    echo ""
 else
     echo "Update completed successfully!"
     echo "  - MCP server rebuilt"
@@ -647,22 +767,6 @@ else
     echo "  - API keys preserved"
     echo ""
 fi
-
-# What was installed section
-echo -e "${YELLOW}=== What was installed ===${NC}"
-echo ""
-echo -e "${GREEN}1. MCP Server${NC} ${DIM}(prisme-ai-builder)${NC}"
-echo "   Provides Prisme.ai tools to Claude Code"
-echo -e "   ${DIM}Location: $BUILD_PATH${NC}"
-echo ""
-echo -e "${GREEN}2. Prisme Assistant Agent${NC}"
-echo "   Specialized agent for Prisme.ai development"
-echo -e "   ${DIM}Location: ~/.claude/agents/prisme-assistant.md${NC}"
-echo ""
-echo -e "${GREEN}3. Environment Configuration${NC}"
-echo "   API keys and endpoints stored in Claude Code settings"
-echo -e "   ${DIM}Location: ~/.claude.json${NC}"
-echo ""
 
 echo "Usage:"
 echo "  claude                          # Start Claude Code"
@@ -678,3 +782,7 @@ echo ""
 echo -e "  ${CYAN}cp -r \"$SCRIPT_DIR/.claude\" /path/to/your/project/.claude${NC}"
 echo ""
 echo "This folder contains CLAUDE.md with Prisme.ai-specific instructions for Claude Code."
+echo ""
+echo -e "${YELLOW}=== Getting Started ===${NC}"
+echo ""
+echo -e "Run ${CYAN}/guide${NC} in Claude Code to start the automated Prisme.ai development flow."
