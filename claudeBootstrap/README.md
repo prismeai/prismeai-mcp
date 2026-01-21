@@ -8,6 +8,18 @@
 
 Requires: Node.js 18+, Claude Code CLI (`npm i -g @anthropic-ai/claude-code`)
 
+## Project Setup
+
+Copy the `.claude` folder to the root of your project where Claude Code will be executed:
+
+```bash
+cp -r ./claudeBootstrap/.claude /path/to/your/project/
+```
+
+This folder contains Prisme.ai-specific instructions, agents, and skills for Claude Code.
+
+**Getting started**: Once in your project, run `/guide` to learn the full Prisme.ai development workflow.
+
 ## Manual Setup
 
 If you prefer not to run the script:
@@ -56,3 +68,11 @@ Use `workspaceName` parameter in tools to target specific workspaces:
 claude mcp list                 # Check server is registered
 claude mcp remove prisme-ai-builder  # Remove and re-add if issues
 ```
+
+## Changelog
+
+### 2026-01-21
+- Renamed `dot_claude` folder to `.claude`
+- Added `/guide` skill for onboarding new users
+- Added skills: `/design`, `/gitlab-ticket`, `/workspace-edit`
+- Added agents: `code-review`, `prisme-assistant`, `ticket-validator`
