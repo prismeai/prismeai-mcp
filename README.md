@@ -16,6 +16,7 @@ A Model Context Protocol (MCP) server for interacting with the Prisme.ai AI Buil
 git clone https://github.com/prisme-ai/mcp-prisme.ai.git
 cd mcp-prisme.ai
 ./claudeBootstrap/setup.sh
+cp -r ./claudeBootstrap/.claude /path/to/your/project/
 ```
 
 Then start Claude Code:
