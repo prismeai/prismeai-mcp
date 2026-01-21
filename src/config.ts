@@ -9,6 +9,8 @@ export const PRISME_WORKSPACE_ID = process.env.PRISME_WORKSPACE_ID;
 export const PRISME_API_BASE_URL =
   process.env.PRISME_API_BASE_URL || "https://api.staging.prisme.ai/v2";
 export const PRISME_FORCE_READONLY = process.env.PRISME_FORCE_READONLY === "true";
+// Disable feedback/reporting tools (these communicate with Prisme.ai servers)
+export const PRISME_DISABLE_FEEDBACK_TOOLS = process.env.PRISME_DISABLE_FEEDBACK_TOOLS === "true";
 const PRISME_WORKSPACES = process.env.PRISME_WORKSPACES;
 const PRISME_ENVIRONMENTS = process.env.PRISME_ENVIRONMENTS;
 const PRISME_DEFAULT_ENVIRONMENT =

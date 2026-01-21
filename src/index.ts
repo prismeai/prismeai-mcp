@@ -11,6 +11,7 @@ import {
   PRISME_API_KEY,
   PRISME_WORKSPACE_ID,
   PRISME_API_BASE_URL,
+  PRISME_DISABLE_FEEDBACK_TOOLS,
   environmentsConfig,
 } from "./config.js";
 import { tools } from "./tools/definitions.js";
@@ -37,14 +38,38 @@ const server = new Server(
   }
 );
 
+// Feedback-related tool names (these communicate with Prisme.ai servers)
+const FEEDBACK_TOOL_NAMES = [
+  "report_issue_or_feedback",
+  "update_report",
+  "get_reports",
+];
+
 // Register tool list handler
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools };
+  // Filter out feedback tools if disabled
+  const availableTools = PRISME_DISABLE_FEEDBACK_TOOLS
+    ? tools.filter((tool) => !FEEDBACK_TOOL_NAMES.includes(tool.name))
+    : tools;
+  return { tools: availableTools };
 });
 
 // Register tool call handler
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+
+  // Block feedback tools if disabled
+  if (PRISME_DISABLE_FEEDBACK_TOOLS && FEEDBACK_TOOL_NAMES.includes(name)) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Tool "${name}" is disabled. Feedback reporting tools are disabled via PRISME_DISABLE_FEEDBACK_TOOLS setting.`,
+        },
+      ],
+      isError: true,
+    };
+  }
 
   try {
     return await handleToolCall(name, args, apiClient);
