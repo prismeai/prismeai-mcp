@@ -1,5 +1,5 @@
 ---
-name: workspace-edit
+name: 04-workspace-edit
 description: Use this skill when editing a Prisme.ai workspace (automations, pages, config). Guides through documentation reading, local editing, linting, and code review.
 argument-hint: "[workspace-name] [description of changes]"
 allowed-tools: Read, Grep, Glob, Edit, Write, Task, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__lint_doc, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__search_events

@@ -1,6 +1,6 @@
 ---
-name: gitlab-ticket
-description: Create a GitLab-ready ticket with implementation steps and test checklist. Use after /design or when you have clear requirements for a feature/bugfix.
+name: 02-gitlab-ticket
+description: Create a GitLab-ready ticket with implementation steps and test checklist. Use after /01-design or when you have clear requirements for a feature/bugfix.
 argument-hint: "[feature description or spec file path]"
 allowed-tools: Read, Grep, Glob, AskUserQuestion, Write
 ---

@@ -23,19 +23,23 @@ This guide explains the full development workflow for Prisme.ai workspaces. Foll
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │   1. DESIGN          ──▶   Gather context, create spec          │
-│      /design                                                    │
+│      /01-design                                                 │
 │           │                                                     │
 │           ▼                                                     │
 │   2. TICKET          ──▶   Create GitLab ticket with tests      │
-│      /gitlab-ticket                                             │
+│      /02-gitlab-ticket                                          │
 │           │                                                     │
 │           ▼                                                     │
 │   3. REVIEW          ──▶   Human reviews conception             │
 │      (manual)              Approve / Request changes            │
 │           │                                                     │
 │           ▼                                                     │
+│  3b. SPLIT (optional)──▶   Split into parallel sub-tickets      │
+│      /03-split-tickets     For complex features only            │
+│           │                                                     │
+│           ▼                                                     │
 │   4. IMPLEMENT       ──▶   Edit workspace, run validations      │
-│      /workspace-edit                                            │
+│      /04-workspace-edit    (run per sub-ticket if split)        │
 │           │                                                     │
 │           ▼                                                     │
 │   5. DONE            ──▶   Push changes, close ticket           │
@@ -45,7 +49,7 @@ This guide explains the full development workflow for Prisme.ai workspaces. Foll
 
 ---
 
-## Phase 1: Design (`/design`)
+## Phase 1: Design (`/01-design`)
 
 **Purpose**: Understand requirements, explore codebase, clarify with user.
 
@@ -61,12 +65,12 @@ This guide explains the full development workflow for Prisme.ai workspaces. Foll
 
 **Command**:
 ```
-/design [workspace-name] [feature description]
+/01-design [workspace-name] [feature description]
 ```
 
 **Example**:
 ```
-/design ai-governance add bulk user import with CSV upload
+/01-design ai-governance add bulk user import with CSV upload
 ```
 
 **Output**: Specification document with requirements, technical design, events, dependencies.
@@ -75,7 +79,7 @@ This guide explains the full development workflow for Prisme.ai workspaces. Foll
 
 ---
 
-## Phase 2: GitLab Ticket (`/gitlab-ticket`)
+## Phase 2: GitLab Ticket (`/02-gitlab-ticket`)
 
 **Purpose**: Create a trackable, testable ticket for the work.
 
@@ -91,12 +95,12 @@ This guide explains the full development workflow for Prisme.ai workspaces. Foll
 
 **Command**:
 ```
-/gitlab-ticket [feature description or spec file path]
+/02-gitlab-ticket [feature description or spec file path]
 ```
 
 **Example**:
 ```
-/gitlab-ticket specs/bulk-user-import.md
+/02-gitlab-ticket specs/bulk-user-import.md
 ```
 
 **Output**: GitLab ticket markdown with:
@@ -133,14 +137,55 @@ This guide explains the full development workflow for Prisme.ai workspaces. Foll
 |---------|--------|
 | **Approved** | Proceed to Phase 4 |
 | **Minor changes** | Update ticket, proceed |
-| **Major concerns** | Return to Phase 1 (/design) |
+| **Major concerns** | Return to Phase 1 (/01-design) |
 | **Rejected** | Archive, document why |
 
 **Exit criteria**: Explicit approval from reviewer to proceed.
 
 ---
 
-## Phase 4: Implementation (`/workspace-edit`)
+## Phase 3b: Split Tickets (`/03-split-tickets`) - Optional
+
+**Purpose**: Break a large ticket into parallelizable sub-tickets.
+
+**When to use**: For complex features that would benefit from parallel work streams.
+
+**What it does**:
+1. Reads the main ticket (from /01-design or /02-gitlab-ticket)
+2. Analyzes work streams (automations, pages, config, etc.)
+3. Identifies dependencies and parallelization opportunities
+4. Creates numbered sub-tickets (01-01, 01-02, 02-01, etc.)
+5. Generates README.md with implementation order
+
+**Command**:
+```
+/03-split-tickets [path to main ticket or feature folder]
+```
+
+**Example**:
+```
+/03-split-tickets ./tickets/bulk-user-import/
+```
+
+**Output**:
+- Numbered sub-ticket files (01-01-*.md, 02-01-*.md, etc.)
+- README.md with dependency graph and implementation order
+
+**Naming convention**:
+- `01-01-*.md` + `01-02-*.md` = parallel (same first number)
+- `02-*.md` = sequential (depends on 01-*)
+- `03-*.md` = sequential (depends on 02-*)
+
+**Exit criteria**: Sub-tickets created and reviewed, ready for parallel implementation.
+
+**When to skip**:
+- Simple features (single automation or page change)
+- Bug fixes
+- Configuration changes
+
+---
+
+## Phase 4: Implementation (`/04-workspace-edit`)
 
 **Purpose**: Make the actual code changes.
 
@@ -157,12 +202,12 @@ This guide explains the full development workflow for Prisme.ai workspaces. Foll
 
 **Command**:
 ```
-/workspace-edit [workspace-name] [what to implement]
+/04-workspace-edit [workspace-name] [what to implement]
 ```
 
 **Example**:
 ```
-/workspace-edit ai-governance implement bulk user import per ticket #123
+/04-workspace-edit ai-governance implement bulk user import per ticket #123
 ```
 
 **Process**:
@@ -213,9 +258,10 @@ mcp__prisme-ai-builder__push_workspace(
 
 | Situation | Skill |
 |-----------|-------|
-| "I have a vague idea for a feature" | `/design` |
-| "I have clear requirements, need a ticket" | `/gitlab-ticket` |
-| "I have an approved ticket, ready to code" | `/workspace-edit` |
+| "I have a vague idea for a feature" | `/01-design` |
+| "I have clear requirements, need a ticket" | `/02-gitlab-ticket` |
+| "I have a complex ticket, need to parallelize" | `/03-split-tickets` |
+| "I have an approved ticket, ready to code" | `/04-workspace-edit` |
 | "I don't know where to start" | `/guide` (this) |
 | "I need to understand the workflow" | `/guide` (this) |
 
@@ -225,27 +271,49 @@ mcp__prisme-ai-builder__push_workspace(
 
 ### New Feature (Full Process)
 ```
-/design ai-knowledge add document versioning
+/01-design ai-knowledge add document versioning
   ↓ (spec created)
-/gitlab-ticket specs/document-versioning.md
+/02-gitlab-ticket specs/document-versioning.md
   ↓ (ticket created, reviewed)
-/workspace-edit ai-knowledge implement document versioning
+/04-workspace-edit ai-knowledge implement document versioning
   ↓ (code complete)
+push → test → close ticket
+```
+
+### Complex Feature (With Parallelization)
+```
+/01-design ai-governance add bulk user import with CSV
+  ↓ (spec created)
+/02-gitlab-ticket specs/bulk-user-import.md
+  ↓ (ticket created, reviewed)
+/03-split-tickets ./tickets/bulk-user-import/
+  ↓ (sub-tickets created)
+# Phase 1 - parallel:
+/04-workspace-edit ai-governance implement 01-01-csv-parser.md
+/04-workspace-edit ai-governance implement 01-02-user-types.md
+  ↓ (Phase 1 complete)
+# Phase 2 - parallel:
+/04-workspace-edit ai-governance implement 02-01-import-automation.md
+/04-workspace-edit ai-governance implement 02-02-import-page.md
+  ↓ (Phase 2 complete)
+# Phase 3:
+/04-workspace-edit ai-governance implement 03-integration.md
+  ↓ (all phases complete)
 push → test → close ticket
 ```
 
 ### Bug Fix (Abbreviated)
 ```
-/gitlab-ticket fix pagination bug in user list
+/02-gitlab-ticket fix pagination bug in user list
   ↓ (ticket created)
-/workspace-edit ai-governance fix pagination offset calculation
+/04-workspace-edit ai-governance fix pagination offset calculation
   ↓ (fix applied)
 push → verify → close ticket
 ```
 
 ### Quick Change (Minimal)
 ```
-/workspace-edit ai-store update agent card styling
+/04-workspace-edit ai-store update agent card styling
   ↓ (change made, validated)
 push → done
 ```

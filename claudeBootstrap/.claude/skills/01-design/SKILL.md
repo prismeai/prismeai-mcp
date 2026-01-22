@@ -1,5 +1,5 @@
 ---
-name: design
+name: 01-design
 description: Use this skill to create detailed specifications for a Prisme.ai feature or change. Gathers context from documentation and codebase, then clarifies requirements with the user.
 argument-hint: "[workspace-name] [feature description]"
 allowed-tools: Read, Write, Grep, Glob, Task, AskUserQuestion, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__get_app, mcp__prisme-ai-builder__list_apps

@@ -99,6 +99,23 @@ Key automations: `query`, `genericQuery`, `buildPrompt`, `LLMCompletion`, `callL
 - Conversations stored via `Conversations Service App`
 - SSE streaming for real-time responses
 
+### Agent URLs
+
+URLs to access agents in the Prisme.ai interface follow this pattern:
+
+```
+https://{environment}.prisme.ai/fr/product/ai-knowledge/documents?id={projectId}
+```
+
+| Environment | Base URL |
+|-------------|----------|
+| sandbox | `https://sandbox.prisme.ai` |
+| prod | `https://prisme.ai` |
+
+**Finding the project ID**: The `id` parameter is found in the workspace's `imports/Knowledge Client.yml` file.
+
+**Usage**: When working on a workspace with a Knowledge Client, provide the full clickable URL to the user so they can easily test the agent in their browser.
+
 ## Event Schema Quick Reference
 
 | Field | Description |
