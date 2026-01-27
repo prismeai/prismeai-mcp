@@ -464,7 +464,7 @@ config:
 - Collection.insert:
     data:
       name: "{{payload.name}}"
-      createdAt: '{% now() %}'
+      createdAt: '{% {{run.date}} %}'
     output: result
 
 # InsertMany
@@ -524,7 +524,6 @@ config:
 - Collection.deleteMany:
     query:
       active: false
-      lastLogin: { $lt: "{% dateAdd('now', -90, 'days') %}" }
 # Empty query raises error. Use overrideSecurity: true for all.
 
 # Upsert
@@ -536,7 +535,7 @@ config:
       onConflictFields:
         - name
       onInsertValues:
-        createdAt: '{% now() %}'
+        createdAt: '{% {{run.date}} %}'
 
 # Distinct
 - Collection.distinct:
@@ -662,14 +661,12 @@ jsonmatch({{object}}, {{condition}})
 
 #### Date
 ```yaml
-now()
+{{run.date}} # actual date in iso format
 date("2022-04-13T08:00:05.493Z").hour  # 8
 date({{mydate}}).minute / .second / .date / .month / .year / .day / .ts / .iso
 date("2023-03-31", "DD/MM/YYYY")
 date("2023-03-31", "LT", "fr")
 date("2023-03-31", "LT", "fr", "America/New_York")
-dateAdd('now', -90, 'days')
-dateAdd("2023-01-15", 7, "days")
 ```
 
 #### Math

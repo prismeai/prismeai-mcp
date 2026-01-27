@@ -316,7 +316,6 @@ value: '{% {{counter}} + 1 %}'
 # Functions
 date({{mydate}}).year
 now()
-dateAdd('now', -7, 'days')
 lower({{str}})
 split('a,b', ',')
 rand(1, 100)

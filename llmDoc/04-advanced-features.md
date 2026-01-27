@@ -559,7 +559,7 @@ config:
 - Collection.insert:
     data:
       name: "{{name}}"
-      createdAt: '{% now() %}'
+      createdAt: '{% {{run.date}} %}'
     output: result
 
 # Find
@@ -596,13 +596,12 @@ config:
       onConflictFields:
         - uniqueKey
       onInsertValues:
-        createdAt: '{% now() %}'
+        createdAt: '{% {{run.date}} %}'
 
 # Delete
 - Collection.deleteMany:
     query:
       active: false
-      lastLogin: { $lt: '{% dateAdd("now", -90, "days") %}' }
 # Empty query = error. Use overrideSecurity: true for all.
 
 # Aggregate
