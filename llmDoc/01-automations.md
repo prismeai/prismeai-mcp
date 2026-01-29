@@ -488,8 +488,8 @@ config:
         - createdAt
     output: results
 
-# FindOne
-- Collection.findOne:
+# Find
+- Collection.find:
     query:
       _id: "{{documentId}}"
     output: document

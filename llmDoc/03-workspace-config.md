@@ -225,7 +225,7 @@ From automations, access imported app configuration:
     data:
       conversationId: "{{conversationId}}"
       content: "{{content}}"
-      createdAt: '{% now() %}'
+      createdAt: '{% {{run.date}} %}'
 ```
 
 ### Getting App Config Schema
