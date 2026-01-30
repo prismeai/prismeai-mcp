@@ -633,6 +633,11 @@ export async function handleToolCall(
         }
       });
 
+      // Limit file list to avoid token limits on large workspaces
+      const maxFilesToShow = 20;
+      const truncatedFiles = extractedFiles.slice(0, maxFilesToShow);
+      const hasMore = extractedFiles.length > maxFilesToShow;
+
       return {
         content: [
           {
@@ -642,7 +647,8 @@ export async function handleToolCall(
                 success: true,
                 path: resolvedPath,
                 filesExtracted: extractedFiles.length,
-                files: extractedFiles,
+                files: truncatedFiles,
+                ...(hasMore && { note: `Showing first ${maxFilesToShow} of ${extractedFiles.length} files` }),
               },
               null,
               2
@@ -748,21 +754,32 @@ export async function handleToolCall(
         resolved.environment
       );
 
+      // Check for import errors
+      const hasErrors = importResult?.errors && importResult.errors.length > 0;
+
+      // Return only a summary to avoid token limits (full responses contain entire workspace config)
+      const summary = {
+        success: !hasErrors,
+        backup: {
+          versionName: backupResult?.name || message,
+          createdAt: backupResult?.createdAt,
+        },
+        import: {
+          workspaceId: importResult?.id || resolved.workspaceId,
+          workspaceName: importResult?.name,
+          imported: importResult?.imported,
+          ...(hasErrors && { errors: importResult.errors }),
+        },
+      };
+
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(
-              {
-                success: true,
-                backup: backupResult,
-                import: importResult,
-              },
-              null,
-              2
-            ),
+            text: JSON.stringify(summary, null, 2),
           },
         ],
+        ...(hasErrors && { isError: true }),
       };
     }
 
