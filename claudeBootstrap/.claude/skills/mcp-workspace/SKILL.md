@@ -254,24 +254,98 @@ Follow the MCP recipe Section 8 pattern for each tool:
 
 ### 3.8 automations/test-{tool}.yml (one per tool)
 
-Follow the MCP recipe Section 11 pattern:
+Tests are **playground automations** (not endpoints). Configuration is done once via `test-configure{Service}`, and other tests assume credentials are already set.
 
-**For standard tools:**
-1. Inject credentials directly into `user.{service}.credentials` scope
-2. Call the tool with `outputFormat: both`
+**For configure{Service} test:**
+1. Declare auth arguments as flat `arguments:` with `oneOf` for deployment variants
+2. Call `configure{Service}` directly with credentials as arguments
 3. Return raw result
 
-**For configure{Service}:**
-1. Call `configure{Service}` directly with credentials as arguments
-2. Return raw result
+**Example test-configure{Service}.yml:**
+```yaml
+slug: test-configure{Service}
+name: /04_Tests/test-configure{Service}
+description: Playground test for configure{Service} tool
+when: {}
+arguments:
+  baseUrl:
+    type: string
+    description: '{Service} base URL'
+  type:
+    description: Deployment type
+    oneOf:
+      - value: cloud
+        title: Cloud
+        properties:
+          email:
+            type: string
+            description: Email (Cloud only)
+          apiToken:
+            type: string
+            ui:widget: textarea
+            description: API token (Cloud only)
+      - value: datacenter
+        title: Datacenter
+        properties:
+          personalAccessToken:
+            type: string
+            ui:widget: textarea
+            description: Personal Access Token (DC only)
+do:
+  - configure{Service}:
+      body:
+        arguments:
+          baseUrl: '{{baseUrl}}'
+          type: '{{type}}'
+          email: '{{email}}'
+          apiToken: '{{apiToken}}'
+          personalAccessToken: '{{personalAccessToken}}'
+          outputFormat: both
+      output: result
+  - set:
+      name: output
+      value: '{{result}}'
+output: '{{output}}'
+```
+
+**For standard tool tests (all other tools):**
+1. Declare only the tool-specific arguments as flat `arguments:`
+2. Call the tool directly — **do NOT inject credentials** (user must run `test-configure{Service}` first)
+3. Return raw result
+
+**Example test-{tool}.yml:**
+```yaml
+slug: test-{toolName}
+name: /04_Tests/test-{toolName}
+description: Playground test for {toolName} tool
+when: {}
+arguments:
+  someParam:
+    type: string
+    description: Description of param
+do:
+  - {toolName}:
+      body:
+        arguments:
+          someParam: '{{someParam}}'
+          outputFormat: both
+      output: result
+  - set:
+      name: output
+      value: '{{result}}'
+output: '{{output}}'
+```
 
 **Key rules:**
 - `slug: test-{toolName}`
 - `name: /04_Tests/test-{toolName}`
-- `when: endpoint: true`
-- Credentials are flat in `body` (not nested in `arguments`)
+- `when: {}` (playground automation, NOT endpoint)
+- Arguments are **flat** at top level (not nested under `body`), referenced as `{{paramName}}` (not `{{body.paramName}}`)
+- **No credential injection** in standard tool tests — configuration is done once via `test-configure{Service}`
 - Always use `outputFormat: both`
 - No `validateArguments` needed
+- Use `oneOf` in configure test for deployment variant conditional fields
+- Use `ui:widget: textarea` for secret/token fields
 
 ---
 
