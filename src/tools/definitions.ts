@@ -366,7 +366,7 @@ export const tools: Tool[] = [
   {
     name: "list_app_instances",
     description:
-      "List all installed app instances in a Prisme.ai workspace",
+      "List all installed app instances in a Prisme.ai workspace. Returns summary info only (slug, appSlug, appName, disabled). Use get_app_instance for full details.",
     inputSchema: {
       type: "object",
       properties: {

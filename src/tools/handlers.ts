@@ -998,7 +998,21 @@ export async function handleToolCall(
         resolved.apiUrl,
         resolved.environment
       );
-      return truncateJsonOutput(result, "list_app_instances");
+      // Return only summary info - use get_app_instance for full details
+      const summary = result.map((instance) => ({
+        slug: instance.slug,
+        appSlug: instance.appSlug,
+        appName: instance.appName,
+        disabled: instance.disabled,
+      }));
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(summary, null, 2),
+          },
+        ],
+      };
     }
 
     case "get_app_instance": {
