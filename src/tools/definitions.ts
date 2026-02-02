@@ -308,6 +308,272 @@ export const tools: Tool[] = [
       readOnlyHint: true,
     },
   },
+  // App Instance tools
+  {
+    name: "install_app_instance",
+    description:
+      "Install an app from the Prisme.ai app store into a workspace. Use get_app first to understand the app's configuration schema.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        appInstance: {
+          type: "object",
+          description: "App instance configuration",
+          properties: {
+            appSlug: {
+              type: "string",
+              description: "The slug of the app from the app store to install (case-sensitive)",
+            },
+            slug: {
+              type: "string",
+              description: "Optional custom slug for this instance (defaults to appSlug)",
+            },
+            config: {
+              type: "object",
+              description: "App configuration matching the app's config schema",
+            },
+            disabled: {
+              type: "boolean",
+              description: "Whether the app instance should be disabled",
+            },
+            labels: {
+              type: "array",
+              items: { type: "string" },
+              description: "Labels for the app instance",
+            },
+          },
+          required: ["appSlug"],
+        },
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
+      },
+      required: ["appInstance", "workspaceName"],
+    },
+  },
+  {
+    name: "list_app_instances",
+    description:
+      "List all installed app instances in a Prisme.ai workspace",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
+      },
+      required: ["workspaceName"],
+    },
+    annotations: {
+      readOnlyHint: true,
+    },
+  },
+  {
+    name: "get_app_instance",
+    description:
+      "Get details of an installed app instance by its slug",
+    inputSchema: {
+      type: "object",
+      properties: {
+        instanceSlug: {
+          type: "string",
+          description: "The slug of the installed app instance",
+        },
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
+      },
+      required: ["instanceSlug", "workspaceName"],
+    },
+    annotations: {
+      readOnlyHint: true,
+    },
+  },
+  {
+    name: "update_app_instance",
+    description:
+      "Update an installed app instance (config, disabled status, labels)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        instanceSlug: {
+          type: "string",
+          description: "The slug of the installed app instance to update",
+        },
+        appInstance: {
+          type: "object",
+          description: "Fields to update on the app instance",
+          properties: {
+            config: {
+              type: "object",
+              description: "Updated app configuration",
+            },
+            disabled: {
+              type: "boolean",
+              description: "Whether the app instance should be disabled",
+            },
+            labels: {
+              type: "array",
+              items: { type: "string" },
+              description: "Labels for the app instance",
+            },
+          },
+        },
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
+      },
+      required: ["instanceSlug", "appInstance", "workspaceName"],
+    },
+  },
+  {
+    name: "uninstall_app_instance",
+    description:
+      "Uninstall an app instance from a workspace",
+    inputSchema: {
+      type: "object",
+      properties: {
+        instanceSlug: {
+          type: "string",
+          description: "The slug of the installed app instance to uninstall",
+        },
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
+      },
+      required: ["instanceSlug", "workspaceName"],
+    },
+    annotations: {
+      destructiveHint: true,
+    },
+  },
+  {
+    name: "get_app_instance_config",
+    description:
+      "Get only the configuration of an installed app instance",
+    inputSchema: {
+      type: "object",
+      properties: {
+        instanceSlug: {
+          type: "string",
+          description: "The slug of the installed app instance",
+        },
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
+      },
+      required: ["instanceSlug", "workspaceName"],
+    },
+    annotations: {
+      readOnlyHint: true,
+    },
+  },
+  {
+    name: "update_app_instance_config",
+    description:
+      "Update only the configuration of an installed app instance",
+    inputSchema: {
+      type: "object",
+      properties: {
+        instanceSlug: {
+          type: "string",
+          description: "The slug of the installed app instance",
+        },
+        config: {
+          type: "object",
+          description: "Configuration object to update (merged with existing config)",
+        },
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
+      },
+      required: ["instanceSlug", "config", "workspaceName"],
+    },
+  },
   {
     name: "search_workspaces",
     description:

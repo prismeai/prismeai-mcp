@@ -166,6 +166,23 @@ export interface App {
     [key: string]: any;
 }
 
+export interface AppInstance {
+    appSlug: string;
+    appName?: string | Record<string, string>;
+    appVersion?: string;
+    slug?: string;
+    disabled?: boolean;
+    labels?: string[];
+    config?: Record<string, any>;
+}
+
+export interface DetailedAppInstance extends AppInstance {
+    photo?: string;
+    automations?: any[];
+    events?: { emit?: string[]; listen?: string[]; };
+    blocks?: any[];
+}
+
 export class PrismeApiClient {
     private client: AxiosInstance;
     private workspaceId: string;
@@ -300,6 +317,73 @@ export class PrismeApiClient {
         }
 
         return app;
+    }
+
+    // App Instance CRUD operations
+    async installAppInstance(appInstance: AppInstance, workspaceId?: string, apiUrl?: string, environment?: string): Promise<DetailedAppInstance> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.post(
+            `/workspaces/${wsId}/apps`,
+            appInstance
+        );
+        return response.data;
+    }
+
+    async listAppInstances(workspaceId?: string, apiUrl?: string, environment?: string): Promise<DetailedAppInstance[]> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.get(
+            `/workspaces/${wsId}/apps`
+        );
+        return response.data;
+    }
+
+    async getAppInstance(instanceSlug: string, workspaceId?: string, apiUrl?: string, environment?: string): Promise<DetailedAppInstance> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.get(
+            `/workspaces/${wsId}/apps/${instanceSlug}`
+        );
+        return response.data;
+    }
+
+    async updateAppInstance(instanceSlug: string, appInstance: Partial<AppInstance>, workspaceId?: string, apiUrl?: string, environment?: string): Promise<DetailedAppInstance> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.patch(
+            `/workspaces/${wsId}/apps/${instanceSlug}`,
+            appInstance
+        );
+        return response.data;
+    }
+
+    async uninstallAppInstance(instanceSlug: string, workspaceId?: string, apiUrl?: string, environment?: string): Promise<{ slug: string }> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.delete(
+            `/workspaces/${wsId}/apps/${instanceSlug}`
+        );
+        return response.data;
+    }
+
+    async getAppInstanceConfig(instanceSlug: string, workspaceId?: string, apiUrl?: string, environment?: string): Promise<Record<string, any>> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.get(
+            `/workspaces/${wsId}/apps/${instanceSlug}/config`
+        );
+        return response.data;
+    }
+
+    async updateAppInstanceConfig(instanceSlug: string, config: Record<string, any>, workspaceId?: string, apiUrl?: string, environment?: string): Promise<Record<string, any>> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.patch(
+            `/workspaces/${wsId}/apps/${instanceSlug}/config`,
+            config
+        );
+        return response.data;
     }
 
     async searchWorkspaces(params?: SearchWorkspacesParams, apiUrl?: string, environment?: string): Promise<WorkspaceSearchResult[]> {

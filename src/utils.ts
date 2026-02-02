@@ -11,6 +11,9 @@ export const READONLY_TOOLS = new Set([
   "lint_doc",
   "search_workspaces",
   "report_issue_or_feedback",
+  "list_app_instances",
+  "get_app_instance",
+  "get_app_instance_config",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -20,6 +23,10 @@ export const WRITE_TOOLS = new Set([
   "execute_automation",
   "push_workspace",
   "pull_workspace",
+  "install_app_instance",
+  "update_app_instance",
+  "uninstall_app_instance",
+  "update_app_instance_config",
 ]);
 
 export function enforceReadonlyMode(toolName: string): void {

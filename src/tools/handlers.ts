@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSy
 import { fileURLToPath } from "url";
 import { basename, dirname, join, resolve } from "path";
 import AdmZip from "adm-zip";
-import { PrismeApiClient, AIKnowledgeQueryParams, AIKnowledgeCompletionParams, AIKnowledgeDocumentParams, AIKnowledgeProjectParams, AIKnowledgeAuth } from "../api-client.js";
+import { PrismeApiClient, AIKnowledgeQueryParams, AIKnowledgeCompletionParams, AIKnowledgeDocumentParams, AIKnowledgeProjectParams, AIKnowledgeAuth, AppInstance } from "../api-client.js";
 import { resolveWorkspaceAndEnvironment, environmentsConfig, PRISME_API_BASE_URL } from "../config.js";
 import { enforceReadonlyMode, truncateJsonOutput } from "../utils.js";
 
@@ -942,6 +942,202 @@ export async function handleToolCall(
       };
 
       const result = await apiClient.aiKnowledgeDocument(params, apiKey, apiUrl);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
+    // App Instance handlers
+    case "install_app_instance": {
+      enforceReadonlyMode("install_app_instance");
+      const { appInstance, workspaceId, workspaceName, environment } = args as {
+        appInstance: AppInstance;
+        workspaceId?: string;
+        workspaceName?: string;
+        environment?: string;
+      };
+      const resolved = resolveWorkspaceAndEnvironment({
+        workspaceId,
+        workspaceName,
+        environment,
+      });
+      const result = await apiClient.installAppInstance(
+        appInstance,
+        resolved.workspaceId,
+        resolved.apiUrl,
+        resolved.environment
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
+    case "list_app_instances": {
+      const { workspaceId, workspaceName, environment } = args as {
+        workspaceId?: string;
+        workspaceName?: string;
+        environment?: string;
+      };
+      const resolved = resolveWorkspaceAndEnvironment({
+        workspaceId,
+        workspaceName,
+        environment,
+      });
+      const result = await apiClient.listAppInstances(
+        resolved.workspaceId,
+        resolved.apiUrl,
+        resolved.environment
+      );
+      return truncateJsonOutput(result, "list_app_instances");
+    }
+
+    case "get_app_instance": {
+      const { instanceSlug, workspaceId, workspaceName, environment } = args as {
+        instanceSlug: string;
+        workspaceId?: string;
+        workspaceName?: string;
+        environment?: string;
+      };
+      const resolved = resolveWorkspaceAndEnvironment({
+        workspaceId,
+        workspaceName,
+        environment,
+      });
+      const result = await apiClient.getAppInstance(
+        instanceSlug,
+        resolved.workspaceId,
+        resolved.apiUrl,
+        resolved.environment
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
+    case "update_app_instance": {
+      enforceReadonlyMode("update_app_instance");
+      const { instanceSlug, appInstance, workspaceId, workspaceName, environment } = args as {
+        instanceSlug: string;
+        appInstance: Partial<AppInstance>;
+        workspaceId?: string;
+        workspaceName?: string;
+        environment?: string;
+      };
+      const resolved = resolveWorkspaceAndEnvironment({
+        workspaceId,
+        workspaceName,
+        environment,
+      });
+      const result = await apiClient.updateAppInstance(
+        instanceSlug,
+        appInstance,
+        resolved.workspaceId,
+        resolved.apiUrl,
+        resolved.environment
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
+    case "uninstall_app_instance": {
+      enforceReadonlyMode("uninstall_app_instance");
+      const { instanceSlug, workspaceId, workspaceName, environment } = args as {
+        instanceSlug: string;
+        workspaceId?: string;
+        workspaceName?: string;
+        environment?: string;
+      };
+      const resolved = resolveWorkspaceAndEnvironment({
+        workspaceId,
+        workspaceName,
+        environment,
+      });
+      const result = await apiClient.uninstallAppInstance(
+        instanceSlug,
+        resolved.workspaceId,
+        resolved.apiUrl,
+        resolved.environment
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
+    case "get_app_instance_config": {
+      const { instanceSlug, workspaceId, workspaceName, environment } = args as {
+        instanceSlug: string;
+        workspaceId?: string;
+        workspaceName?: string;
+        environment?: string;
+      };
+      const resolved = resolveWorkspaceAndEnvironment({
+        workspaceId,
+        workspaceName,
+        environment,
+      });
+      const result = await apiClient.getAppInstanceConfig(
+        instanceSlug,
+        resolved.workspaceId,
+        resolved.apiUrl,
+        resolved.environment
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
+    case "update_app_instance_config": {
+      enforceReadonlyMode("update_app_instance_config");
+      const { instanceSlug, config, workspaceId, workspaceName, environment } = args as {
+        instanceSlug: string;
+        config: Record<string, any>;
+        workspaceId?: string;
+        workspaceName?: string;
+        environment?: string;
+      };
+      const resolved = resolveWorkspaceAndEnvironment({
+        workspaceId,
+        workspaceName,
+        environment,
+      });
+      const result = await apiClient.updateAppInstanceConfig(
+        instanceSlug,
+        config,
+        resolved.workspaceId,
+        resolved.apiUrl,
+        resolved.environment
+      );
       return {
         content: [
           {
