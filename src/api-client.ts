@@ -331,14 +331,22 @@ export class PrismeApiClient {
 
     async importWorkspace(archive: Buffer, prune: boolean = true, workspaceId?: string, apiUrl?: string, environment?: string): Promise<any> {
         const wsId = workspaceId || this.workspaceId;
+        const effectiveApiKey = this.getApiKeyForEnvironment(environment);
         const client = this.getClient(apiUrl, environment);
         const formData = new FormData();
-        formData.append('archive', archive, { filename: 'workspace.zip' });
+        formData.append('archive', archive, { filename: 'workspace.zip', contentType: 'application/zip' });
 
         const response = await client.post(
             `/workspaces/${wsId}/import?prune=${prune}`,
             formData,
-            { headers: formData.getHeaders() }
+            {
+                headers: {
+                    ...formData.getHeaders(),
+                    Authorization: `Bearer ${effectiveApiKey}`,
+                },
+                maxBodyLength: Infinity,
+                maxContentLength: Infinity,
+            }
         );
         return response.data;
     }

@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from "fs";
 import { fileURLToPath } from "url";
-import { dirname, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 import AdmZip from "adm-zip";
 import { PrismeApiClient, AIKnowledgeQueryParams, AIKnowledgeCompletionParams, AIKnowledgeDocumentParams, AIKnowledgeProjectParams, AIKnowledgeAuth } from "../api-client.js";
 import { resolveWorkspaceAndEnvironment, environmentsConfig, PRISME_API_BASE_URL } from "../config.js";
@@ -743,7 +743,24 @@ export async function handleToolCall(
         }
       };
 
-      addDirectoryToZip(resolvedPath);
+      // Import API expects the archive to contain a top-level "current/" directory
+      // (same structure as workspace exports).
+      let workspaceDir = resolvedPath;
+      const currentDir = join(resolvedPath, "current");
+      if (
+        basename(resolvedPath) !== "current" &&
+        existsSync(currentDir) &&
+        statSync(currentDir).isDirectory()
+      ) {
+        const looksLikeWorkspaceRoot = ["automations", "pages", "imports", "ux", "collections"].some((name) =>
+          existsSync(join(resolvedPath, name))
+        );
+        if (!looksLikeWorkspaceRoot) {
+          workspaceDir = currentDir;
+        }
+      }
+
+      addDirectoryToZip(workspaceDir, "current");
 
       const zipBuffer = zip.toBuffer();
       const importResult = await apiClient.importWorkspace(
@@ -767,7 +784,9 @@ export async function handleToolCall(
         import: {
           workspaceId: importResult?.id || resolved.workspaceId,
           workspaceName: importResult?.name,
-          imported: importResult?.imported,
+          ...(importResult?.imported !== undefined && { imported: importResult.imported }),
+          ...(importResult?.processing !== undefined && { processing: importResult.processing }),
+          ...(importResult?.message && { message: importResult.message }),
           ...(hasErrors && { errors: importResult.errors }),
         },
       };
