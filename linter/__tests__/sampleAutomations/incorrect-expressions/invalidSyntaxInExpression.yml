@@ -1,0 +1,9 @@
+# EXPRESSION ERROR: Invalid JavaScript syntax in expression
+# The expression contains invalid JS syntax
+# This is NOT caught by current linter (requires expression parsing)
+slug: invalidSyntaxInExpression
+name: Test/Invalid syntax in expression
+do:
+  - set:
+      name: result
+      value: '{% {{a}} +++ {{b}} %}'  # INVALID: +++ is not valid JS

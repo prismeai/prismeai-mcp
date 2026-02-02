@@ -1,0 +1,11 @@
+# ERROR: Nested type errors in repeat instruction
+# - repeat.do must be an array of instructions, not a string
+# - repeat.batch.size must be a number, not a string
+slug: nested-type-error
+name: Test/Nested Type Error
+do:
+  - repeat:
+      on: "{{items}}"
+      do: "this-should-be-an-array"  # INVALID: 'do' must be an array
+      batch:
+        size: "not-a-number"  # INVALID: 'size' must be a number

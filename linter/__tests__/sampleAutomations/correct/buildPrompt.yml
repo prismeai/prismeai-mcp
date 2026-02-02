@@ -1,0 +1,237 @@
+slug: buildPrompt
+name: Query/Build Prompt
+do:
+  - comment: What will be our maximum prompt size ? Take response size into account
+  - set:
+      name: maxSize
+      value: 8000
+  - set:
+      name: maxResponse
+      value: 500
+  - conditions:
+      '{{model}} && {{config.modelsSpecifications[{{model}}].maxContext}}':
+        - set:
+            name: maxSize
+            value: '{{config.modelsSpecifications[{{model}}].maxContext}}'
+      '{{openaiParameters.maxContext}}':
+        - set:
+            name: maxSize
+            value: '{{openaiParameters.maxContext}}'
+  - conditions:
+      '{{openaiParameters.max_tokens}}':
+        - set:
+            name: maxResponse
+            value: '{{openaiParameters.max_tokens}}'
+  - set:
+      name: maxSize
+      value: '{% {{maxSize}} - {{maxResponse}} %}'
+  - comment: Retrieve history
+  - conditions:
+      '{{useHistory}}':
+        - conditions:
+            '{{history.messages}}':
+              - set:
+                  name: history
+                  value: '{{history.messages}}'
+            '!{{history}}':
+              - getConversationHistory:
+                  projectId: '{{project._id}}'
+                  output: history
+  - comment: Prepare project prompt
+  - conditions:
+      '{{openaiParameters.prompt.length}} == 0 || {{openaiParameters.prompt}}':
+        - set:
+            name: promptTemplate
+            value: '{{openaiParameters.prompt}}'
+      default:
+        - set:
+            name: promptTemplate
+            value: '{{config.prompt.default}}'
+  - set:
+      name: canvasInToolChoice
+      value: '{% "canvas" in {{tool_choice}} %}'
+  - conditions:
+      '{{project.canvas.enabled}} || ({{project.canvas.visible}} && {{canvasInToolChoice}})':
+        - addCanvasPrompt:
+            projectPrompt: '{{promptTemplate}}'
+            forceUse: '{{canvasInToolChoice}}'
+            output: promptTemplate
+  - comment: Fetch image/audio attachments & inject their base64
+  - set:
+      name: newAttachmentsMerged
+      value: []
+  - repeat:
+      'on': '{{newAttachmentsPerProvider.forAIK}}'
+      batch:
+        size: 10
+      do:
+        - set:
+            name: item.fileHandler
+            value: prisme
+        - set:
+            name: newAttachmentsMerged
+            type: push
+            value: '{{item}}'
+  - repeat:
+      'on': '{{newAttachmentsPerProvider.forLLM}}'
+      batch:
+        size: 10
+      do:
+        - set:
+            name: item.fileHandler
+            value: llm
+        - set:
+            name: newAttachmentsMerged
+            type: push
+            value: '{{item}}'
+  - repeat:
+      'on': '{{newAttachmentsMerged}}'
+      batch:
+        size: 10
+      do:
+        - conditions:
+            '{{item.url}} and ({{item.fileHandler}} = "llm" or ({{item.type}} = "image" or {{item.type}} = "audio"))':
+              - fetch:
+                  url: '{{item.url}}'
+                  outputMode: base64
+                  prismeaiApiKey:
+                    name: workspace
+                  output: newAttachmentsMerged[{{$index}}].base64
+              - conditions:
+                  '{{newAttachmentsMerged[{{$index}}].base64.error}}':
+                    - break:
+                        scope: all
+                        payload:
+                          errorKey: fileUploadFailed
+                          values: '{{newAttachmentsMerged[{{$index}}].base64}}'
+  - repeat:
+      'on': '{{history}}'
+      batch:
+        size: 10
+      do:
+        - set:
+            name: msgIdx
+            value: '{{$index}}'
+        - set:
+            name: msg
+            value: '{{item}}'
+        - repeat:
+            'on': '{{msg.attachments}}'
+            do:
+              - conditions:
+                  '{{item.url}} && ({{item.type}} == "image" || {{item.type}} == "audio")':
+                    - fetch:
+                        url: '{{item.url}}'
+                        outputMode: base64
+                        prismeaiApiKey:
+                          name: workspace
+                        output: history[{{msgIdx}}].attachments[{{$index}}].base64
+                    - conditions:
+                        '{{history[{{msgIdx}}].attachments[{{$index}}].base64.error}}':
+                          - delete:
+                              name: history[{{msgIdx}}].attachments[{{$index}}]
+  - Custom Code.run:
+      function: buildPrompt
+      parameters:
+        history: '{{history}}'
+        projectPrompt: '{{promptTemplate}}'
+        chunks: '{{context.chunks}}'
+        userInput: '{{userInput}}'
+        newAttachments: '{{newAttachmentsMerged}}'
+        maxTokens: '{{maxSize}}'
+        allAttachmentsPerProvider: '{{allAttachmentsPerProvider}}'
+        user: '{{user}}'
+      output: output
+  - conditions:
+      '{{output.error}}':
+        - break:
+            scope: all
+            payload:
+              errorKey: buildPrompt
+  - fixHistoryOrder:
+      history: '{{output.prompt}}'
+      output: output.prompt
+  - set:
+      name: output.maxResponseTokens
+      value: '{{maxResponse}}'
+arguments:
+  model:
+    type: string
+  useHistory:
+    type: boolean
+  history:
+    description: send directly the history
+    type: object
+    properties:
+      messages:
+        type: array
+  project:
+    description: if no history provided let the project decide
+    type: object
+  openaiParameters:
+    type: object
+    description: openaiParameters, contains project.ai parameters however, can be different from project.ai as these can be overriden by a webhook or some default values can be set by the workspace.
+  userInput:
+    type: string
+  allAttachmentsPerProvider:
+    type: object
+    properties:
+      forLLM:
+        type: array
+        items:
+          type: object
+          properties:
+            url:
+              type: string
+      forAIK:
+        type: array
+        items:
+          type: object
+          properties:
+            url:
+              type: string
+  newAttachmentsPerProvider:
+    type: object
+    properties:
+      forLLM:
+        type: array
+        items:
+          type: object
+          properties:
+            url:
+              type: string
+      forAIK:
+        type: array
+        items:
+          type: object
+          properties:
+            url:
+              type: string
+  context:
+    type: object
+    description: Document & chunk sources to inject
+    properties:
+      docUrls:
+        type: array
+        description: Source document URLS, required by code interpreter
+      chunks:
+        type: array
+        items:
+          type: object
+          properties:
+            docName:
+              type: string
+              description: Source document name
+            content:
+              type: string
+              description: Chunk text content
+            docId:
+              type: string
+              description: Source document id
+  tool_choice:
+    type: array
+    items:
+      type: string
+  sendFileToLLM:
+    type: boolean
+output: '{{output}}'

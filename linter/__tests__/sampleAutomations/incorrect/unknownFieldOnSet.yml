@@ -1,0 +1,9 @@
+# ERROR: Unknown field 'format' on 'set' instruction
+# Valid fields for 'set': name, value, type, interface, clone
+slug: unknownFieldOnSet
+name: Test/Unknown field on set
+do:
+  - set:
+      name: myVar
+      value: hello
+      format: json  # INVALID: 'format' is not a valid argument for 'set'

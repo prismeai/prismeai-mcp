@@ -1,0 +1,8 @@
+# ERROR: Unknown field 'reason' on 'break' instruction
+# Valid fields for 'break': scope, payload
+slug: unknownFieldOnBreak
+name: Test/Unknown field on break
+do:
+  - break:
+      scope: all
+      reason: "Something went wrong"  # INVALID: 'reason' is not a valid argument for 'break'

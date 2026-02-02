@@ -20,13 +20,16 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "@prisme.ai/linter": "file:./linter",
     "adm-zip": "^0.5.16",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
-    "form-data": "^4.0.5"
+    "form-data": "^4.0.5",
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

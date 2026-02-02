@@ -1,0 +1,9 @@
+# ERROR: Empty instruction object in 'do' array
+# Each instruction must have at least one instruction type
+slug: emptyInstruction
+name: Test/Empty instruction
+do:
+  - {}  # INVALID: empty instruction
+  - set:
+      name: test
+      value: ok

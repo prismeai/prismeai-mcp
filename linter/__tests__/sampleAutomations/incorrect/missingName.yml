@@ -1,0 +1,7 @@
+# ERROR: Missing required 'name' field on automation
+# Schema requires: name, do
+slug: missingName
+do:
+  - set:
+      name: test
+      value: hello

@@ -1,0 +1,34 @@
+slug: taskExecuteSourceFilter
+name: Query/execute source filter
+do:
+  - set:
+      name: newOrdoredSources
+      value: []
+  - comment: |
+      INCORRECT: raw text used in {% %}
+  - repeat:
+      'on': '{% llmAnswer.sourceFilter %}'
+      do:
+        - set:
+            name: filteredDocName
+            value: '{{item}}'
+        - repeat:
+            'on': '{{ordoredSourcesDocuments}}'
+            do:
+              - set:
+                  name: ordoredDoc
+                  value: '{{item}}'
+              - comment: |
+                  INCORRECT: usage of now() which doesn't exists.
+              - conditions:
+                  '{{filteredDocName}} == {{ordoredDoc.name}} or now()':
+                    - set:
+                        name: newOrdoredSources
+                        type: push
+                        value: '{{ordoredDoc}}'
+arguments:
+  llmAnswer:
+    type: object
+  ordoredSourcesDocuments:
+    type: array
+output: '{{newOrdoredSources}}'

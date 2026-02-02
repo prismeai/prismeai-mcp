@@ -1,0 +1,10 @@
+# ERROR: Unknown field 'events' on 'wait' instruction
+# Valid fields for 'wait': oneOf, timeout, output
+slug: unknownFieldOnWait
+name: Test/Unknown field on wait
+do:
+  - wait:
+      timeout: 5000
+      events:  # INVALID: 'events' is not a valid argument for 'wait'
+        - myEvent
+      output: waitResult

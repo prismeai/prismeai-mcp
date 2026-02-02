@@ -1,0 +1,10 @@
+# ERROR: Unknown field 'async' on 'emit' instruction
+# Valid fields for 'emit': event, payload, target, options, autocomplete, private
+slug: unknownFieldOnEmit
+name: Test/Unknown field on emit
+do:
+  - emit:
+      event: myEvent
+      payload:
+        data: test
+      async: true  # INVALID: 'async' is not a valid argument for 'emit'

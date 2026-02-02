@@ -1,0 +1,26 @@
+# Tests deeply nested conditions, repeat, and all
+slug: deep-nesting
+name: Test/Deep Nesting
+do:
+  - conditions:
+      '{{isEnabled}}':
+        - repeat:
+            on: '{{items}}'
+            do:
+              - all:
+                  - set:
+                      name: counter
+                      value: '{% {{counter}} + 1 %}'
+                  - conditions:
+                      '{{item.type}} == "special"':
+                        - emit:
+                            event: item.special
+                            payload:
+                              item: '{{item}}'
+                      default:
+                        - emit:
+                            event: item.normal
+                            payload:
+                              item: '{{item}}'
+      default:
+        - comment: Feature is disabled

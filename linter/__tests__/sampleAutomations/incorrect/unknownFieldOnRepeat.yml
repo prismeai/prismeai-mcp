@@ -1,0 +1,12 @@
+# ERROR: Unknown field 'parallel' on 'repeat' instruction
+# Valid fields for 'repeat': on, do, until, batch
+slug: unknownFieldOnRepeat
+name: Test/Unknown field on repeat
+do:
+  - repeat:
+      on: '{{items}}'
+      parallel: true  # INVALID: 'parallel' is not a valid argument for 'repeat'
+      do:
+        - set:
+            name: item
+            value: '{{item}}'

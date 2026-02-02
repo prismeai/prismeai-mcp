@@ -813,12 +813,29 @@ SECTIONS:
     },
   },
   {
-    name: "lint_doc",
+    name: "validate_automation",
     description:
-      "Get the Prisme.ai automation linting rules document. Returns guidelines and common mistakes to check when reviewing automation YAML.",
+      "Validate Prisme.ai automation(s). Checks schema compliance, expression syntax ({{variables}} and {% code %}), unknown functions, and optionally strict mode. Accepts a file path, folder path (validates all .yml/.yaml/.json files), or automation object.",
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: {
+        path: {
+          type: "string",
+          description: "Path to a YAML/JSON file or folder containing automations. Preferred over 'automation' when files exist on disk.",
+        },
+        automation: {
+          type: "object",
+          description: "The automation object to validate directly (use 'path' instead when possible).",
+        },
+        strict: {
+          type: "boolean",
+          description: "Enable strict mode: validates that instruction arguments match their specs. Default: false",
+        },
+        validateExpressions: {
+          type: "boolean",
+          description: "Enable expression validation ({{}} and {% %}). Default: true",
+        },
+      },
       required: [],
     },
     annotations: {

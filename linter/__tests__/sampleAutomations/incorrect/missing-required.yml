@@ -1,0 +1,12 @@
+# ERROR: Missing required fields
+# - fetch is missing required 'url' field
+# - set is missing required 'name' field
+slug: missing-required
+name: Test/Missing Required Fields
+do:
+  - fetch:
+      method: get
+      # Missing required 'url' field
+  - set:
+      value: "no name provided"
+      # Missing required 'name' field

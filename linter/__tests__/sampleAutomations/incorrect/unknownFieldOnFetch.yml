@@ -1,0 +1,11 @@
+# ERROR: Unknown field 'retries' on 'fetch' instruction
+# Valid fields for 'fetch': url, method, headers, body, output, outputMode,
+#   timeout, query, emitErrors, multipart, allowSelfSignedCert, stream, prismeaiApiKey, auth
+slug: unknownFieldOnFetch
+name: Test/Unknown field on fetch
+do:
+  - fetch:
+      url: https://api.example.com/data
+      method: GET
+      output: response
+      retries: 3  # INVALID: 'retries' is not a valid argument for 'fetch'

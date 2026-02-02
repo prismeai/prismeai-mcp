@@ -1,0 +1,18 @@
+# ERROR: Unknown field nested inside conditions block
+# Tests that strict validation works recursively in nested instructions
+slug: nestedUnknownField
+name: Test/Nested unknown field
+do:
+  - conditions:
+      '{{flag}}':
+        - repeat:
+            on: '{{items}}'
+            do:
+              - set:
+                  name: item
+                  value: '{{item}}'
+                  invalid: true  # INVALID: nested inside conditions > repeat > set
+      default:
+        - emit:
+            event: done
+            debug: true  # INVALID: nested inside conditions > default > emit

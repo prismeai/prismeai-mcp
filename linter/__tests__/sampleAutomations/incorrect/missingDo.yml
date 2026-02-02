@@ -1,0 +1,7 @@
+# ERROR: Missing required 'do' field on automation
+# Schema requires: name, do
+slug: missingDo
+name: Test/Missing do
+arguments:
+  input:
+    type: string

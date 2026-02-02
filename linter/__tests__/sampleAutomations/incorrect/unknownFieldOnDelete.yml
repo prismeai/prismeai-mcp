@@ -1,0 +1,8 @@
+# ERROR: Unknown field 'force' on 'delete' instruction
+# Valid fields for 'delete': name
+slug: unknownFieldOnDelete
+name: Test/Unknown field on delete
+do:
+  - delete:
+      name: myVar
+      force: true  # INVALID: 'force' is not a valid argument for 'delete'

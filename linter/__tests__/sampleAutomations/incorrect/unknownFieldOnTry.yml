@@ -1,0 +1,15 @@
+# ERROR: Unknown field 'onError' on 'try' instruction
+# Valid fields for 'try': do, catch, finally
+slug: unknownFieldOnTry
+name: Test/Unknown field on try
+do:
+  - try:
+      do:
+        - set:
+            name: result
+            value: ok
+      catch:
+        - set:
+            name: error
+            value: '{{$error}}'
+      onError: log  # INVALID: 'onError' is not a valid argument for 'try'

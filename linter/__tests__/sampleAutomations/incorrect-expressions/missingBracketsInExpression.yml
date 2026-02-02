@@ -1,0 +1,9 @@
+# EXPRESSION ERROR: Missing {{}} around variable in {% %} expression
+# Should be: '{% {{myVar}} + 1 %}'
+# This is NOT caught by current linter (requires expression parsing)
+slug: missingBracketsInExpression
+name: Test/Missing brackets in expression
+do:
+  - set:
+      name: result
+      value: '{% myVar + 1 %}'  # INVALID: should be {{myVar}}

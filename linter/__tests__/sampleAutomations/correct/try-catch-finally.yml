@@ -1,0 +1,18 @@
+# Tests try/catch/finally instruction validation
+slug: try-catch-finally
+name: Test/Try Catch Finally
+do:
+  - try:
+      do:
+        - fetch:
+            url: "http://example.com"
+            output: result
+      catch:
+        - emit:
+            event: "error.occurred"
+            payload:
+              message: "Fetch failed"
+      finally:
+        - set:
+            name: completed
+            value: true

@@ -1,0 +1,633 @@
+slug: genericQuery
+name: Query/Generic Query Knowledge
+do:
+  - set:
+      name: run.timers.startGeneration
+      value: '{{run.date}}'
+  - set:
+      name: payloadParams
+      value:
+        - input
+        - interface
+        - projectId
+        - callback
+        - stream
+        - channel
+        - filters
+        - history
+        - messageId
+        - tool
+        - projectOverrides
+        - webhookPayload
+        - attachments
+        - tool_choice
+        - excludeTools
+        - conversationId
+        - metadata
+  - repeat:
+      'on': '{{payloadParams}}'
+      do:
+        - conditions:
+            '{{payload[{{item}}]}}':
+              - set:
+                  name: '{{item}}'
+                  value: '{{payload[{{item}}]}}'
+  - conditions:
+      '!{{projectId}}':
+        - break:
+            scope: all
+            payload:
+              errorKey: missingArgument
+              values:
+                argument: projectId
+  - conditions:
+      '!{{messageId}}':
+        - set:
+            name: uuid
+            value: '{% uuid() %}'
+        - set:
+            name: messageId
+            value: message_{{uuid}}
+  - set:
+      name: input
+      value: '{% sanitize({{input}}) %}'
+  - try:
+      do:
+        - Get Project By ID:
+            id: '{{projectId}}'
+            asSuperAdmin: true
+            output: project
+      catch:
+        - set:
+            name: output
+            value:
+              error: '{{$error.break.project.error}}'
+        - break: {}
+  - conditions:
+      isArray({{tool_choice}}) and {{project.tools.tool_choice}}:
+        - set:
+            name: tool_choice
+            type: merge
+            value: '{{project.tools.tool_choice}}'
+      '{{project.tools.tool_choice}}':
+        - set:
+            name: tool_choice
+            value: '{{project.tools.tool_choice}}'
+  - mergeProjectConfigOverride:
+      project: '{{project}}'
+      projectOverrides: '{{projectOverrides}}'
+      output: project
+  - comment: Apply requests per minute rate limits early on to protect RAG & embeddings resources. Tokens per minute limits will be enforced after embeddings, webhooks & RAG, when we'll have complete prompt tokens count
+  - set:
+      name: limits
+      value: '{{config.limits.llm}}'
+  - set:
+      name: limits
+      type: merge
+      value: '{{project.limits.llm}}'
+  - conditions:
+      ({{limits.users}} || {{limits.projects}}):
+        - applyRateLimits:
+            name: chat-completions
+            projectId: '{{projectId}}'
+            limits: '{{limits}}'
+            requests: 1
+            output: limitsRes
+        - conditions:
+            '{{limitsRes.error}} || !{{limitsRes.ok}}':
+              - break:
+                  scope: all
+                  payload:
+                    errorKey: tooManyRequests
+                    values:
+                      limit: '{{limitsRes.rateLimit}}'
+                      error: '{{limitsRes.error}}'
+  - set:
+      name: openaiParameters
+      value: '{{config.openai}}'
+  - set:
+      name: openaiParameters
+      type: merge
+      value: '{{project.ai}}'
+  - conditions:
+      '!{{openaiParameters.model}}':
+        - set:
+            name: openaiParameters.model
+            value: '{{config.defaultModels.completions}}'
+  - set:
+      name: project.ai
+      type: merge
+      value: '{{openaiParameters}}'
+  - conditions:
+      (!{{project.ai.max_tokens}} and {{config.modelsSpecifications[{{openaiParameters.model}}].maxResponseTokens}}) or ({{project.ai.max_tokens}} > {{config.modelsSpecifications[{{openaiParameters.model}}].maxResponseTokens}}):
+        - set:
+            name: openaiParameters.max_tokens
+            value: '{{config.modelsSpecifications[{{openaiParameters.model}}].maxResponseTokens}}'
+  - conditions:
+      '{{input}} && {{project.enhanceQuery.enabled}}':
+        - enhanceQuery:
+            query: '{{input}}'
+            project: '{{project}}'
+            enhancePrompt: '{{project.enhanceQuery.prompt}}'
+            model: '{{project.enhanceQuery.model}}'
+            $http: '{{$http}}'
+            messageId: '{{messageId}}'
+            conversationId: '{{conversationId}}'
+            output: enhancedQuery
+        - set:
+            name: input
+            value: '{{enhancedQuery}}'
+  - conditions:
+      '{{project.ai.history}} && !{{history}}':
+        - getConversationHistory:
+            projectId: '{{project._id}}'
+            output: history
+  - mergeAttachmentsFromHistory:
+      history: '{{history}}'
+      attachments: '{{attachments}}'
+      output: allConversationAttachments
+  - conditions:
+      '{{project.webhook.subscriptions.queries}}':
+        - fetchProjectWebhook:
+            currentProject: '{{project}}'
+            stream: '{{stream}}'
+            allowedOutput:
+              - chunks
+              - prompt
+              - answer
+              - searchResults
+              - blocks
+              - aiParameters
+              - filters
+            type: queries
+            payload:
+              input: '{{input}}'
+              messageId: '{{messageId}}'
+              history: '{{history}}'
+              interface: '{{interface}}'
+              allConversationAttachments: '{{allConversationAttachments}}'
+              newAttachments: '{{attachments}}'
+              webhookPayload: '{{webhookPayload}}'
+              metadata: '{{metadata}}'
+              filters: '{{filters}}'
+            output: webhook
+  - conditions:
+      '{{webhook.result.filters}}':
+        - comment: Filters can be overriden by the webhook
+        - set:
+            name: filters
+            type: merge
+            value: '{{webhook.result.filters}}'
+  - conditions:
+      '{{webhook.result.aiParameters}}':
+        - comment: some openaiParameters can be overriden by the webhook
+        - set:
+            name: openaiParameters
+            type: merge
+            value: '{{webhook.result.aiParameters}}'
+  - getModelSpecifications:
+      model: '{{openaiParameters.model}}'
+      output: modelSpec
+  - getAttachmentsToSendToLLM:
+      modelSpec: '{{modelSpec}}'
+      attachments: '{{allConversationAttachments}}'
+      output: allAttachmentsPerProvider
+  - getAttachmentsToSendToLLM:
+      modelSpec: '{{modelSpec}}'
+      attachments: '{{attachments}}'
+      output: newAttachmentsPerProvider
+  - conditions:
+      '!{{webhook.result.chunks}} and !{{webhook.result.answer}}':
+        - set:
+            name: toolAttachments
+            value:
+              allConversation: '{{allAttachmentsPerProvider.forAIK}}'
+              new: '{{newAttachmentsPerProvider.forAIK}}'
+        - getDeepResearchType:
+            excludeTools: '{{excludeTools}}'
+            tool_choice: '{{tool_choice}}'
+            deepResearchBehavior: '{{project.deepResearch.behavior}}'
+            output: deepResearchMode
+        - conditions:
+            '{{deepResearchMode.execute}}':
+              - deepResearch:
+                  mode: '{{deepResearchMode.mode}}'
+                  userQuery: '{{input}}'
+                  history: '{{history}}'
+                  allConversationAttachments: '{{toolAttachments.allConversation}}'
+                  newAttachments: '{{toolAttachments.new}}'
+                  openaiParameters: '{{openaiParameters}}'
+                  project: '{{project}}'
+                  filters: '{{filters}}'
+                  metadata: '{{metadata}}'
+                  messageId: '{{messageId}}'
+                  conversationId: '{{conversationId}}'
+                  $http: '{{$http}}'
+                  output: deepResearchResult
+              - conditions:
+                  '{{deepResearchResult.openaiParameters}}':
+                    - set:
+                        name: openaiParameters
+                        value: '{{deepResearchResult.openaiParameters}}'
+      '{{webhook.result.chunks}}':
+        - set:
+            name: toolCallingResult.chunks.documents
+            value: '{{webhook.result.chunks}}'
+        - set:
+            name: toolCallingResult.chunks.total
+            value: '{{webhook.result.chunks.length}}'
+  - set:
+      name: maxContextItems
+      value: '{{config.embeddings.numberOfSearchResults}}'
+  - conditions:
+      '{{project.embeddings.numberOfSearchResults}}':
+        - set:
+            name: maxContextItems
+            value: '{{project.embeddings.numberOfSearchResults}}'
+  - conditions:
+      '{{stream.event}}':
+        - set:
+            name: stream.payload.messageId
+            value: '{{messageId}}'
+  - conditions:
+      '{{webhook.result.prompt}}':
+        - set:
+            name: llmPrompt
+            value:
+              prompt: '{{webhook.result.prompt}}'
+  - conditions:
+      '!{{webhook.result.answer}}':
+        - conditions:
+            '{{toolCallingResult.chunks.documents.length}} > 0':
+              - enrichContextChunks:
+                  projectId: '{{project._id}}'
+                  maxContextItems: '{{maxContextItems}}'
+                  sourceViewerUrl: '{{callback.sourceViewerUrl}}'
+                  chunks: '{{toolCallingResult.chunks.documents}}'
+                  output: enrichedContext
+              - createSourceResult:
+                  maxContextItems: '{{maxContextItems}}'
+                  ordoredSourcesDocuments: '{{enrichedContext.ordoredSourcesDocuments}}'
+                  output: sourceResults
+              - set:
+                  name: searchResults
+                  value: '{{sourceResults.json}}'
+        - buildPrompt:
+            newAttachmentsPerProvider: '{{newAttachmentsPerProvider}}'
+            allAttachmentsPerProvider: '{{allAttachmentsPerProvider}}'
+            model: '{{openaiParameters.model}}'
+            useHistory: '{{project.ai.history}}'
+            project: '{{project}}'
+            openaiParameters: '{{openaiParameters}}'
+            userInput: '{{input}}'
+            history: '{{history}}'
+            context:
+              docUrls: '{{sourceResults.url}}'
+              chunks: '{{enrichedContext.chunks}}'
+            messageId: '{{messageId}}'
+            tool_choice: '{{tool_choice}}'
+            output: llmPrompt
+  - conditions:
+      '{{webhook.result.searchResults}}':
+        - set:
+            name: searchResults
+            value: '{{webhook.result.searchResults}}'
+  - conditions:
+      '!{{llmPrompt.totalTokens}} && {{llmPrompt.prompt}}':
+        - Custom Code.run:
+            function: estimateTokens
+            parameters:
+              messages: '{{llmPrompt.prompt}}'
+            output: llmPrompt.totalTokens
+  - comment: Save the user query in the history.
+  - conditions:
+      '{{project.ai.history}}':
+        - saveMessagesToHistory:
+            projectId: '{{projectId}}'
+            userId: '{{user.id}}'
+            messages:
+              - role: user
+                content: '{{input}}'
+  - conditions:
+      '!{{webhook.result.answer}}':
+        - conditions:
+            '{{callback.url}} || {{stream.event}} || {{stream.method}} == "sse"':
+              - set:
+                  name: sseStreaming
+                  value:
+                    method: sse
+                    concatenate:
+                      path: choices[0].delta.content
+                      throttle: 200
+        - callLLMWithTools:
+            $http: '{{$http}}'
+            maxContextItems: '{{maxContextItems}}'
+            allConversationAttachments: '{{toolAttachments.allConversation}}'
+            input: '{{input}}'
+            newAttachments: '{{toolAttachments.new}}'
+            history: '{{history}}'
+            project: '{{project}}'
+            filters: '{{filters}}'
+            tool_choice: '{{tool_choice}}'
+            excludeTools: '{{excludeTools}}'
+            metadata: '{{metadata}}'
+            openaiParameters: '{{openaiParameters}}'
+            callback: '{{callback}}'
+            projectId: '{{project._id}}'
+            userId: '{{user.id}}'
+            limits: '{{limits}}'
+            failover: '{{openaiParameters.failover}}'
+            messages: '{{llmPrompt.prompt}}'
+            stream: '{{sseStreaming}}'
+            modelsOverride: '{{project.models}}'
+            messageId: '{{messageId}}'
+            sourcesResults: '{{sourcesResults}}'
+            channel: '{{channel}}'
+            conversationId: '{{conversationId}}'
+            promptTokens: '{{llmPrompt.totalTokens}}'
+            output: result
+        - set:
+            name: answer
+            value: '{{result.answer}}'
+        - conditions:
+            '{{result.lastChunk}}':
+              - set:
+                  name: lastChunk
+                  value: '{{result.lastChunk}}'
+        - conditions:
+            '{{result.allSourceResults}}':
+              - set:
+                  name: sourceResults
+                  value: '{{result.allSourceResults}}'
+        - conditions:
+            '{{result.allSearchResults}}':
+              - set:
+                  name: searchResults
+                  value: '{{result.allSearchResults}}'
+        - conditions:
+            '{{result.llmCompletionResult}}':
+              - set:
+                  name: result
+                  value: '{{result.llmCompletionResult}}'
+      default:
+        - set:
+            name: answer
+            value: '{{webhook.result.answer}}'
+  - repeat:
+      'on': '{{result.choices}}'
+      do:
+        - set:
+            name: answer
+            value: '{{item.message.content}}'
+        - set:
+            name: finishReasons[]
+            value: '{{item.finish_reason}}'
+  - conditions:
+      '{{project.ai.history}}':
+        - saveMessagesToHistory:
+            projectId: '{{projectId}}'
+            messages:
+              - role: assistant
+                content: '{{answer}}'
+  - comment: |
+      Below instructions handle a second query made after the first one
+      for various tasks.
+  - conditions:
+      '{{project.post_query.question_suggestions}}':
+        - taskPromptQuestionSuggestion:
+            output: questionSuggestionPrompt
+        - set:
+            name: postLLMTasks
+            type: push
+            value: '{{questionSuggestionPrompt}}'
+  - conditions:
+      '{{project.post_query.sources_filter}} && {{enrichedContext.chunks}}':
+        - taskPromptSourceFilter:
+            sources: '{{enrichedContext.chunks}}'
+            output: sourceFilterPrompt
+        - set:
+            name: postLLMTasks
+            type: push
+            value: '{{sourceFilterPrompt}}'
+  - conditions:
+      '{{postLLMTasks}}':
+        - set:
+            name: llmAnswer
+            value: '{{answer}}'
+        - conditions:
+            '{{llmAnswer}}':
+              - postLLMQuery:
+                  project: '{{project}}'
+                  input: '{{input}}'
+                  history: '{{history}}'
+                  taskPrompts: '{{postLLMTasks}}'
+                  lastLLMAnswer: '{{llmAnswer}}'
+                  openaiParameters: '{{openaiParameters}}'
+                  $http: '{{$http}}'
+                  messageId: '{{messageId}}'
+                  conversationId: '{{conversationId}}'
+                  output: query
+              - conditions:
+                  '{{query.choices}}':
+                    - set:
+                        name: tasksResult
+                        value: '{% unsafejson({{query.choices[0].message.content}}) %}'
+                    - set:
+                        name: suggestedQuestions
+                        value: '{{tasksResult.questionSuggestion}}'
+                    - conditions:
+                        '{{enrichedContext.ordoredSourcesDocuments}}':
+                          - taskExecuteSourceFilter:
+                              llmAnswer: '{{tasksResult}}'
+                              ordoredSourcesDocuments: '{{enrichedContext.ordoredSourcesDocuments}}'
+                              output: enrichedContext.ordoredSourcesDocuments
+  - conditions:
+      '{{project.post_query.sources_filter}} && {{enrichedContext.ordoredSourcesDocuments}}':
+        - comment: |
+            We cover every source again to generate the source HTML block, allowing us to use the filtered source
+            if the task was enabled in project's settings
+        - createSourceResult:
+            maxContextItems: '{{maxContextItems}}'
+            ordoredSourcesDocuments: '{{enrichedContext.ordoredSourcesDocuments}}'
+            output: sourceResults
+        - set:
+            name: searchResults
+            value: '{{sourceResults.json}}'
+  - set:
+      name: output
+      value:
+        cannotStream: '{{cannotStream}}'
+        messageId: '{{messageId}}'
+        answer: '{{answer}}'
+        end: true
+        suggestedQuestions: '{{suggestedQuestions}}'
+        sources:
+          values: '{{sourceResults.url}}'
+          html: '{{sourceResults.text}}'
+        search:
+          results: '{{searchResults}}'
+        blocks: '{{webhook.result.blocks}}'
+        chunks: '{{chunks}}'
+  - conditions:
+      '{{verbose}}':
+        - set:
+            name: output
+            type: merge
+            value:
+              context: '{{llmPrompt.context}}'
+              prompt: '{{project.ai.prompt}}'
+  - conditions:
+      '{{result.data[0].error.message}}':
+        - set:
+            name: $http
+            value:
+              status: 500
+        - set:
+            name: output.message
+            value: '{{result.data[0].error.message}}'
+        - conditions:
+            '{{result.data[0].error.code}}':
+              - set:
+                  name: $http
+                  value:
+                    status: '{{result.data[0].error.code}}'
+              - set:
+                  name: output.error
+                  value: LLMError:{{result.data[0].error.code}}
+            default:
+              - set:
+                  name: output.error
+                  value: '{{result.data[0].error}}'
+  - conditions:
+      '{{callback.url}} && {{stream.method}} != "sse"':
+        - set:
+            name: output.userId
+            value: '{{user.id}}'
+        - wait:
+            timeout: 1
+        - conditions:
+            '{{stream.event}}':
+              - emit:
+                  event: sendSourcesMessage
+                  payload:
+                    messageId: '{{messageId}}'
+                    body: '{{output}}'
+                    callback: '{{callback}}'
+            default:
+              - fetch:
+                  url: '{{callback.url}}'
+                  headers:
+                    knowledge-project-apiKey: '{{callback.apiKey}}'
+                  method: POST
+                  body: '{{output}}'
+  - set:
+      name: run.timers.endGeneration
+      value: '{{run.date}}'
+  - set:
+      name: output.metadata.timers
+      value: '{{run.timers}}'
+  - set:
+      name: output.metadata.tools
+      value: '{{run.metadata.tools}}'
+arguments:
+  newAttachments:
+    type: array
+  allConversationAttachments:
+    type: array
+  historyTooling:
+    type: array
+  project:
+    type: object
+  filters:
+    type: array
+    items:
+      type: object
+      properties:
+        field:
+          type: string
+        type:
+          enum:
+            - textSearch
+            - match
+            - in
+            - not in
+          type: string
+        value:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+  input:
+    type: string
+    title:
+      en: Text input
+      fr: Saisie texte
+    description:
+      en: Query to ask to the knowledge base.
+      fr: Question à poser à la base de connaissance
+  projectId:
+    type: string
+    title:
+      en: Project ID
+      fr: ID de projet
+    description: Id of the project (knowledge base) that should be asked.
+  stream:
+    type: object
+    title: The query can be streamed if this option is filled with the appropriate configuration (check fetch documentation for the format).
+    additionalProperties: true
+  search:
+    type: object
+    title: The query can return results from a search inside your documents.
+    properties:
+      limit:
+        type: number
+        title: Limit of results to display. If 0 or none is provided the query will not return the results of the search.
+  historyCompletion:
+    type: object
+    title: History
+    properties:
+      id:
+        type: string
+      messages:
+        type: array
+  attachments:
+    type: array
+    items:
+      type: object
+      properties:
+        url:
+          type: string
+  tool_choice:
+    description: id of the tools to use at least once
+    type: array
+    items:
+      type: string
+  excludeTools:
+    description: exclude these tools from the available ones to call
+    type: array
+    items:
+      type: string
+  verbose:
+    description: Add prompt and context to output
+    type: boolean
+  projectOverrides:
+    description: override some project settings when calling this automation directly. Check implementation before using.
+    type: object
+  messageId:
+    type: string
+  metadata:
+    type: object
+    additionalProperties:
+      type: array
+  conversationId:
+    type: string
+  channel:
+    type: string
+output: '{{output}}'
+description: This is the automation that do most of the work when a user query a Knowledge base. This automation should be called by channel automations.
+when:
+  events: []
+  endpoint: false
+  schedules: []
+validateArguments: false

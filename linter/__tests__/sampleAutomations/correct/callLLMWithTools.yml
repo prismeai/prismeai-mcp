@@ -1,0 +1,761 @@
+slug: callLLMWithTools
+name: Query/tool/callLLMWithTools
+description: |-
+  This automation is key to genericQuery. It is thought as a replacement to LLMCompletion within genericQuery. 
+  It handles calling the LLM and handling different features around tools, translating them in OAI format and keep building the promps for each calls.
+do:
+  - comment: |-
+      1. Prepare the tools, tool_choice depending on tools configuration 
+      2. Handle "buildPrompt" 
+      3. Make an LLMCompletion query 
+      4. Check the result 
+        a. If a tool is asked, execute it, add both messages to history and start again 
+        b. If an answer is given, break the loop and stream it to the end user.
+  - set:
+      name: chunks
+      value:
+        documents: []
+  - set:
+      name: allSourceResults
+      value:
+        json: []
+        url: []
+        text: ''
+  - set:
+      name: allSearchResults
+      value: {}
+  - set:
+      name: toolResults
+      value: []
+  - set:
+      name: toolsCounters
+      value: {}
+  - set:
+      name: totalCounter
+      value: 0
+  - conditions:
+      '!{{tool_choice}}':
+        - set:
+            name: tool_choice
+            value: []
+  - set:
+      name: maxTools
+      value: '{% {{project.tools.maxPerRequest}} + ({{tool_choice.length}}) %}'
+  - conditions:
+      '!{{maxTools}}':
+        - set:
+            name: maxTools
+            value: '{% {{config.limits.tools.maxPerRequest}} + ({{tool_choice.length}}) %}'
+  - conditions:
+      '!{{maxTools}}':
+        - set:
+            name: maxTools
+            value: 5
+  - set:
+      name: maxLoops
+      value: '{% {{maxTools}} + 1 %}'
+  - comment: input argument cannot be updated from inside the async repeat as it is not a object, so we use this intermediate overrideArguments
+  - set:
+      name: initialTools
+      value: '{{openaiParameters.tools}}'
+  - set:
+      name: overrideArguments
+      value:
+        input: '{{input}}'
+        project: '{{project}}'
+  - repeat:
+      until: '{{maxLoops}}'
+      do:
+        - comment: |-
+            ## STEP 1: TOOL PREPARATION 
+
+            1. Retrieves detailed tools definitions. 
+            2. Format to OpenAI both "tools" and "tool_choice" fields.
+        - set:
+            name: loopIndex
+            value: '{{$index}}'
+        - conditions:
+            '{{totalCounter}} >= {{maxLoops}}':
+              - break:
+                  scope: repeat
+        - comment: |-
+            ## getAvailabeToolsDetails is called here to be as close as the first integration. 
+            However it occurs to me that nothing seems to changes between tools calls for the parameters passed to getAvailableToolsDetails... 
+            Maybe it could be called once before the loop starts. 
+            TODO: Verify if it still work with details called beforehand.
+        - getAvailableToolsDetails:
+            input: '{{input}}'
+            docCount: '{{project.docCount}}'
+            allConversationAttachments: '{{allConversationAttachments}}'
+            newAttachments: '{{newAttachments}}'
+            codeInterpreterEnabled: '{{project.codeInterpreter.enabled}}'
+            imageGenerationEnabled: '{{project.imageGeneration.enabled}}'
+            webSearchEnabled: '{{project.webSearch.enabled}}'
+            deepResearchEnabled: '{{project.deepResearch.enabled}}'
+            projectTools: '{{project.tools}}'
+            toolsCounters: '{{toolsCounters}}'
+            tool_choice: '{{tool_choice}}'
+            excludeTools: '{{excludeTools}}'
+            output: availableToolsDetails
+        - comment: '## GET CALL AGENT DYNAMIC TOOLS'
+        - GetAvailableAgentCallTools:
+            history: '{{history}}'
+            tool_choice: '{{tool_choice}}'
+            output: availableAgentCallTools
+        - set:
+            name: availableToolsDetails.toolsDefinitions
+            type: merge
+            value: '{{availableAgentCallTools.toolsDefinitions}}'
+        - comment: |
+            ## FORMAT TOOLS TO OPENAI
+        - repeat:
+            'on': '{{availableToolsDetails.toolsDefinitions}}'
+            do:
+              - conditions:
+                  '!{{item.value.arguments.type}}':
+                    - comment: Sometimes our Prisme.ai tools could not be correctly formatted.
+                    - set:
+                        name: item.value.arguments
+                        value:
+                          type: object
+                          properties: '{{item.value.arguments}}'
+              - conditions:
+                  '!{{item.value.arguments.properties}}':
+                    - comment: Sometimes our Prisme.ai tools could forget to declare properties. OpenAI expect always an object, even empty here.
+                    - set:
+                        name: item.value.arguments.properties
+                        value: {}
+              - set:
+                  name: tools[]
+                  value:
+                    type: function
+                    function:
+                      name: '{{item.key}}'
+                      description: '{% {{item.value.description}} || {{item.value.prompt_detail}} %}'
+                      parameters: '{{item.value.arguments}}'
+        - set:
+            name: requiredToolsOpenAIFormat
+            value: []
+        - conditions:
+            '{{availableToolsDetails.remainingRequiredTools.length}} > 0':
+              - repeat:
+                  'on': '{{availableToolsDetails.remainingRequiredTools}}'
+                  do:
+                    - set:
+                        name: requiredToolsOpenAIFormat
+                        type: push
+                        value:
+                          function:
+                            name: '{{item}}'
+                          type: function
+              - conditions:
+                  '{{availableToolsDetails.remainingRequiredTools.length}} === 1':
+                    - set:
+                        name: toolChoiceOpenAI
+                        value: '{{requiredToolsOpenAIFormat[0]}}'
+                  default:
+                    - repeat:
+                        'on': '{{availableToolsDetails.remainingRequiredTools}}'
+                        do:
+                          - set:
+                              name: toolChoiceOpenAI
+                              value:
+                                type: allowed_tools
+                                allowed_tools:
+                                  mode: required
+                                  tools: '{{requiredToolsOpenAIFormat}}'
+            default:
+              - delete:
+                  name: toolChoiceOpenAI
+        - conditions:
+            '{{toolChoiceOpenAI}}':
+              - set:
+                  name: openaiParameters.tool_choice
+                  value: '{{toolChoiceOpenAI}}'
+            default:
+              - delete:
+                  name: openaiParameters.tool_choice
+        - comment: |
+            ## Reset tools list before each call. 
+            If we don't do this we re-add tools with each loop.
+        - conditions:
+            '{{initialTools}}':
+              - set:
+                  name: openaiParameters.tools
+                  value: '{{initialTools}}'
+            default:
+              - delete:
+                  name: openaiParameters.tools
+        - conditions:
+            '{{tools}}':
+              - repeat:
+                  'on': '{{tools}}'
+                  do:
+                    - set:
+                        name: alreadyPresent
+                        value: false
+                    - set:
+                        name: newTool
+                        value: '{{item}}'
+                    - repeat:
+                        'on': '{{openaiParameters.tools}}'
+                        do:
+                          - conditions:
+                              '{{item.function.name}} == {{newTool.function.name}}':
+                                - set:
+                                    name: alreadyPresent
+                                    value: true
+                    - conditions:
+                        '!{{alreadyPresent}}':
+                          - set:
+                              name: openaiParameters.tools
+                              type: push
+                              value: '{{newTool}}'
+        - comment: |
+            ## Reset the list of tool to calls.
+        - set:
+            name: toolCalls
+            value: []
+        - conditions:
+            '{{totalCounter}} >= {{maxTools}}':
+              - comment: 'We don''t want to trigger anymore tools, it''s time to go back home. '
+              - set:
+                  name: openaiParameters.tool_choice
+                  value: none
+        - comment: |
+            ## QUERY THE LLM
+        - set:
+            name: llmStartTs
+            value: '{% date({{run.date}}).ts %}'
+        - LLMCompletion:
+            input: '{{input}}'
+            projectId: '{{projectId}}'
+            promptTokens: '{{promptTokens}}'
+            limits: '{{limits}}'
+            failover: '{{failover}}'
+            openaiParameters: '{{openaiParameters}}'
+            messages: '{{messages}}'
+            stream: '{{stream}}'
+            modelsOverride: '{{modelsOverride}}'
+            messageId: '{{messageId}}'
+            $http: '{{$http}}'
+            output: result
+        - conditions:
+            '{{stream}}':
+              - set:
+                  name: answer
+                  value: ''
+              - repeat:
+                  'on': '{{result.body}}'
+                  do:
+                    - conditions:
+                        '!{{result.usage.firstTokenDuration}} && {{item.concatenated.value.length}}':
+                          - set:
+                              name: result.usage.firstTokenDuration
+                              value: '{% date({{run.date}}).ts - {{llmStartTs}} %}'
+                    - conditions:
+                        '{{item.concatenated.value}}':
+                          - set:
+                              name: answer
+                              value: '{{item.concatenated.value}}'
+                    - handleSSEMessageChunk:
+                        $http: '{{$http}}'
+                        input: '{{input}}'
+                        raw: '{{item}}'
+                        messageId: '{{messageId}}'
+                        stream: '{{stream}}'
+                        callback: '{{callback}}'
+                        projectId: '{{projectId}}'
+                        payload:
+                          delta: '{{delta}}'
+                          concatenated:
+                            value: '{{item.concatenated.value}}'
+                        codeInterpreter: '{{project.codeInterpreter}}'
+                        sources: '{{sourceResults.url}}'
+                        tool_choice: '{{openaiParameters.tool_choice}}'
+                        output: lastChunk
+                    - comment: |
+                        Below condition is to support tool calls spanning multiple chunks
+                    - conditions:
+                        '{{lastChunk.toolCalls}}':
+                          - conditions:
+                              '!{{toolCalls.length}}':
+                                - set:
+                                    name: toolCalls
+                                    value: '{{lastChunk.toolCalls}}'
+                              default:
+                                - repeat:
+                                    'on': '{{lastChunk.toolCalls}}'
+                                    do:
+                                      - buildToolsFromStreamingDeltas:
+                                          aggregator: '{{toolCalls}}'
+                                          deltaObject: '{{item}}'
+                                          output: built
+                                      - set:
+                                          name: toolCalls
+                                          value: '{{built.aggregator}}'
+            default:
+              - set:
+                  name: toolCalls
+                  value: []
+              - repeat:
+                  'on': '{{result.choices}}'
+                  do:
+                    - set:
+                        name: choice
+                        value: '{{item}}'
+                    - conditions:
+                        '{{choice.message.tool_calls.length}} > 0':
+                          - repeat:
+                              'on': '{{choice.message.tool_calls}}'
+                              do:
+                                - set:
+                                    name: toolCalls
+                                    type: push
+                                    value: '{{item}}'
+        - conditions:
+            '{{toolCalls.length}} > 0':
+              - comment: |
+                  ## Tools are asked, we will have to execute them.
+                  This is handled outside of this repeat block.
+                  We emit the token usage here, and later on one "empty" usage per tool called to track their number of use.
+                  Usage will be emited there
+              - getUsageForQuery:
+                  tool: toolCalling
+                  result: '{{result}}'
+                  lastChunk: '{{lastChunk}}'
+                  promptTokens: '{{promptTokens}}'
+                  llmStartTs: '{{llmStartTs}}'
+                  channel: '{{channel}}'
+                  projectId: '{{projectId}}'
+                  messageId: '{{messageId}}'
+                  answer: '{{answer}}'
+                  conversationId: '{{conversationId}}'
+            '!{{toolCalls.length}}':
+              - comment: '## No tool are asked, the response will be handled by genericQuery.'
+              - getUsageForQuery:
+                  tool: genericQuery
+                  result: '{{result}}'
+                  lastChunk: '{{lastChunk}}'
+                  promptTokens: '{{promptTokens}}'
+                  llmStartTs: '{{llmStartTs}}'
+                  channel: '{{channel}}'
+                  projectId: '{{projectId}}'
+                  messageId: '{{messageId}}'
+                  answer: '{{answer}}'
+                  conversationId: '{{conversationId}}'
+                  tool_choice: '{{tool_choice}}'
+                  metadata: '{{metadata}}'
+              - set:
+                  name: output
+                  value:
+                    llmCompletionResult: '{{result}}'
+                    lastChunk: '{{lastChunk}}'
+                    answer: '{{answer}}'
+                    allSourceResults: '{{allSourceResults}}'
+                    allSearchResults: '{{allSearchResults}}'
+              - break:
+                  scope: repeat
+        - conditions:
+            '{{toolCalls.length}} > 0':
+              - comment: |
+                  ## Tools have been asked, let's call the gods upon them.
+              - repeat:
+                  'on': '{{toolCalls}}'
+                  do:
+                    - set:
+                        name: totalCounter
+                        value: '{% {{totalCounter}} + 1 %}'
+                    - set:
+                        name: toolPrismeaiFormat
+                        value:
+                          id: '{{item.function.name}}'
+                          arguments: '{% unsafejson({{item.function.arguments}}) %}'
+                    - comment: '## Emit usage for the tokens used to provide the arguments of the tool, before executing the tool itself'
+                    - getUsageForQuery:
+                        tool: '{{toolPrismeaiFormat.id}}'
+                        channel: '{{channel}}'
+                        projectId: '{{projectId}}'
+                        messageId: '{{messageId}}'
+                        answer: '{{toolPrismeaiFormat.arguments}}'
+                        conversationId: '{{conversationId}}'
+                    - conditions:
+                        '{{stream}}':
+                          - conditions:
+                              '{{availableToolsDetails.toolsDefinitions[{{toolPrismeaiFormat.id}}].type}} == ''agent''':
+                                - set:
+                                    name: toolParams
+                                    value:
+                                      tool: '{{availableToolsDetails.toolsDefinitions[{{toolPrismeaiFormat.id}}].agent.name}}'
+                                      img: '{{availableToolsDetails.toolsDefinitions[{{toolPrismeaiFormat.id}}].agent.img}}'
+                              default:
+                                - set:
+                                    name: toolParams
+                                    value:
+                                      tool: '{{toolPrismeaiFormat.id}}'
+                          - set:
+                              name: $http
+                              value:
+                                chunk:
+                                  activity:
+                                    - title:
+                                        key: executing_tool
+                                        params: '{{toolParams}}'
+                                      type: toolCall
+                                      raw:
+                                        role: assistant
+                                        tool_calls:
+                                          - '{{item}}'
+                                        content: 
+                    - comment: |-
+                        ## Let''s execute each tools one by one, then add them to the history + the call responses.
+                        NB: executeTool is expecting Prisme.ai tool format.
+                    - executeTool:
+                        tool: '{{toolPrismeaiFormat}}'
+                        toolDefinition: '{{availableToolsDetails.toolsDefinitions[{{toolPrismeaiFormat.id}}]}}'
+                        newAttachments: '{% {{toolPrismeaiFormat.newAttachments}} || {{newAttachments}} %}'
+                        allConversationAttachments: '{% {{toolPrismeaiFormat.allConversationAttachments}} || {{allConversationAttachments}} %}'
+                        input: '{{input}}'
+                        history: '{{history}}'
+                        project: '{{overrideArguments.project}}'
+                        filters: '{{filters}}'
+                        metadata: '{{metadata}}'
+                        openaiParameters: '{{openaiParameters}}'
+                        callback: '{{callback}}'
+                        previousToolResults: '{{toolResults}}'
+                        messageId: '{{messageId}}'
+                        conversationId: '{{conversationId}}'
+                        $http: '{{$http}}'
+                        output: result
+                    - set:
+                        name: toolContent
+                        value: ''
+                    - conditions:
+                        '{{result.input}}':
+                          - set:
+                              name: overrideArguments.input
+                              value: '{{result.input}}'
+                    - conditions:
+                        '{{result.project}}':
+                          - set:
+                              name: overrideArguments.project
+                              type: merge
+                              value: '{{result.project}}'
+                    - conditions:
+                        '{{result.chunks.documents.length}} > 0':
+                          - enrichContextChunks:
+                              projectId: '{{project._id}}'
+                              maxContextItems: '{{maxContextItems}}'
+                              sourceViewerUrl: '{{callback.sourceViewerUrl}}'
+                              chunks: '{{result.chunks.documents}}'
+                              output: enrichedContext
+                          - createSourceResult:
+                              maxContextItems: '{{maxContextItems}}'
+                              ordoredSourcesDocuments: '{{enrichedContext.ordoredSourcesDocuments}}'
+                              output: sourceResults
+                          - set:
+                              name: searchResults
+                              value: '{{sourceResults.json}}'
+                          - set:
+                              name: allSourceResults.json
+                              type: merge
+                              value: '{{sourceResults.json}}'
+                          - set:
+                              name: allSourceResults.text
+                              value: |
+                                {{allSourceResults.text}}
+                                {{sourceResults.text}}
+                          - set:
+                              name: allSourceResults.url
+                              type: merge
+                              value: '{{sourceResults.url}}'
+                          - set:
+                              name: allSearchResults
+                              value: '{{allSourceResults.json}}'
+                    - conditions:
+                        '{{result.chunks.documents.length}}':
+                          - set:
+                              name: chunks.documents
+                              type: merge
+                              value: '{{result.chunks.documents}}'
+                          - set:
+                              name: toolContent
+                              value: '{{result.chunks.documents}}'
+                    - conditions:
+                        '{{result.output}}':
+                          - set:
+                              name: toolResults
+                              type: push
+                              value:
+                                id: '{{toolPrismeaiFormat.id}}'
+                                arguments: '{{toolPrismeaiFormat.arguments}}'
+                                output: '{{result.output}}'
+                          - set:
+                              name: toolContent
+                              value: '{{result.output}}'
+                        '!{{result.output}} && !({{result.chunks.documents.length}} > 0)':
+                          - set:
+                              name: toolResults
+                              type: push
+                              value:
+                                id: '{{toolPrismeaiFormat.id}}'
+                                arguments: '{{toolPrismeaiFormat.arguments}}'
+                                output: No result
+                          - set:
+                              name: toolContent
+                              value: No result
+                        default:
+                          - set:
+                              name: toolResults
+                              type: push
+                              value:
+                                id: '{{toolPrismeaiFormat.id}}'
+                                output: '{{result.chunks.documents}}'
+                          - set:
+                              name: toolContent
+                              value: '{{result.chunks.documents}}'
+                    - conditions:
+                        '! isNumber({{toolsCounters[{{toolPrismeaiFormat.id}}]}})':
+                          - set:
+                              name: toolsCounters[{{toolPrismeaiFormat.id}}]
+                              value: 0
+                    - set:
+                        name: toolsCounters[{{toolPrismeaiFormat.id}}]
+                        value: '{% {{toolsCounters[{{toolPrismeaiFormat.id}}]}} + 1 %}'
+                    - set:
+                        name: messages
+                        type: push
+                        value:
+                          role: assistant
+                          tool_calls:
+                            - '{{item}}'
+                          content: 
+                    - set:
+                        name: messages
+                        type: push
+                        value:
+                          role: tool
+                          tool_call_id: '{{item.id}}'
+                          content: '{{toolContent}} '
+                    - comment: '## Niveau 2 Fix: Force LLM to respond after file_summary with empty input When file_summary is called without a user question, add a system instruction to guide the LLM to present the summary to the user.'
+                    - conditions:
+                        '{{toolPrismeaiFormat.id}} == "file_summary" && !{{input}}':
+                          - set:
+                              name: messages
+                              type: push
+                              value:
+                                role: system
+                                content: The user uploaded a file without asking a specific question. Please present the file summary to the user in a helpful and clear way. Start your response with a brief introduction acknowledging the file upload, then present the key information from the summary.
+                    - comment: Inject filesForLLM as multimodal content if files were returned
+                    - set:
+                        name: toolContentForActivity
+                        value: '{{toolContent}}'
+                    - conditions:
+                        '{{result.filesForLLM}} and {{result.filesForLLM.length}} > 0':
+                          - injectFilesIntoMessages:
+                              filesForLLM: '{{result.filesForLLM}}'
+                              messages: '{{messages}}'
+                              output: injectedMessages
+                          - set:
+                              name: messages
+                              value: '{{injectedMessages.messages}}'
+                          - set:
+                              name: toolContentForActivity
+                              value: '{{injectedMessages.filesSummary}}'
+                    - conditions:
+                        '{{stream}}':
+                          - conditions:
+                              '{{availableToolsDetails.toolsDefinitions[{{toolPrismeaiFormat.id}}].type}} == ''agent''':
+                                - set:
+                                    name: toolParams
+                                    value:
+                                      tool: '{{availableToolsDetails.toolsDefinitions[{{toolPrismeaiFormat.id}}].agent.name}}'
+                                      img: '{{availableToolsDetails.toolsDefinitions[{{toolPrismeaiFormat.id}}].agent.img}}'
+                              default:
+                                - set:
+                                    name: toolParams
+                                    value:
+                                      tool: '{{toolPrismeaiFormat.id}}'
+                          - set:
+                              name: $http
+                              value:
+                                chunk:
+                                  activity:
+                                    - title:
+                                        key: tool_result
+                                        params: '{{toolParams}}'
+                                      type: toolResult
+                                      raw:
+                                        role: tool
+                                        tool_call_id: '{{item.id}}'
+                                        content: '{{toolContentForActivity}} '
+  - comment: |-
+      After everything has been handled, we have an edge case to watch for: 
+        - new_attachments were sent
+        - neither file_search nor file_summary has been called by the LLM
+  - set:
+      name: newAttachmentsWereSent
+      value: '{% {{newAttachments}} and {{newAttachments.length}} > 0 %}'
+  - repeat:
+      'on': '{{toolResults}}'
+      do:
+        - conditions:
+            '{{item.id}} in "file_search,file_summary"':
+              - set:
+                  name: fileUploadHaveBeenCalled
+                  value: true
+  - conditions:
+      '{{newAttachmentsWereSent}} and !{{fileUploadHaveBeenCalled}}':
+        - executeTool:
+            tool:
+              id: file_upload
+              arguments: {}
+            newAttachments: '{{newAttachments}}'
+            allConversationAttachments: '{{allConversationAttachments}}'
+            input: '{{input}}'
+            history: '{{history}}'
+            project: '{{overrideArguments.project}}'
+            filters: '{{filters}}'
+            metadata: '{{metadata}}'
+            openaiParameters: '{{openaiParameters}}'
+            callback: '{{callback}}'
+            previousToolResults: '{{toolResults}}'
+            messageId: '{{messageId}}'
+            conversationId: '{{conversationId}}'
+            $http: '{{$http}}'
+            output: postFileUpload
+output: '{{output}}'
+validateArguments: false
+arguments:
+  messageId:
+    type: string
+  projectId:
+    type: string
+    description: Project id only used for rate limits & usage tracking
+  limits:
+    type: object
+    properties:
+      projects:
+        type: object
+        properties:
+          requestsPerMinute:
+            type: number
+          tokensPerMinute:
+            type: number
+      users:
+        type: object
+        properties:
+          requestsPerMinute:
+            type: number
+          tokensPerMinute:
+            type: number
+      models:
+        type: object
+        properties:
+          requestsPerMinute:
+            type: number
+          tokensPerMinute:
+            type: number
+  failover:
+    type: object
+    title:
+      en: Failover
+      fr: Failover
+    description:
+      en: Can dynamically change model when selected model is overloaded.
+      fr: Peut changer automatiquement de modèle lorsque celui sélectionné est surchargé.
+    properties:
+      enabled:
+        type: boolean
+        title:
+          en: Enabled
+          fr: Activé
+  promptTokens:
+    type: number
+    description: Total number of prompt tokens for rate limits
+  openaiParameters:
+    type: object
+    properties:
+      model:
+        type: string
+  input:
+    description: used for mistral only
+    type: string
+  messages:
+    type: array
+    items:
+      type: object
+      properties:
+        role:
+          type: string
+        content:
+          type: string
+  project:
+    type: object
+  stream:
+    type: object
+    properties:
+      method:
+        type: string
+      concatenate:
+        type: object
+        properties:
+          path:
+            type: string
+          throttle:
+            type: number
+  modelsOverride:
+    type: object
+    additionalProperties: true
+    properties:
+      openai:
+        type: object
+        additionalProperties: true
+        properties:
+          openai:
+            type: object
+            additionalProperties: true
+            properties:
+              api_key:
+                type: string
+                secret: true
+          azure:
+            type: object
+            additionalProperties: true
+            properties:
+              resources:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                  properties:
+                    api_key:
+                      type: string
+                      secret: true
+  channel:
+    description: For Usage emission
+    type: string
+  conversationId:
+    description: For Usage emission
+    type: string
+  filters:
+    type: array
+    items:
+      type: object
+      properties:
+        field:
+          type: string
+        type:
+          enum:
+            - textSearch
+            - match
+            - in
+            - not in
+          type: string
+        value:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+  tool_choice: {}

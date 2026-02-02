@@ -1,0 +1,16 @@
+# ERROR: Multiple unknown fields on different instructions
+# Tests that the linter catches all errors, not just the first one
+slug: multipleUnknownFields
+name: Test/Multiple unknown fields
+do:
+  - set:
+      name: var1
+      value: test
+      format: json  # INVALID
+  - emit:
+      event: testEvent
+      async: true  # INVALID
+  - fetch:
+      url: https://example.com
+      retries: 3  # INVALID
+      output: result

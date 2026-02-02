@@ -1,0 +1,9 @@
+# EXPRESSION ERROR: Unclosed expression tag
+# Missing closing %}
+# This is NOT caught by current linter (requires expression parsing)
+slug: unclosedExpression
+name: Test/Unclosed expression
+do:
+  - set:
+      name: result
+      value: '{% {{myVar}} + 1'  # INVALID: missing closing %}

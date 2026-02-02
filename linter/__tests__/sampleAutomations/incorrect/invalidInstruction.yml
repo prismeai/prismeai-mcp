@@ -1,0 +1,31 @@
+slug: taskExecuteSourceFilter
+name: Query/execute source filter
+do:
+  - set:
+      name: newOrdoredSources
+      value: []
+  - repeat:
+      'on': '{{llmAnswer.sourceFilter}}'
+      because: 'INCORRECT FIELD'
+      do:
+        - set:
+            name: filteredDocName
+            value: '{{item}}'
+        - repeat:
+            'on': '{{ordoredSourcesDocuments}}'
+            do:
+              - set:
+                  name: ordoredDoc
+                  value: '{{item}}'
+              - conditions:
+                  '{{filteredDocName}} == {{ordoredDoc.name}}':
+                    - set:
+                        name: newOrdoredSources
+                        type: push
+                        value: '{{ordoredDoc}}'
+arguments:
+  llmAnswer:
+    type: object
+  ordoredSourcesDocuments:
+    type: array
+output: '{{newOrdoredSources}}'

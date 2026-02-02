@@ -1,0 +1,16 @@
+# ERROR: Invalid enum values
+# - set.type must be one of: replace, merge, push
+# - fetch.method must be one of: get, post, put, patch, delete
+# - break.scope must be one of: all, automation, repeat
+slug: invalid-enum
+name: Test/Invalid Enum Values
+do:
+  - set:
+      name: myVar
+      value: 123
+      type: "invalid-type"  # INVALID: must be replace|merge|push
+  - fetch:
+      url: "http://example.com"
+      method: "INVALID"  # INVALID: must be get|post|put|patch|delete
+  - break:
+      scope: "invalid-scope"  # INVALID: must be all|automation|repeat

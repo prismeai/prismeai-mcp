@@ -1,0 +1,5 @@
+# ERROR: 'do' must be an array of instructions
+# Schema requires do to be an array
+slug: invalidDoType
+name: Test/Invalid do type
+do: "not an array"  # INVALID: 'do' must be an array

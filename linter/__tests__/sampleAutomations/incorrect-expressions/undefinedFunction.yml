@@ -1,0 +1,9 @@
+# EXPRESSION ERROR: Using undefined function 'now()'
+# Valid functions include: date(), uuid(), json(), etc.
+# This is NOT caught by current linter (requires expression parsing)
+slug: undefinedFunction
+name: Test/Undefined function
+do:
+  - set:
+      name: timestamp
+      value: '{% now() %}'  # INVALID: now() doesn't exist, use date()

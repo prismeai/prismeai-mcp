@@ -2,9 +2,29 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSy
 import { fileURLToPath } from "url";
 import { basename, dirname, join, resolve } from "path";
 import AdmZip from "adm-zip";
+import yaml from "js-yaml";
 import { PrismeApiClient, AIKnowledgeQueryParams, AIKnowledgeCompletionParams, AIKnowledgeDocumentParams, AIKnowledgeProjectParams, AIKnowledgeAuth, AppInstance } from "../api-client.js";
 import { resolveWorkspaceAndEnvironment, environmentsConfig, PRISME_API_BASE_URL } from "../config.js";
 import { enforceReadonlyMode, truncateJsonOutput } from "../utils.js";
+import { lintAutomation, type AutomationLintResult } from "@prisme.ai/linter";
+
+/**
+ * Format linting errors for human-readable output
+ */
+function formatLintErrors(result: AutomationLintResult): string {
+  if (result.valid) {
+    return "Validation passed: No errors found.";
+  }
+
+  const errorLines = result.errors.map((err, i) => {
+    const path = err.instancePath || "(root)";
+    const message = err.message || "Unknown error";
+    const params = err.params ? ` (${JSON.stringify(err.params)})` : "";
+    return `${i + 1}. [${err.keyword}] ${path}: ${message}${params}`;
+  });
+
+  return `Validation failed with ${result.errors.length} error(s):\n${errorLines.join("\n")}`;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,6 +46,21 @@ export async function handleToolCall(
         workspaceName?: string;
         environment?: string;
       };
+
+      // Validate automation before creating
+      const lintResult = lintAutomation(automation);
+      if (!lintResult.valid) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Automation validation failed. Please fix the following errors before creating:\n\n${formatLintErrors(lintResult)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
       const resolved = resolveWorkspaceAndEnvironment({
         workspaceId,
         workspaceName,
@@ -91,6 +126,21 @@ export async function handleToolCall(
         workspaceName?: string;
         environment?: string;
       };
+
+      // Validate automation before updating
+      const lintResult = lintAutomation(automation);
+      if (!lintResult.valid) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Automation validation failed. Please fix the following errors before updating:\n\n${formatLintErrors(lintResult)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
       const resolved = resolveWorkspaceAndEnvironment({
         workspaceId,
         workspaceName,
@@ -389,18 +439,126 @@ export async function handleToolCall(
       }
     }
 
-    case "lint_doc": {
-      // Go up two levels from tools/ to get to the project root
-      const lintingPath = join(__dirname, "..", "..", "linting.mdx");
-      const lintingRules = readFileSync(lintingPath, "utf-8");
-      return {
-        content: [
-          {
-            type: "text",
-            text: lintingRules,
-          },
-        ],
+    case "validate_automation": {
+      const { path: inputPath, automation, strict, validateExpressions: validateExprs } = args as {
+        path?: string;
+        automation?: any;
+        strict?: boolean;
+        validateExpressions?: boolean;
       };
+
+      const lintOptions = { strict, validateExpressions: validateExprs };
+
+      // Helper to validate a single file
+      const validateFile = (filePath: string): { path: string; valid: boolean; errors?: any[]; error?: string } => {
+        try {
+          const fileContent = readFileSync(filePath, "utf-8");
+          const ext = filePath.toLowerCase();
+          const parsed = ext.endsWith(".json") ? JSON.parse(fileContent) : yaml.load(fileContent);
+          const result = lintAutomation(parsed, lintOptions);
+
+          if (result.valid) {
+            return { path: filePath, valid: true };
+          }
+          return {
+            path: filePath,
+            valid: false,
+            errors: result.errors.map((err) => ({
+              path: err.instancePath || "(root)",
+              keyword: err.keyword,
+              message: err.message,
+            })),
+          };
+        } catch (err) {
+          return { path: filePath, valid: false, error: err instanceof Error ? err.message : "Parse error" };
+        }
+      };
+
+      if (inputPath) {
+        const resolvedPath = resolve(inputPath);
+        if (!existsSync(resolvedPath)) {
+          return {
+            content: [{ type: "text", text: `Error: Path not found: ${resolvedPath}` }],
+            isError: true,
+          };
+        }
+
+        const stat = statSync(resolvedPath);
+
+        if (stat.isDirectory()) {
+          // Validate all automation files in folder
+          const files = readdirSync(resolvedPath)
+            .filter((f) => /\.(ya?ml|json)$/i.test(f))
+            .map((f) => join(resolvedPath, f));
+
+          if (files.length === 0) {
+            return {
+              content: [{ type: "text", text: JSON.stringify({ path: resolvedPath, message: "No .yml, .yaml, or .json files found in folder." }, null, 2) }],
+            };
+          }
+
+          const results = files.map(validateFile);
+          const validCount = results.filter((r) => r.valid).length;
+          const invalidCount = results.length - validCount;
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    path: resolvedPath,
+                    summary: `${validCount}/${results.length} files valid${invalidCount > 0 ? `, ${invalidCount} with errors` : ""}`,
+                    results,
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        } else {
+          // Single file
+          const result = validateFile(resolvedPath);
+          return {
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          };
+        }
+      } else if (automation) {
+        const result = lintAutomation(automation, lintOptions);
+
+        if (result.valid) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ valid: true, message: "Automation is valid." }, null, 2) }],
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  valid: false,
+                  errorCount: result.errors.length,
+                  errors: result.errors.map((err) => ({
+                    path: err.instancePath || "(root)",
+                    keyword: err.keyword,
+                    message: err.message,
+                  })),
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } else {
+        return {
+          content: [{ type: "text", text: "Error: Either 'path' or 'automation' must be provided." }],
+          isError: true,
+        };
+      }
     }
 
     case "report_issue_or_feedback": {
