@@ -10,8 +10,6 @@ Environments are configured during setup. You can add any number of custom envir
 
 | Environment | API URL |
 |-------------|---------|
-| `sandbox` | `https://api.sandbox.prisme.ai/v2` |
-| `staging` | `https://api.staging.prisme.ai/v2` |
 | `prod` | `https://api.studio.prisme.ai/v2` |
 | `custom` | `https://api.your-instance.prisme.ai/v2` |
 
@@ -144,12 +142,19 @@ PRISME_FORCE_READONLY=true
 - `execute_automation`
 - `push_workspace`
 - `pull_workspace`
+- `install_app_instance`
+- `update_app_instance`
+- `uninstall_app_instance`
+- `update_app_instance_config`
 
 ### Available in Readonly
 
 - `get_automation`
 - `list_automations`
 - `list_apps`, `get_app`
+- `list_app_instances`
+- `get_app_instance`
+- `get_app_instance_config`
 - `search_events`
 - `search_workspaces`
 - `get_prisme_documentation`

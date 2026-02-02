@@ -43,6 +43,7 @@ mcp-prisme.ai/
 | `PRISME_DEFAULT_ENVIRONMENT` | No | Default environment name |
 | `PRISME_WORKSPACES` | No | Legacy workspace mappings |
 | `PRISME_FORCE_READONLY` | No | Block write operations |
+| `PRISME_DISABLE_FEEDBACK_TOOLS` | No | Disable feedback reporting tools |
 
 ## API Endpoints
 
