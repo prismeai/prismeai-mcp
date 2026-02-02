@@ -115,8 +115,11 @@ Create the workspace directory with all files. The folder name must be `{service
 ├── security.yml
 ├── imports/
 │   └── Custom Code.yml
+├── pages/
+│   └── _doc.yml                         # Documentation page (Instructions + MCP tabs)
 └── automations/
     ├── mcp.yml                          # MCP JSON-RPC router (private)
+    ├── initDocMcp.yml                   # Doc page init automation (private)
     ├── ensureAuthentication.yml          # Session auth helper (private)
     ├── buildAuthHeader.yml              # App config auth helper (private)
     ├── configure{Service}.yml           # MCP configure tool (private)
@@ -686,6 +689,157 @@ output: '{{output}}'
 - Use `oneOf` in configure test for deployment variant conditional fields
 - Use `ui:widget: textarea` for secret/token fields
 
+### 3.12 automations/initDocMcp.yml
+
+Automation triggered by the doc page to compute the dynamic MCP endpoint URL.
+
+**Key rules:**
+- `slug: initDocMcp`
+- `name: initDocMcp`
+- `private: true`
+- Triggered by event `initDocMcp` (emitted by the doc page `onInit`)
+- Uses `{{global.endpoints.mcp}}` to get the full endpoint URL (adapts to any environment)
+- Emits `updateDocMcp` event with the URL, targeted to the user's session
+
+**Template:**
+```yaml
+slug: initDocMcp
+name: initDocMcp
+description: Initialize the MCP doc page with the dynamic endpoint URL
+when:
+  events:
+    - initDocMcp
+do:
+  - emit:
+      event: updateDocMcp
+      payload:
+        mcpEndpointUrl: '{{global.endpoints.mcp}}'
+      target:
+        sessionId: '{{source.sessionId}}'
+private: true
+```
+
+### 3.13 pages/_doc.yml
+
+Documentation page with two tabs: **Instructions** and **MCP**.
+
+**Structure:**
+- Top-level `RichText` block with `<h1>{Service} MCP</h1>` header
+- `TabsView` with `direction: horizontal`, `selected: 0`, two tabs
+
+**Tab 1 — Instructions:**
+- Introduction: what the app does (1-2 paragraphs)
+- Configuration table: all fields from `config.schema` in index.yml (field name, type, description)
+- One section per public app instruction (flat `{tool}.yml`), each with:
+  - Instruction name as `### {toolName}`
+  - Short description
+  - Parameter table with columns: Parameter, Type, Required/Default, Description
+- Content must be localized (fr + en keys)
+- Use `markdown: true` on the RichText block
+
+**Tab 2 — MCP:**
+- The RichText block MUST have `onInit: initDocMcp` and `updateOn: updateDocMcp`
+- Endpoint section: display `{{mcpEndpointUrl}}` inside a code block (dynamically resolved by the init automation)
+- Headers configuration: show example JSON for each auth type (Basic Auth, Token, etc.) ready to copy-paste into AI Knowledge MCP tool headers
+- MCP tools table: list all tools from `mcpTools` in index.yml with name + description
+- MCP resources table (if applicable): list resources with URI + description
+- Content must be localized (fr + en keys)
+- Use `markdown: true` on the RichText block
+
+**Template (abbreviated):**
+```yaml
+slug: _doc
+name:
+  fr: Documentation
+  en: Documentation
+blocks:
+  - slug: RichText
+    content:
+      fr: <h1>{Service} MCP</h1>
+      en: <h1>{Service} MCP</h1>
+  - slug: TabsView
+    direction: horizontal
+    selected: 0
+    tabs:
+      - text:
+          fr: Instructions
+          en: Instructions
+        content:
+          blocks:
+            - slug: RichText
+              markdown: true
+              content:
+                fr: |
+                  ## Introduction
+                  ...
+                  ## Configuration
+                  | Champ | Type | Description |
+                  ...
+                  ## Instructions
+                  ### {toolName}
+                  ...
+                en: |
+                  ## Introduction
+                  ...
+                  ## Configuration
+                  | Field | Type | Description |
+                  ...
+                  ## Instructions
+                  ### {toolName}
+                  ...
+      - text:
+          fr: MCP
+          en: MCP
+        content:
+          blocks:
+            - slug: RichText
+              onInit: initDocMcp
+              updateOn: updateDocMcp
+              markdown: true
+              content:
+                fr: |
+                  ## Utilisation en tant que serveur MCP
+                  ### Endpoint
+                  ```
+                  {{mcpEndpointUrl}}
+                  ```
+                  ### Configuration des headers
+                  **Basic Auth :**
+                  ```json
+                  {
+                    "baseurl": "https://example.com/...",
+                    "username": "votre-utilisateur",
+                    "password": "votre-mot-de-passe"
+                  }
+                  ```
+                  ### Outils MCP
+                  | Outil | Description |
+                  ...
+                en: |
+                  ## Usage as MCP Server
+                  ### Endpoint
+                  ```
+                  {{mcpEndpointUrl}}
+                  ```
+                  ### Headers configuration
+                  **Basic Auth:**
+                  ```json
+                  {
+                    "baseurl": "https://example.com/...",
+                    "username": "your-username",
+                    "password": "your-password"
+                  }
+                  ```
+                  ### MCP Tools
+                  | Tool | Description |
+                  ...
+```
+
+**Important notes:**
+- The `{{mcpEndpointUrl}}` variable is populated by the `initDocMcp` automation via the `updateDocMcp` event
+- Header field names in the JSON examples must be **lowercase** (e.g., `baseurl` not `baseUrl`) since HTTP headers are lowercased by Prisme.ai
+- Adapt the auth header examples to match the service's auth types (Basic Auth, Token, API Key, etc.)
+
 ---
 
 ## Phase 4: Cloud vs Server/DC Handling
@@ -743,6 +897,10 @@ Verify:
 - [ ] `config.schema` in index.yml has fields matching what `buildAuthHeader` reads
 - [ ] All automations with `do:` blocks have `output: '{{output}}'`
 - [ ] All tools handle the 3 output formats (structured/verbose/both) in tool wrappers
+- [ ] `pages/_doc.yml` exists with two tabs (Instructions + MCP)
+- [ ] `automations/initDocMcp.yml` exists and emits `updateDocMcp` with `{{global.endpoints.mcp}}`
+- [ ] MCP tab RichText has `onInit: initDocMcp` and `updateOn: updateDocMcp`
+- [ ] All public app instructions are documented in the Instructions tab with their parameters
 
 ### 5.3 Code Review
 
@@ -781,8 +939,9 @@ After all files are created and validated, provide:
 2. **Architecture diagram**: Show the 3-layer flow
 3. **Tool list**: Table of all MCP tools with descriptions
 4. **Visibility**: Confirm which automations are public vs private
-5. **Testing instructions**: How to test via `execute_automation` or webhook
-6. **Deployment command**: The `push_workspace` command to run (but don't execute unless asked)
+5. **Documentation page**: Confirm the `_doc` page was created with Instructions + MCP tabs
+6. **Testing instructions**: How to test via `execute_automation` or webhook
+7. **Deployment command**: The `push_workspace` command to run (but don't execute unless asked)
 
 ```
 push_workspace(
