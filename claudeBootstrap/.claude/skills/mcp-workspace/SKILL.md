@@ -38,8 +38,8 @@ Every MCP workspace uses a **3-layer architecture** that separates concerns:
 
 | Layer | File pattern | Slug pattern | Name pattern | Private | Purpose |
 |-------|-------------|-------------|-------------|---------|---------|
-| **Method** | `method-{tool}.yml` | `method-{tool}` | `/01_Helpers/{tool}` | true | Core logic: API calls, data transform. Flat args: tool params + `baseUrl` + `authHeader`. No auth logic, no output formatting. |
-| **Tool wrapper** | `tool-{tool}.yml` | `tool-{tool}` | `/02_Tools/{tool}` | true | MCP interface: `body.arguments.*` → calls `ensureAuthentication` → delegates to `method-{tool}` → output formatting (structured/verbose/both) |
+| **Method** | `method-{tool}.yml` | `method-{tool}` | `/02_Methods/{scope}/method-{tool}` | true | Core logic: API calls, data transform. Flat args: tool params + `baseUrl` + `authHeader`. No auth logic, no output formatting. |
+| **Tool wrapper** | `tool-{tool}.yml` | `tool-{tool}` | `/03_Tools/{scope}/{tool}` | true | MCP interface: `body.arguments.*` → calls `ensureAuthentication` → delegates to `method-{tool}` → output formatting (structured/verbose/both) |
 | **Flat app instruction** | `{tool}.yml` | `{tool}` | `{tool}` | **false** | Public app API: flat args → calls `buildAuthHeader` (reads `config.*`) → delegates to `method-{tool}` → returns raw structured result |
 | **Helper** | `buildAuthHeader.yml` | `buildAuthHeader` | `/01_Helpers/buildAuthHeader` | true | Reads `config.*` (app config), builds `{baseUrl, authHeader}` or `{error}` |
 | **Helper** | `ensureAuthentication.yml` | `ensureAuthentication` | `/01_Helpers/ensureAuthentication` | true | Reads `user.{service}.credentials` (session), builds auth header |
@@ -397,7 +397,7 @@ The method contains the **core logic** extracted from the tool: API calls, data 
 
 **Key rules:**
 - `slug: method-{toolName}`
-- `name: /01_Helpers/{toolName}`
+- `name: /02_Methods/{scope}/method-{toolName}`
 - `private: true`
 - **Flat arguments**: tool-specific params + `baseUrl` + `authHeader` (not nested in `body.arguments`)
 - No call to `ensureAuthentication` or `buildAuthHeader`
@@ -407,7 +407,7 @@ The method contains the **core logic** extracted from the tool: API calls, data 
 **Template (simple tool — e.g., deleteFile):**
 ```yaml
 slug: method-deleteFile
-name: /01_Helpers/deleteFile
+name: /02_Methods/Files/method-deleteFile
 description: Core logic to delete a file or directory
 private: true
 arguments:
@@ -462,7 +462,7 @@ Thin wrapper for MCP: unwraps `body.arguments.*`, calls auth, delegates to metho
 
 **Key rules:**
 - `slug: tool-{toolName}`
-- `name: /02_Tools/{toolName}`
+- `name: /03_Tools/{scope}/{toolName}`
 - `private: true`
 - Arguments follow the `body.arguments.*` pattern
 - Calls `ensureAuthentication` → checks `auth.authenticated` → calls `method-{tool}` → checks `methodResult.error` → formats output (structured/verbose/both)
@@ -471,7 +471,7 @@ Thin wrapper for MCP: unwraps `body.arguments.*`, calls auth, delegates to metho
 **Template:**
 ```yaml
 slug: tool-deleteFile
-name: /02_Tools/deleteFile
+name: /03_Tools/Files/deleteFile
 description: Delete a file or directory from the WebDAV server
 private: true
 arguments:
@@ -607,7 +607,7 @@ Tests are **playground automations** (not endpoints). Configuration is done once
 **Example test-configure{Service}.yml:**
 ```yaml
 slug: test-configure{Service}
-name: /04_Tests/test-configure{Service}
+name: /03_Tools/Config/test-configure{Service}
 description: Playground test for configure{Service} tool
 private: true
 when: {}
@@ -655,7 +655,7 @@ output: '{{output}}'
 **For standard tool tests (all other tools):**
 ```yaml
 slug: test-{toolName}
-name: /04_Tests/test-{toolName}
+name: /03_Tools/{scope}/test-{toolName}
 description: Playground test for {toolName} tool
 private: true
 when: {}
@@ -678,7 +678,7 @@ output: '{{output}}'
 
 **Key rules:**
 - `slug: test-{toolName}`
-- `name: /04_Tests/test-{toolName}`
+- `name: /03_Tools/{scope}/test-{toolName}`
 - `private: true`
 - `when: {}` (playground automation, NOT endpoint)
 - Calls **`tool-{toolName}:`** (the MCP wrapper, with `body.arguments` interface)
