@@ -1,8 +1,11 @@
 import { lintAutomation } from '../index';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const SAMPLE_AUTOMATIONS_DIR = path.join(__dirname, 'sampleAutomations');
 
 function loadAutomation(relativePath: string): unknown {

@@ -167,6 +167,20 @@ export function extractIdentifiers(exprContent: string): Identifier[] {
       continue;
     }
 
+    // Check if it's preceded by ). (property access on function result) - skip those
+    // e.g., date({{now}}).ts - the .ts is valid property access on function result
+    if (match.index > 1 && withoutStrings[match.index - 1] === '.') {
+      // Find the non-whitespace character before the dot
+      let i = match.index - 2;
+      while (i >= 0 && /\s/.test(withoutStrings[i])) {
+        i--;
+      }
+      // Only skip if it's a closing paren (function call result)
+      if (i >= 0 && withoutStrings[i] === ')') {
+        continue;
+      }
+    }
+
     identifiers.push({
       name: match[1],
       start: match.index,

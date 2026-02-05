@@ -132,6 +132,21 @@ describe('expression validation', () => {
       expect(bracketErrors.length).toBe(0);
     });
 
+    it('should not flag property access after function calls', () => {
+      const automation = {
+        name: 'test',
+        do: [
+          { set: { name: 'x', value: '{% date({{now}}).ts + 300 %}' } },
+          { set: { name: 'y', value: '{% date({{tokenExpiration}}).iso %}' } },
+        ],
+      };
+      const errors = validateExpressions(automation);
+      const bracketErrors = errors.filter(
+        (e) => e.params?.expressionType === 'missingBrackets'
+      );
+      expect(bracketErrors.length).toBe(0);
+    });
+
     it('should not flag string literals as missing brackets', () => {
       const automation = {
         name: 'test',
