@@ -2,7 +2,7 @@
 name: 01-design
 description: Use this skill to create detailed specifications for a Prisme.ai feature or change. Gathers context from documentation and codebase, then clarifies requirements with the user.
 argument-hint: "[workspace-name] [feature description]"
-allowed-tools: Read, Write, Grep, Glob, Task, AskUserQuestion, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__get_app, mcp__prisme-ai-builder__list_apps
+allowed-tools: Read, Write, Grep, Glob, Task, AskUserQuestion, WebSearch, WebFetch, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__get_app, mcp__prisme-ai-builder__list_apps
 ---
 
 # Prisme.ai Specification Design Process
@@ -114,11 +114,210 @@ Task(
 
 ---
 
-## Phase 3: Question Generation
+## Phase 3: External Research (Web Search)
 
-Based on the documentation and codebase exploration, generate a comprehensive list of questions organized by category:
+Research design patterns, existing solutions, and real-world examples from the web and GitHub to inform the specification.
 
-### 3.1 Question Categories
+### 3.1 Identify Research Topics
+
+Based on the feature description, identify 3-5 key research topics:
+- Core technical challenge (e.g., "real-time sync", "RAG pipeline", "user authentication")
+- Industry patterns for similar features
+- Open-source implementations
+
+### 3.2 Search for Design Patterns
+
+Use `WebSearch` to find established design patterns:
+
+```
+WebSearch(query: "[CORE TECHNICAL CHALLENGE] design pattern best practices 2026")
+WebSearch(query: "[FEATURE TYPE] architecture pattern")
+```
+
+**Examples:**
+- "event-driven automation design pattern best practices 2026"
+- "RAG pipeline architecture pattern"
+- "human-in-the-loop workflow design pattern"
+
+### 3.3 Search for Existing Frameworks & Solutions
+
+Research existing tools and libraries that solve similar problems:
+
+```
+WebSearch(query: "[FEATURE DESCRIPTION] library framework comparison 2026")
+WebSearch(query: "[TECHNOLOGY AREA] open source tools")
+```
+
+**Examples:**
+- "workflow automation library framework comparison 2026"
+- "document processing RAG open source tools"
+- "conversational AI framework comparison"
+
+### 3.4 Search GitHub for Examples
+
+Search GitHub for real-world implementations:
+
+```
+WebSearch(query: "site:github.com [FEATURE KEYWORDS] implementation")
+WebSearch(query: "github [TECHNOLOGY] [PATTERN] example repository")
+```
+
+**Examples:**
+- "site:github.com webhook retry mechanism implementation"
+- "github langchain RAG pipeline example repository"
+- "site:github.com human approval workflow automation"
+
+### 3.5 Search for Reference Files
+
+Search for key technical files that inform the specification. Based on the feature context, search for relevant file types:
+
+#### A. API Specifications (REST/HTTP)
+
+**When:** Feature involves REST APIs, webhooks, or HTTP integrations
+
+```
+WebSearch(query: "[SERVICE NAME] API swagger openapi specification")
+WebSearch(query: "site:github.com [SERVICE NAME] openapi.yaml OR swagger.json")
+```
+
+**File types:** `openapi.yaml`, `openapi.json`, `swagger.json`, `swagger.yaml`
+
+#### B. GraphQL Schemas
+
+**When:** Feature involves GraphQL APIs
+
+```
+WebSearch(query: "[SERVICE NAME] GraphQL schema SDL")
+WebSearch(query: "site:github.com [SERVICE NAME] schema.graphql")
+```
+
+**File types:** `schema.graphql`, `*.graphqls`, `schema.gql`
+
+#### C. Event/Message Schemas (AsyncAPI)
+
+**When:** Feature involves event-driven architecture, message queues, webhooks
+
+```
+WebSearch(query: "[SERVICE NAME] AsyncAPI specification")
+WebSearch(query: "site:github.com [SERVICE NAME] asyncapi.yaml webhook schema")
+```
+
+**File types:** `asyncapi.yaml`, `asyncapi.json`
+
+#### D. Data Schemas & Types
+
+**When:** Feature involves data models, validation, or type definitions
+
+```
+WebSearch(query: "[SERVICE NAME] JSON schema validation")
+WebSearch(query: "site:github.com [SERVICE NAME] types.ts OR interfaces.ts")
+WebSearch(query: "[SERVICE NAME] data model schema")
+```
+
+**File types:** `schema.json` (JSON Schema), `types.ts`, `interfaces.ts`, `*.prisma`, `*.proto` (Protocol Buffers)
+
+#### E. Database Schemas & Migrations
+
+**When:** Feature involves data persistence or database design
+
+```
+WebSearch(query: "[TECHNOLOGY] [FEATURE] database schema design")
+WebSearch(query: "site:github.com [PROJECT] migrations OR schema.sql")
+```
+
+**File types:** `schema.sql`, `schema.prisma`, `migrations/*.sql`, `*.entity.ts`
+
+#### F. Configuration Templates
+
+**When:** Feature requires environment setup or configuration
+
+```
+WebSearch(query: "[SERVICE NAME] configuration example")
+WebSearch(query: "site:github.com [SERVICE NAME] .env.example OR config.yaml")
+```
+
+**File types:** `.env.example`, `config.example.yaml`, `docker-compose.yml`, `values.yaml` (Helm)
+
+#### G. SDK Examples & Code Samples
+
+**When:** Feature integrates with external services that provide SDKs
+
+```
+WebSearch(query: "[SERVICE NAME] SDK [LANGUAGE] example")
+WebSearch(query: "site:github.com [SERVICE NAME] examples OR samples")
+```
+
+**File types:** Code samples in target language, `examples/` directories
+
+#### H. API Collection Files
+
+**When:** Feature involves API testing or complex API workflows
+
+```
+WebSearch(query: "[SERVICE NAME] Postman collection")
+WebSearch(query: "site:github.com [SERVICE NAME] postman_collection.json")
+```
+
+**File types:** `*.postman_collection.json`, `insomnia.json`, `bruno/`
+
+#### I. Architecture Diagrams
+
+**When:** Feature involves complex system design
+
+```
+WebSearch(query: "[PATTERN/TECHNOLOGY] architecture diagram")
+WebSearch(query: "site:github.com [PROJECT] architecture.md OR diagrams")
+```
+
+**File types:** `*.mermaid`, `*.puml` (PlantUML), `*.drawio`, `architecture.md`
+
+---
+
+**Retrieve spec files from official docs:**
+```
+WebFetch(
+  url: "[API DOCS URL]",
+  prompt: "Find links to specification files: OpenAPI/Swagger, GraphQL schema, AsyncAPI, JSON Schema, Postman collections, or SDK downloads. Return the direct URLs to these files."
+)
+```
+
+### 3.6 Deep Dive with WebFetch
+
+For promising results, use `WebFetch` to extract detailed information:
+
+```
+WebFetch(
+  url: "[URL FROM SEARCH RESULTS]",
+  prompt: "Extract the key design decisions, architecture patterns, and implementation details relevant to [FEATURE DESCRIPTION]. Focus on:
+  - Architecture choices and rationale
+  - Error handling approaches
+  - Edge cases addressed
+  - Trade-offs mentioned"
+)
+```
+
+### 3.7 Synthesize Research Findings
+
+After completing web research, create a summary:
+
+| Topic | Finding | Source | Relevance to Feature |
+|-------|---------|--------|---------------------|
+| Design Pattern | [key insight] | [URL] | [how it applies] |
+| Framework | [capability] | [URL] | [potential use] |
+| GitHub Example | [implementation detail] | [URL] | [what to adopt] |
+
+**Important considerations:**
+- Note any licensing constraints from open-source projects
+- Identify patterns that align with Prisme.ai's architecture
+- Flag approaches that conflict with platform limitations
+
+---
+
+## Phase 4: Question Generation
+
+Based on the documentation, codebase exploration, and external research, generate a comprehensive list of questions organized by category:
+
+### 4.1 Question Categories
 
 **A. Functional Requirements**
 - What exactly should this feature do?
@@ -156,9 +355,9 @@ Based on the documentation and codebase exploration, generate a comprehensive li
 
 ---
 
-## Phase 4: Self-Answer Questions
+## Phase 5: Self-Answer Questions
 
-### 4.1 Launch Parallel Research Agents by Topic
+### 5.1 Launch Parallel Research Agents by Topic
 
 Group your questions by topic and launch **multiple Explore agents in parallel** (in a single message) to research answers concurrently:
 
@@ -253,7 +452,7 @@ Task(
 
 **Important**: Only launch agents for topics that have questions. Skip empty categories.
 
-### 4.2 Aggregate and Categorize Answers
+### 5.2 Aggregate and Categorize Answers
 
 After all parallel agents complete, merge their results into:
 - **Resolved**: Questions answered from documentation/codebase (include source)
@@ -262,9 +461,9 @@ After all parallel agents complete, merge their results into:
 
 ---
 
-## Phase 5: User Clarification
+## Phase 6: User Clarification
 
-### 5.1 Ask Remaining Questions
+### 6.1 Ask Remaining Questions
 
 Use `AskUserQuestion` to clarify questions that:
 - Require subjective decisions
@@ -277,7 +476,7 @@ Use `AskUserQuestion` to clarify questions that:
 2. **Important**: Affects major design decisions
 3. **Nice-to-have**: Can assume defaults if not answered
 
-### 5.2 Question Format
+### 6.2 Question Format
 
 When asking the user, structure questions as:
 
@@ -306,11 +505,11 @@ AskUserQuestion(
 
 ---
 
-## Phase 6: Specification Output
+## Phase 7: Specification Output
 
 After gathering all information, produce a specification document and save it as a ticket.
 
-### 6.1 Feature Name Derivation
+### 7.1 Feature Name Derivation
 
 Derive a kebab-case feature name from the feature description:
 - Remove common words (the, a, an, for, to, etc.)
@@ -323,7 +522,7 @@ Derive a kebab-case feature name from the feature description:
 - "Fix the broken chat widget" → `fix-chat-widget`
 - "Implement RAG search for documents" → `rag-document-search`
 
-### 6.2 Create Ticket Directory
+### 7.2 Create Ticket Directory
 
 Create the specification file at:
 ```
@@ -332,7 +531,90 @@ Create the specification file at:
 
 Use the `Write` tool to create the file with the specification content.
 
-### 6.3 Specification Template
+### 7.3 Import Reference Files (If Relevant)
+
+Import useful reference files found during research to the ticket folder. This provides implementation context and ensures specs are versioned with the ticket.
+
+#### Folder Structure
+
+```
+./tickets/{featureName}/
+├── base-ticket.md
+└── refs/
+    ├── api/           # API specifications
+    ├── schemas/       # Data schemas & types
+    ├── config/        # Configuration templates
+    ├── examples/      # Code samples & SDK examples
+    └── docs/          # Architecture docs & diagrams
+```
+
+#### Download & Save Process
+
+1. **Download the file** using WebFetch:
+```
+WebFetch(
+  url: "[FILE URL]",
+  prompt: "Return the complete raw content of this file. Do not summarize or modify it. Preserve exact formatting."
+)
+```
+
+2. **Save to appropriate subfolder:**
+```
+Write(
+  file_path: "./tickets/{featureName}/refs/{category}/{filename}",
+  content: "[RAW CONTENT]"
+)
+```
+
+#### File Type Reference
+
+| Category | File Types | Folder | Naming Convention |
+|----------|-----------|--------|-------------------|
+| REST API | OpenAPI, Swagger | `refs/api/` | `{service}-openapi.yaml`, `{service}-swagger.json` |
+| GraphQL | Schema SDL | `refs/api/` | `{service}-schema.graphql` |
+| AsyncAPI | Event specs | `refs/api/` | `{service}-asyncapi.yaml` |
+| JSON Schema | Validation schemas | `refs/schemas/` | `{entity}-schema.json` |
+| TypeScript | Type definitions | `refs/schemas/` | `{service}-types.ts` |
+| Protobuf | gRPC definitions | `refs/schemas/` | `{service}.proto` |
+| Database | SQL schemas | `refs/schemas/` | `{service}-schema.sql`, `schema.prisma` |
+| Config | Env templates | `refs/config/` | `.env.example`, `config.example.yaml` |
+| Docker | Compose files | `refs/config/` | `docker-compose.yml` |
+| Postman | Collections | `refs/examples/` | `{service}.postman_collection.json` |
+| Code | SDK samples | `refs/examples/` | `{language}-example.{ext}` |
+| Diagrams | Architecture | `refs/docs/` | `architecture.md`, `flow.mermaid` |
+
+#### Priority Rules
+
+**Always import (high value):**
+- OpenAPI/Swagger specs for APIs you'll integrate with
+- AsyncAPI specs for webhook/event payloads
+- JSON Schema for data validation requirements
+- Type definitions (TypeScript interfaces)
+
+**Import if useful:**
+- Configuration templates (understand required setup)
+- Postman collections (test cases and examples)
+- Database schemas (data model reference)
+- Architecture diagrams (system context)
+
+**Skip (link instead):**
+- Files larger than 500KB
+- Entire SDK repositories (link to specific files)
+- Files already in the local codebase
+- Redundant specs (e.g., both OpenAPI 2 and 3 for same API)
+
+#### Create a refs/index.md
+
+After importing files, create an index:
+
+```
+Write(
+  file_path: "./tickets/{featureName}/refs/index.md",
+  content: "# Reference Files\n\n| File | Type | Source | Purpose |\n|------|------|--------|---------|..."
+)
+```
+
+### 7.4 Specification Template
 
 ```markdown
 # Specification: [Feature Name]
@@ -375,6 +657,42 @@ Use the `Write` tool to create the file with the specification content.
 - Apps: [list of apps to import]
 - External APIs: [list]
 
+## Reference Files
+
+See `./refs/index.md` for full listing.
+
+### API Specifications
+| API | File | Type | Key Endpoints |
+|-----|------|------|---------------|
+| [service] | `refs/api/{file}` | OpenAPI 3.x | [relevant endpoints] |
+
+### Data Schemas
+| Schema | File | Purpose |
+|--------|------|---------|
+| [entity] | `refs/schemas/{file}` | [validation/types for what] |
+
+### Configuration
+| Config | File | Purpose |
+|--------|------|---------|
+| [service] | `refs/config/{file}` | [what it configures] |
+
+### Code Examples
+| Example | File | Language | Demonstrates |
+|---------|------|----------|--------------|
+| [name] | `refs/examples/{file}` | [lang] | [what it shows] |
+
+## External Research
+
+### Design Patterns
+| Pattern | Source | Application |
+|---------|--------|-------------|
+| [pattern name] | [URL] | [how it applies] |
+
+### Reference Implementations
+| Project/Framework | Source | Key Insights |
+|-------------------|--------|--------------|
+| [name] | [URL] | [relevant learnings] |
+
 ## User Decisions
 | Question | Decision | Rationale |
 |----------|----------|-----------|
@@ -392,7 +710,7 @@ Use the `Write` tool to create the file with the specification content.
 - [Any remaining uncertainties]
 ```
 
-### 6.4 Save the Ticket
+### 7.5 Save the Ticket
 
 After generating the specification, save it using the Write tool:
 
