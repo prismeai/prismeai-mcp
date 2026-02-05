@@ -134,7 +134,11 @@ mcp__prisme-ai-builder__lint_doc()
 
 Review your changes against these rules.
 
-### 4.2 Code Review
+### 4.2 Validate Automation
+
+**After creating or editing any YAML/DSUL automation**, run `validate_automation` to check for syntax and semantic errors:
+
+### 4.3 Code Review
 
 Launch the code-review agent to analyze changes:
 
@@ -152,7 +156,7 @@ Provide issues in format:
 - 🟡 MINOR: [suggestion] - Nice to have")
 ```
 
-### 4.3 Ticket Validation (if ticket provided)
+### 4.4 Ticket Validation (if ticket provided)
 
 If implementing from a ticket, run ticket-validator:
 
@@ -202,3 +206,14 @@ mcp__prisme-ai-builder__push_workspace(
 | `product-governance` | Governance/admin product |
 | `product-insights` | Insights/analytics product |
 | `product-collection` | Collection/tabular data product |
+
+---
+
+## Phase 6: Summary & Next Ticket
+
+If ticket provided, find and display the next ticket command:
+
+```
+✅ Completed: [path-to-ticket-task-md]
+Next: /04-workspace-edit '[path-to-next-ticket]'
+```
