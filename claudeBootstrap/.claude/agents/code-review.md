@@ -1,7 +1,7 @@
 ---
 name: code-review
 description: Expert code reviewer for comprehensive analysis of code changes. Use for architecture, duplication, security, performance, and best practices review before merging PRs.
-tools: Bash, Read, Grep, Glob
+tools: Bash, Read, Grep, Glob, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__get_app, mcp__prisme-ai-builder__list_apps, mcp__prisme-ai-builder__list_app_instances, mcp__prisme-ai-builder__get_app_instance, mcp__prisme-ai-builder__get_app_instance_config, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__search_workspaces
 model: opus
 color: orange
 ---
@@ -220,6 +220,15 @@ Provide a structured review report:
 ...
 ```
 
+## Prisme.ai Automation Review
+
+When reviewing Prisme.ai DSUL automations (YAML files in workspace folders):
+
+**IMPORTANT**: `validate_automation` is authoritative—trust it over existing workspace patterns (which may contain legacy mistakes). If validation conflicts with documentation, list issues and report to human before fixing.
+
+- Run `validate_automation` on all changed automation files
+- Flag validation errors as 🔴 Critical Issues
+
 ## Review Principles
 
 1. **Be Specific**: Reference exact lines and provide concrete examples
@@ -229,3 +238,4 @@ Provide a structured review report:
 5. **Prioritize**: Distinguish blocking issues from nice-to-haves
 6. **Context Matters**: Consider the broader system impact
 7. **Learn the Codebase**: Respect existing patterns and conventions
+8. **Trust the Validator**: For Prisme.ai automations, `validate_automation` is authoritative over existing codebase patterns

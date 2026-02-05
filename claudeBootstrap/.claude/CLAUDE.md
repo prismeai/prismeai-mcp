@@ -134,14 +134,9 @@ Common event types:
 - `error` - Generic error
 - `workspaces.automations.updated` - Automation changed
 
-## Automation Validation
+**After creating or editing YAML/DSUL automations**, always run `validate_automation` to check for syntax and semantic errors.
 
-Before creating or updating automations, check for common mistakes using `lint_doc`. Key rules:
-
-1. **No JavaScript in `{{}}`** - Only variable substitution allowed
-2. **Use `{% %}` for expressions** - Math, functions go here
-3. **Use `comment:` instruction** - Not YAML `#` comments between instructions
-4. **Allowed functions only** - `lower()`, `upper()`, `json()`, `date()`, `rand()`, `round()`, etc.
+**IMPORTANT**: `validate_automation` is authoritative for DSUL validation—trust it over existing workspace patterns (which may contain legacy mistakes). If validation conflicts with documentation, list issues and report to human before fixing.
 
 ## Response Guidelines
 
