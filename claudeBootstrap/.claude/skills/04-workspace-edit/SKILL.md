@@ -71,6 +71,68 @@ Read `advanced-features` section when working on:
 
 ---
 
+## DSUL Code Conventions Reference
+
+### Naming Conventions
+
+| Element | Convention | Example |
+|---------|------------|---------|
+| **Slug** | camelCase only | `combineTexts`, `onInit`, `validateEmail` |
+| **Name** (private) | Folder-scoped with `/` | `tools/files/summary/combineTexts`, `forms/tools/onInit` |
+| **Name** (public) | Localized FR + EN | `{ fr: "Lister fichiers", en: "List files" }` |
+| **Variables** | camelCase | `userData`, `authHeader`, `methodResult` |
+| **Event handlers** | `on{Event}` in slug | `onInit`, `onSubmit`, `onError` |
+
+### Structure Rules
+
+| Rule | Requirement |
+|------|-------------|
+| Max lines per automation | 200 (excluding arguments) |
+| CRUD operations | Centralize in dedicated automations per entity |
+| API/form automations | Never do CRUD directly - call central automation |
+| Business logic + UI | Never in same automation |
+| HTTP requests | Centralize per external API |
+| Arguments | Must be typed; `validateArguments: true` only for entry points |
+| Description | Mandatory - describe the output at minimum |
+
+### Error Format (Required)
+
+```yaml
+- set:
+    name: output
+    value:
+      error: "ErrorCode"         # PascalCase
+      message: "Human readable"  # User-friendly text
+      details: {}                # Additional context
+```
+
+### Security Requirements
+
+- Authenticate callers on all event/endpoint-triggered automations
+- Never set `session.id` or `user.id` from external input
+- Limit context storage to few hundred KB
+- Plan cleanup for persistent contexts (global, user)
+
+### Page Construction Pattern
+
+1. Single `onInit` automation for main page - load fast data only
+2. Slow data via event-triggered secondary automations
+
+### Code Style
+
+| Prefer | Avoid |
+|--------|-------|
+| `and`, `or`, `=` | `&&`, `\|\|` |
+| `{% {{var}} \|\| 'default' %}` | Verbose existence conditions |
+
+### Event Naming
+
+Format: `{Product}.{entity}.{action}` or `{Product}.{process}.{status}`
+- `Workspace.automations.updated`
+- `Ingestion.crawl.failed`
+
+---
+
 ## Phase 2: Local Workspace Analysis
 
 ### 2.1 Verify Local Workspace Exists
@@ -138,6 +200,32 @@ Review your changes against these rules.
 
 **After creating or editing any YAML/DSUL automation**, run `validate_automation` to check for syntax and semantic errors:
 
+### DSUL Convention Validation Checklist
+
+**Naming:**
+- [ ] Slugs are pure camelCase (no `/` in slugs)
+- [ ] Names use `/` for folder scoping (private automations)
+- [ ] Public automations have localized FR + EN names
+- [ ] Event handlers use `on{Event}` slug pattern
+- [ ] Variables use camelCase
+- [ ] All automations have descriptions
+
+**Structure:**
+- [ ] No automation exceeds 200 lines (excluding arguments)
+- [ ] CRUD operations centralized (not inline in API/form)
+- [ ] Business logic separate from UI concerns
+- [ ] HTTP requests go through central helpers
+- [ ] Arguments are typed
+- [ ] Entry points have `validateArguments: true`
+
+**Error Handling:**
+- [ ] Errors use `{error, message, details}` format
+- [ ] Error codes are PascalCase
+
+**Security:**
+- [ ] Event/endpoint automations authenticate caller
+- [ ] No external input sets session.id or user.id
+
 ### 4.3 Code Review
 
 Launch the code-review agent to analyze changes:
@@ -149,6 +237,14 @@ Task(subagent_type: "general-purpose", prompt: "Review the changes made to the P
 - Missing error handling
 - Security issues (exposed secrets, missing auth checks)
 - Logic errors
+- DSUL convention compliance:
+  - Slugs are camelCase only (no `/` in slugs)
+  - Names use `/` for folder scoping on private automations
+  - Public automations have localized names (FR + EN)
+  - Error format: {error, message, details}
+  - Automations under 200 lines
+  - CRUD centralized, not inline
+  - Arguments typed, entry points have validateArguments: true
 
 Provide issues in format:
 - 🔴 MAJOR: [issue] - Must fix before pushing
@@ -206,6 +302,18 @@ mcp__prisme-ai-builder__push_workspace(
 | `product-governance` | Governance/admin product |
 | `product-insights` | Insights/analytics product |
 | `product-collection` | Collection/tabular data product |
+
+---
+
+## AIK Workspace Guidelines
+
+When creating workspaces that interact with AI Knowledge:
+
+1. **Version prompts via Knowledge Client** - Create workspace that versions prompt through the Knowledge Client app
+2. **Group automations by phase** - Use numbered folders: `00_init/`, `01_ingestion/`, `02_processing/`, etc.
+3. **Prefer webhook for AI Store entry point** - Use `when: endpoint: true` for Store integrations
+4. **Include error handling** - Handle ingestion failures and response errors gracefully
+5. **Include tests** - Create test automations for each critical path
 
 ---
 

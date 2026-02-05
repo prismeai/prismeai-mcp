@@ -36,13 +36,17 @@ Every MCP workspace uses a **3-layer architecture** that separates concerns:
 
 ### Layer Details
 
+**IMPORTANT**: The `/` namespace scoping goes in the `name` field, NOT the `slug`:
+- **Slug**: Pure camelCase (e.g., `combineTexts`, `methodListFiles`, `toolListFiles`)
+- **Name**: Folder-scoped with `/` (e.g., `02_Methods/Files/listFiles`, `03_Tools/Files/listFiles`)
+
 | Layer | File pattern | Slug pattern | Name pattern | Private | Purpose |
 |-------|-------------|-------------|-------------|---------|---------|
-| **Method** | `method-{tool}.yml` | `method-{tool}` | `/02_Methods/{scope}/method-{tool}` | true | Core logic: API calls, data transform. Flat args: tool params + `baseUrl` + `authHeader`. No auth logic, no output formatting. |
-| **Tool wrapper** | `tool-{tool}.yml` | `tool-{tool}` | `/03_Tools/{scope}/{tool}` | true | MCP interface: `body.arguments.*` → calls `ensureAuthentication` → delegates to `method-{tool}` → output formatting (structured/verbose/both) |
-| **Flat app instruction** | `{tool}.yml` | `{tool}` | `{tool}` | **false** | Public app API: flat args → calls `buildAuthHeader` (reads `config.*`) → delegates to `method-{tool}` → returns raw structured result |
-| **Helper** | `buildAuthHeader.yml` | `buildAuthHeader` | `/01_Helpers/buildAuthHeader` | true | Reads `config.*` (app config), builds `{baseUrl, authHeader}` or `{error}` |
-| **Helper** | `ensureAuthentication.yml` | `ensureAuthentication` | `/01_Helpers/ensureAuthentication` | true | Reads `user.{service}.credentials` (session), builds auth header |
+| **Helper** | `buildAuthHeader.yml` | `buildAuthHeader` | `01_Helpers/buildAuthHeader` | true | Reads `config.*` (app config), builds `{baseUrl, authHeader}` or `{error}` |
+| **Helper** | `ensureAuthentication.yml` | `ensureAuthentication` | `01_Helpers/ensureAuthentication` | true | Reads `user.{service}.credentials` (session), builds auth header |
+| **Method** | `method-{tool}.yml` | `method{Tool}` | `02_Methods/{Scope}/method{Tool}` | true | Core logic: API calls, data transform. Flat args: tool params + `baseUrl` + `authHeader`. No auth logic, no output formatting. |
+| **Tool wrapper** | `tool-{tool}.yml` | `tool{Tool}` | `03_Tools/{Scope}/{tool}` | true | MCP interface: `body.arguments.*` → calls `ensureAuthentication` → delegates to `method-{tool}` → output formatting (structured/verbose/both) |
+| **Flat app instruction** | `{tool}.yml` | `{tool}` | `{tool}` (or localized for public) | **false** | Public app API: flat args → calls `buildAuthHeader` (reads `config.*`) → delegates to `method-{tool}` → returns raw structured result |
 
 **Why 3 layers?**
 - **Methods** are reusable core logic with no coupling to auth strategy or output format
@@ -266,7 +270,7 @@ Build the Authorization header from **app config** (`config.*`) instead of user 
 - `name: /01_Helpers/buildAuthHeader`
 - `private: true`
 - Reads `config.baseUrl`, `config.type`, `config.username`, `config.password`, `config.token` (matching `config.schema` fields)
-- Returns `{baseUrl, authHeader}` or `{error: "..."}` — no `authenticated` field
+- Returns `{baseUrl, authHeader}` or `{error, message, details}` — no `authenticated` field
 - Uses same Custom Code functions as `ensureAuthentication` for header building
 - `output: '{{output}}'`
 
@@ -284,9 +288,9 @@ do:
         - set:
             name: output
             value:
-              error: >-
-                {Service} not configured. Please set baseUrl, type, and
-                credentials in the app configuration.
+              error: ConfigurationMissing
+              message: '{Service} not configured. Please set baseUrl, type, and credentials in the app configuration.'
+              details: {}
         - break: {}
   - conditions:
       '{{config.type}} == "basic"':
@@ -295,14 +299,18 @@ do:
               - set:
                   name: output
                   value:
-                    error: Basic Auth requires username in app configuration.
+                    error: MissingCredential
+                    message: 'Basic Auth requires username in app configuration.'
+                    details: {}
               - break: {}
         - conditions:
             '!{{config.password}}':
               - set:
                   name: output
                   value:
-                    error: Basic Auth requires password in app configuration.
+                    error: MissingCredential
+                    message: 'Basic Auth requires password in app configuration.'
+                    details: {}
               - break: {}
         - Custom Code.run function:
             function: buildBasicAuthHeader
@@ -316,7 +324,9 @@ do:
               - set:
                   name: output
                   value:
-                    error: Token auth requires a Bearer token in app configuration.
+                    error: MissingCredential
+                    message: 'Token auth requires a Bearer token in app configuration.'
+                    details: {}
               - break: {}
         - set:
             name: authHeader
@@ -325,9 +335,9 @@ do:
         - set:
             name: output
             value:
-              error: >-
-                Authentication type must be 'basic' or 'token' in app
-                configuration.
+              error: InvalidAuthType
+              message: "Authentication type must be 'basic' or 'token' in app configuration."
+              details: {}
         - break: {}
   - set:
       name: output
@@ -401,7 +411,7 @@ The method contains the **core logic** extracted from the tool: API calls, data 
 - `private: true`
 - **Flat arguments**: tool-specific params + `baseUrl` + `authHeader` (not nested in `body.arguments`)
 - No call to `ensureAuthentication` or `buildAuthHeader`
-- Returns structured data directly (e.g., `{success, path, status}`) or `{error: "..."}` on failure
+- Returns structured data directly (e.g., `{success, path, status}`) or `{error, message, details}` on failure
 - `validateArguments: true` and `output: '{{output}}'`
 
 **Template (simple tool — e.g., deleteFile):**
@@ -423,7 +433,9 @@ do:
         - set:
             name: output
             value:
-              error: 'path is required'
+              error: MissingParameter
+              message: 'path is required'
+              details: {}
         - break: {}
   - Custom Code.run function:
       function: encodePath
@@ -443,8 +455,11 @@ do:
         - set:
             name: output
             value:
-              error: >-
-                Error deleting file (HTTP {{result.status}}): {{result.body}}
+              error: HttpError
+              message: 'Error deleting file (HTTP {{result.status}})'
+              details:
+                status: '{{result.status}}'
+                body: '{{result.body}}'
         - break: {}
   - set:
       name: output
@@ -901,6 +916,34 @@ Verify:
 - [ ] `automations/initDocMcp.yml` exists and emits `updateDocMcp` with `{{global.endpoints.mcp}}`
 - [ ] MCP tab RichText has `onInit: initDocMcp` and `updateOn: updateDocMcp`
 - [ ] All public app instructions are documented in the Instructions tab with their parameters
+
+### 5.2.1 DSUL Convention Compliance
+
+**Naming:**
+- [ ] Slugs are pure camelCase (no `/` in slugs)
+- [ ] Names use `/` for folder scoping (e.g., `01_Helpers/buildAuthHeader`, `02_Methods/Files/listFiles`)
+- [ ] Public automations have localized FR + EN names
+- [ ] Variables use camelCase
+- [ ] All automations have descriptions
+
+**Error Format:**
+- [ ] All errors use `{error, message, details}` structure
+- [ ] Error codes are PascalCase (e.g., `HttpError`, `MissingParameter`, `AuthenticationFailed`)
+
+**Structure:**
+- [ ] No automation exceeds 200 lines (excluding arguments)
+- [ ] Arguments are typed
+- [ ] Entry points have `validateArguments: true`
+
+### 5.2.2 AIK Workspace Guidelines
+
+When creating workspaces that interact with AI Knowledge:
+
+1. **Version prompts via Knowledge Client** - Create workspace that versions prompt through the Knowledge Client app
+2. **Group automations by phase** - Use numbered folders in names: `00_init/`, `01_ingestion/`, `02_processing/`, etc.
+3. **Prefer webhook for AI Store entry point** - Use `when: endpoint: true` for Store integrations
+4. **Include error handling** - Handle ingestion failures and response errors gracefully
+5. **Include tests** - Create test automations for each critical path
 
 ### 5.3 Code Review
 

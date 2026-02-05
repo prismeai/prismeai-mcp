@@ -71,6 +71,23 @@ Look for logic that would appear in multiple places:
 | Constants/Config | Repeated magic values, URLs | `utils/constants.yml` |
 | Business Rules | Domain logic used in multiple flows | `utils/businessRules.yml` |
 
+### DSUL Naming for Shared Components
+
+**IMPORTANT**: The `/` namespace scoping goes in the `name` field, NOT the `slug`:
+- **Slug**: Pure camelCase (e.g., `httpClient`, `validateEntity`, `createUser`)
+- **Name**: Folder-scoped with `/` (e.g., `utils/api/httpClient`, `entities/user/create`)
+
+| Component Type | Slug (camelCase) | Name (folder-scoped) |
+|----------------|------------------|----------------------|
+| HTTP Client | `httpClient` | `utils/{api}/httpClient` |
+| Validator | `validateEntity` | `utils/validators/validateEntity` |
+| CRUD Create | `createUser` | `entities/user/create` |
+| CRUD Get | `getUser` | `entities/user/get` |
+| CRUD Update | `updateUser` | `entities/user/update` |
+| CRUD Delete | `deleteUser` | `entities/user/delete` |
+| CRUD List | `listUsers` | `entities/user/list` |
+| Event Handler | `onUserCreated` | `handlers/user/onCreated` |
+
 ### 3.2 Reuse Rules
 
 | # of Usages | Complexity | Action |
@@ -236,6 +253,15 @@ Each sub-ticket should follow this format:
 
 - **Requires:** [ticket X] to be completed first
 - **Provides:** [what this ticket makes available for later tickets]
+
+## DSUL Compliance
+
+- [ ] Slugs are pure camelCase (no `/` in slugs)
+- [ ] Names use `/` for folder scoping
+- [ ] Public automations have localized FR + EN names
+- [ ] Errors use `{error, message, details}` format
+- [ ] Automations under 200 lines
+- [ ] Arguments typed, entry points have `validateArguments: true`
 
 ## Notes
 

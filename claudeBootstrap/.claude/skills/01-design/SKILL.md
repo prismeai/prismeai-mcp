@@ -638,6 +638,14 @@ Write(
 
 ## Technical Design
 
+### Automation Naming (DSUL)
+
+**Convention**: Slug is camelCase only, Name uses `/` for folder scoping.
+
+| Automation | Slug (camelCase) | Name (folder-scoped) | Description |
+|------------|------------------|----------------------|-------------|
+| [description] | `exampleSlug` | `folder/path/exampleSlug` | [what it does] |
+
 ### Automations to Create/Modify
 | Automation | Action | Description |
 |------------|--------|-------------|

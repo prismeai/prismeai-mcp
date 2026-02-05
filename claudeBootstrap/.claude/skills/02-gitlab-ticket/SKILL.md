@@ -201,11 +201,29 @@ Generate the final ticket in this format:
 - [ ] Existing [related feature] still works
 - [ ] No console errors in browser
 
+### Code Quality (DSUL)
+- [ ] All slugs are camelCase (no `/` in slugs)
+- [ ] Names use `/` for folder scoping
+- [ ] Automations under 200 lines
+- [ ] Errors use `{error, message, details}` format
+- [ ] Arguments typed, entry points have `validateArguments: true`
+- [ ] Lint validation passes (`validate_automation`)
+
 ## Acceptance Criteria
 
 - [ ] All test checklist items pass
 - [ ] Code reviewed and approved
 - [ ] Documentation updated (if applicable)
+
+## Implementation Notes
+
+### DSUL Conventions
+- **Slugs**: camelCase only (no `/` in slugs) - e.g., `createUser`, `onInit`
+- **Names**: Folder-scoped with `/` for organization - e.g., `entities/user/create`
+- **Max lines**: 200 lines per automation (excluding arguments)
+- **CRUD**: Centralize per entity, never inline in API/form automations
+- **Error format**: `{error: "PascalCase", message: "Human readable", details: {}}`
+- **Auth**: Check on all entry points (event/endpoint-triggered automations)
 
 ## Notes
 

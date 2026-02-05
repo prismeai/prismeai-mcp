@@ -835,6 +835,10 @@ SECTIONS:
           type: "boolean",
           description: "Enable expression validation ({{}} and {% %}). Default: true",
         },
+        validateNaming: {
+          type: "boolean",
+          description: "Enable naming convention validation: checks automation names (camelCase with verb/on prefix), slugs (camelCase only), descriptions (required), arguments (required), variable names in set (camelCase), and event names in emit (Namespace.entity.action format). Default: false",
+        },
       },
       required: [],
     },

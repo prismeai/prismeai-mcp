@@ -3,6 +3,7 @@ import type { LintOptions, AutomationLintResult } from './types.js';
 import { validateAutomation } from './automationSchema.js';
 import { validateStrictMode } from './strictMode.js';
 import { validateExpressions } from './expressionValidation.js';
+import { validateNamingConventions } from './namingConventions.js';
 
 export function lintAutomation(
   automation: unknown,
@@ -34,6 +35,14 @@ export function lintAutomation(
       const expressionErrors = validateExpressions(automation);
       if (expressionErrors.length > 0) {
         return { valid: false, errors: [...errors, ...expressionErrors] };
+      }
+    }
+
+    // Naming convention validation (default: disabled)
+    if (options?.validateNaming) {
+      const namingErrors = validateNamingConventions(automation);
+      if (namingErrors.length > 0) {
+        return { valid: false, errors: [...errors, ...namingErrors] };
       }
     }
 

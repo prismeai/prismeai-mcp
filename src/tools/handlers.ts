@@ -440,14 +440,15 @@ export async function handleToolCall(
     }
 
     case "validate_automation": {
-      const { path: inputPath, automation, strict, validateExpressions: validateExprs } = args as {
+      const { path: inputPath, automation, strict, validateExpressions: validateExprs, validateNaming } = args as {
         path?: string;
         automation?: any;
         strict?: boolean;
         validateExpressions?: boolean;
+        validateNaming?: boolean;
       };
 
-      const lintOptions = { strict, validateExpressions: validateExprs };
+      const lintOptions = { strict, validateExpressions: validateExprs, validateNaming };
 
       // Helper to validate a single file
       const validateFile = (filePath: string): { path: string; valid: boolean; errors?: any[]; error?: string } => {

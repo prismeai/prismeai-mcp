@@ -7,14 +7,114 @@ Server-side processes: **what to do** and **when**.
 ## Basic Structure
 
 ```yaml
-slug: example-automation
-name: Example Automation
+slug: updateProfile
+name:
+  fr: users/profile/Mettre à jour le profil
+  en: users/profile/Update profile
+description: Updates user profile and returns the updated user object
+arguments:
+  userId:
+    type: string
+  profileData:
+    type: object
 when:
-  # Trigger
+  endpoint: true
+validateArguments: true
 do:
   # Instructions
-output: "{{result}}"
+output: "{{updatedUser}}"
 ```
+
+---
+
+## DSUL Code Conventions
+
+### Naming
+
+#### Slug
+- **camelCase**, for both internal and app automations
+- **Verb for business logic** (e.g., `combineTexts`, `getGlobal`)
+- **on... for event-driven** automations (e.g., `onInit`, `onSubmit`)
+- NO folder structure in slug—use `name` for scoping
+
+| Type | Example |
+|------|---------|
+| Business logic | `combineTexts` |
+| KPI retrieval | `getGlobal` |
+| Page init | `onInit` |
+| Form submit | `onSubmit` |
+
+#### Name
+- For end-user exposed automations: provide translations in FR and EN
+- **Use folder structure in name** for scoping (enables proper .zip export for local development)
+- Format: `folder/subfolder/Human readable name`
+
+| Slug | Name (EN) |
+|------|-----------|
+| `combineTexts` | `tools/files/summary/Combine texts` |
+| `getGlobal` | `kpi/tokens/Get global` |
+| `onInit` | `forms/tools/On init` |
+| `onSubmit` | `forms/tools/On submit` |
+
+#### Description
+- **Mandatory**, even if brief
+- Summarize at minimum the automation's output (arguments document inputs)
+
+#### Arguments
+- **Mandatory** typing for each argument
+- Nested field typing recommended but optional
+- Use `validateArguments: true` **only for entry points** (endpoint or external event listeners) for performance reasons
+
+### General Rules
+
+1. **Max 200 lines** per automation (excluding arguments). Split if larger.
+2. **Centralize CRUD operations** on collections/datasources in one automation per operation type
+3. **Never do CRUD directly** in API or form automations—always use the central automation
+4. **Separate business logic from UI**: different automations for interface management vs data processing
+5. **Centralize HTTP requests** to the same external API in a single automation
+6. **Always return detailed error objects** on break:
+```yaml
+- break:
+    scope: automation
+    payload:
+      error: "UserNotFound"
+      message: "The requested user does not exist"
+      details:
+        userId: "{{userId}}"
+```
+
+### Performance & Security
+
+1. **Authenticate callers** on all event/endpoint-triggered automations
+2. **Never set** `session.id` or `user.id` from externally provided IDs
+3. **Limit context storage** to a few hundred KB in run, global, user, session, socket
+4. **Implement cleanup** for long-lived persistent contexts (global, user)
+
+### Page Construction
+
+1. **Single init automation** per page: return only fast data (collections, contexts)
+2. **Async load slow data** via a second event-triggered automation to avoid blocking browser
+
+### Instructions Style
+
+- **Variable names:** camelCase
+- **Conditions:** prefer `and`, `or`, `=` over `&&`, `||`, `==`
+- **Default values:** use `{% {{myVar}} || "default" %}` instead of condition checks
+
+### Event Naming
+
+Use event-driven format with dot notation:
+- `Workspace.automations.updated`
+- `Ingestion.crawl.failed`
+- `User.profile.updated`
+
+### Workspace Guidelines (AIK Projects)
+
+1. Create a workspace that updates prompt/params via Knowledge Client (for versioning and duplication)
+2. Group automations in numbered folders by ingestion process step (e.g., `00_init/`)
+3. Prefer webhooks for AI Store entry points, even with external connectors
+4. Implement error handling for ingestion and responses
+5. Add tests in AIK or workspace if other logic needs testing
 
 ---
 
@@ -70,8 +170,8 @@ https://api.{instance}.prisme.ai/v2/workspaces/{workspaceId}/webhooks/{automatio
 ```yaml
 when:
   events:
-    - user-login
-    - document-uploaded
+    - User.login.completed
+    - Document.upload.completed
 ```
 
 **Variables:** `payload`, `source` (IP, correlationId, userId, automation, serviceTopic)
@@ -311,9 +411,9 @@ Min frequency: 15 minutes. Emits `runtime.automations.scheduled`.
 - fetch:
     url: '...'
     stream:
-      event: chunk
+      event: streamChunk
       payload:
-        foo: bar
+        sourceUrl: "{{sourceUrl}}"
       endChunk:
         done: true
       target:
@@ -345,13 +445,13 @@ Min frequency: 15 minutes. Emits `runtime.automations.scheduled`.
 ### Emit
 ```yaml
 - emit:
-    event: user-registered
+    event: User.registration.completed
     payload:
       userId: "{{user.id}}"
     target:
-      userTopic: 'target-topic'
-      sessionId: 'session-id'
-      userId: 'user-id'
+      userTopic: 'projectUpdates'
+      sessionId: '{{targetSessionId}}'
+      userId: '{{targetUserId}}'
     options:
       persist: false
 ```
@@ -369,7 +469,7 @@ Use `wait` for simple delays or to wait for specific events.
 ```yaml
 - wait:
     oneOf:
-      - event: processing-complete
+      - event: Document.processing.completed
         filters:
           payload.documentId: "{{documentId}}"
     timeout: 30  # Optional timeout (default 20s), returns after timeout even if no event received
@@ -379,21 +479,21 @@ Use `wait` for simple delays or to wait for specific events.
 ### Rate Limit
 ```yaml
 - rateLimit:
-    name: ExternalAPICall
+    name: externalApiCall
     window: 60    # seconds
     limit: 5
     consumer: "{{user.id}}"
-    output: limits
+    output: rateLimitResult
 
 - conditions:
-    "{{limits.ok}}":
+    "{{rateLimitResult.ok}}":
       - fetch:
           url: https://api.example.com/data
     default:
       - emit:
-          event: rate-limit-exceeded
+          event: RateLimit.exceeded
           payload:
-            retryAfter: "{{limits.retryAfter}}"
+            retryAfter: "{{rateLimitResult.retryAfter}}"
 ```
 
 **Output:** `ok`, `retryAfter`, `remaining`, `limit`, `window`, `consumer`
@@ -576,19 +676,19 @@ config:
 ### User Topics
 ```yaml
 - createUserTopic:
-    topic: project-updates
+    topic: projectUpdates
     userIds:
-      - "{{user1Id}}"
+      - "{{firstUserId}}"
 
 - joinUserTopic:
-    topic: project-updates
+    topic: projectUpdates
     userIds:
       - "{{newUserId}}"
 
 - emit:
-    event: project-update
+    event: Project.update.published
     target:
-      userTopic: project-updates
+      userTopic: projectUpdates
 ```
 
 ---
@@ -714,33 +814,37 @@ URL("https://www.google.fr/path/?foo=bar").searchParams
 ## Argument Validation
 
 ```yaml
-slug: testArguments
-do: []
-when:
-  endpoint: true
+slug: validateUserInput
+name:
+  fr: api/users/Validation des entrées utilisateur
+  en: api/users/User input validation
+description: Validates and returns user input data with various field types
 arguments:
-  someString:
+  userName:
     type: string
-  someNumber:
+  userAge:
     type: number
-  someObject:
+  userProfile:
     type: object
     required:
-      - field
+      - firstName
     properties:
-      field:
+      firstName:
         type: string
         pattern: '^[a-z]+$'
-  someUri:
+  websiteUrl:
     type: string
     format: uri  # uri, email, date, time, password
-  someRawJSON:
+  rawMetadata:
     type: object
     additionalProperties: true
-  someToken:
+  apiToken:
     type: string
     secret: true  # Auto-redacted from events
-validateArguments: true
+when:
+  endpoint: true
+validateArguments: true  # Only for entry points (endpoint/external events)
+do: []
 output: '{{body}}'
 ```
 
@@ -752,9 +856,19 @@ Validation errors stop current and parent automations.
 
 ### Webhook Handler
 ```yaml
-slug: hubspot-webhook
+slug: onHubspotWebhook
+name:
+  fr: integrations/hubspot/Webhook Hubspot
+  en: integrations/hubspot/Hubspot Webhook
+description: Receives Hubspot webhooks and notifies Slack of new deals
+arguments:
+  body:
+    type: object
+  headers:
+    type: object
 when:
   endpoint: true
+validateArguments: true
 do:
   - conditions:
       '!{{headers["x-hubspot-signature"]}}':
@@ -764,6 +878,10 @@ do:
               status: 401
         - break:
             scope: automation
+            payload:
+              error: "Unauthorized"
+              message: "Missing Hubspot signature"
+              details: {}
   - set:
       name: newDeal
       value: "{{body.deal}}"
@@ -776,26 +894,36 @@ do:
 
 ### Event Chain
 ```yaml
-# Step 1
+# Step 1: Emit event from processing automation
 - emit:
-    event: doc-started
+    event: Document.processing.started
     payload:
-      docId: "{{doc.id}}"
+      documentId: "{{document.id}}"
 
-# Step 2 (separate automation)
+# Step 2: Separate automation
+slug: onDocumentProcessingStarted
+name:
+  fr: documents/processing/Traitement document démarré
+  en: documents/processing/Document processing started
+description: Handles document processing start event and emits completion
+arguments:
+  payload:
+    type: object
+    properties:
+      documentId:
+        type: string
 when:
   events:
-    - doc-started
+    - Document.processing.started
 do:
-  - emit:
-      event: doc-completed
-      payload:
-        docId: "{{payload.docId}}"
+  - myCustomApp:
+      documentId: "{{payload.documentId}}"
 ```
 
 ### Multi-LLM
 ```yaml
-# Categorize
+# Automation slug: categorizeFeedback (name: llm/feedback/Categorize feedback)
+# Categorize feedback using fast model
 - fetch:
     url: "{{config.llmApiUrl}}/chat-completions"
     method: POST
@@ -806,9 +934,10 @@ do:
           content: "Categorize: Bug, Feature, UX, Praise, Other"
         - role: user
           content: "{{payload.text}}"
-    output: category
+    output: categoryResult
 
-# Analyze with different model
+# Automation slug: analyzeFeedback (name: llm/feedback/Analyze feedback)
+# Analyze with different model for deeper insights
 - fetch:
     url: "{{config.llmApiUrl}}/chat-completions"
     method: POST
@@ -819,5 +948,5 @@ do:
           content: "Extract sentiment and key points"
         - role: user
           content: "{{payload.text}}"
-    output: analysis
+    output: analysisResult
 ```
