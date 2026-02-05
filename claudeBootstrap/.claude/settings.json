@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__prisme-ai-builder__execute_automation",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/allow-workspace.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__prisme-ai-builder__push_workspace",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/allow-workspace.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
