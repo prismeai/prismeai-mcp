@@ -498,19 +498,6 @@ Use `wait` for simple delays or to wait for specific events.
 
 **Output:** `ok`, `retryAfter`, `remaining`, `limit`, `window`, `consumer`
 
-### Auth
-```yaml
-- auth:
-    workspace: true
-    output: jwt
-- fetch:
-    url: https://api.studio.prisme.ai/v2/workspaces/123/webhooks/someAutomation
-    headers:
-      Authorization: Bearer {{jwt.jwt}}
-```
-
-**Note:** `{{run.authenticatedWorkspaceId}}` available when using workspace token.
-
 ---
 
 ## App Automations
