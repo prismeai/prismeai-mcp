@@ -996,7 +996,7 @@ Use this to cancel a report, edit its message, or change its type.`,
   {
     name: "push_workspace",
     description:
-      "Upload the local workspace directory to Prisme.ai. Creates a backup version before importing.",
+      "Upload the local workspace directory to Prisme.ai. Creates a backup version before importing. Version name (message) must not exceed 15 characters and only allows letters, numbers, hyphens, and underscores (no spaces).",
     inputSchema: {
       type: "object",
       properties: {
