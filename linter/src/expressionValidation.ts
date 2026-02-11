@@ -112,17 +112,12 @@ function checkRawVariables(
   const functionNames = new Set(functionCalls.map(f => f.name));
 
   for (const id of identifiers) {
-    // Skip if it's a known function name (even if not followed by parenthesis in this context)
-    if (isKnownFunction(id.name)) {
-      continue;
-    }
-
     // Skip if it's a JS keyword/built-in
     if (isJsKeyword(id.name)) {
       continue;
     }
 
-    // Skip if it's being used as a function call elsewhere
+    // Skip if it's being used as a function call in this expression
     if (functionNames.has(id.name)) {
       continue;
     }

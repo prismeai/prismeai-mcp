@@ -1,0 +1,15 @@
+# EXPRESSION ERROR: Bare variables missing {{}} in {% %} expression
+# '{% errors | length > 0 %}' - both 'errors' and 'length' are bare identifiers.
+# Should use function syntax: '{% length({{errors}}) > 0 %}'
+slug: unsupportedPipeOperator
+name: Test/Unsupported pipe operator
+do:
+  - conditions:
+      '{% errors | length > 0 %}':  # INVALID: errors and length need {{}} or function syntax
+        - set:
+            name: hasErrors
+            value: true
+      default:
+        - set:
+            name: hasErrors
+            value: false

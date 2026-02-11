@@ -160,6 +160,45 @@ describe('expression validation', () => {
     });
   });
 
+  describe('known function names used as bare variables', () => {
+    it('should flag known function names when not used as function calls', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{% errors | length > 0 %}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const bracketErrors = errors.filter(
+        (e) => e.params?.expressionType === 'missingBrackets'
+      );
+      // Both 'errors' and 'length' should be flagged as missing {{}}
+      expect(bracketErrors.length).toBe(2);
+    });
+
+    it('should flag a || b when a and b are bare variables', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{% a || b %}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const bracketErrors = errors.filter(
+        (e) => e.params?.expressionType === 'missingBrackets'
+      );
+      expect(bracketErrors.length).toBe(2);
+    });
+
+    it('should still allow known function names when used as function calls', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{% length({{errors}}) > 0 %}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const bracketErrors = errors.filter(
+        (e) => e.params?.expressionType === 'missingBrackets'
+      );
+      expect(bracketErrors.length).toBe(0);
+    });
+  });
+
   describe('JS syntax validation', () => {
     it('should detect invalid operators', () => {
       // Note: +++ is actually valid JS (parsed as ++ +), so we use @@@ which is invalid
