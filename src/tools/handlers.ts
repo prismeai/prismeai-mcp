@@ -6,7 +6,7 @@ import yaml from "js-yaml";
 import { PrismeApiClient, AIKnowledgeQueryParams, AIKnowledgeCompletionParams, AIKnowledgeDocumentParams, AIKnowledgeProjectParams, AIKnowledgeAuth, AppInstance } from "../api-client.js";
 import { resolveWorkspaceAndEnvironment, environmentsConfig, PRISME_API_BASE_URL } from "../config.js";
 import { enforceReadonlyMode, truncateJsonOutput } from "../utils.js";
-import { lintAutomation, type AutomationLintResult } from "@prisme.ai/linter";
+import { lintAutomation, type AutomationLintResult } from "../../linter/dist/index.js";
 
 /**
  * Format linting errors for human-readable output

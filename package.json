@@ -5,7 +5,8 @@
   "type": "module",
   "main": "build/index.js",
   "scripts": {
-    "build": "tsc",
+    "preinstall": "cd linter && npm install",
+    "build": "cd linter && npm run build && cd .. && tsc",
     "start": "node build/index.js",
     "dev": "tsx src/index.ts",
     "prepare": "npm run build"
@@ -20,7 +21,6 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "@prisme.ai/linter": "file:./linter",
     "adm-zip": "^0.5.16",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
