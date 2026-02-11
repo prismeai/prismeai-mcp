@@ -199,6 +199,10 @@ PRISME_FORCE_READONLY=true
 - `execute_automation`
 - `push_workspace`
 - `pull_workspace` (blocks local file modifications)
+- `install_app_instance`
+- `update_app_instance`
+- `uninstall_app_instance`
+- `update_app_instance_config`
 
 ### Available Operations
 
@@ -206,10 +210,14 @@ PRISME_FORCE_READONLY=true
 - `list_automations`
 - `list_apps`
 - `get_app`
+- `list_app_instances`
+- `get_app_instance`
+- `get_app_instance_config`
 - `search_events`
 - `search_workspaces`
 - `get_prisme_documentation`
-- `lint_doc`
+- `validate_automation`
+- `report_issue_or_feedback`
 
 ### Use Cases
 
@@ -315,15 +323,51 @@ npm run dev
 
 This MCP server interacts with the following Prisme.ai API endpoints:
 
+**Automations**
+
 | Endpoint | Operation |
 |----------|-----------|
-| `POST /v2/workspaces/{workspaceId}/automations` | Create automation |
-| `GET /v2/workspaces/{workspaceId}/automations/{automationSlug}` | Get automation |
-| `PATCH /v2/workspaces/{workspaceId}/automations/{automationSlug}` | Update automation |
-| `DELETE /v2/workspaces/{workspaceId}/automations/{automationSlug}` | Delete automation |
-| `GET /v2/workspaces/{workspaceId}` | Get workspace (includes automations list) |
-| `POST /v2/workspaces/{workspaceId}/test/{automationSlug}` | Execute automation |
-| `POST /v2/workspaces/{workspaceId}/search` | Search events |
+| `POST /v2/workspaces/{id}/automations` | Create automation |
+| `GET /v2/workspaces/{id}/automations/{slug}` | Get automation |
+| `PATCH /v2/workspaces/{id}/automations/{slug}` | Update automation |
+| `DELETE /v2/workspaces/{id}/automations/{slug}` | Delete automation |
+| `POST /v2/workspaces/{id}/test/{slug}` | Execute automation |
+
+**Workspaces**
+
+| Endpoint | Operation |
+|----------|-----------|
+| `GET /v2/workspaces/{id}` | List automations |
+| `GET /v2/workspaces` | Search workspaces |
+| `GET /v2/workspaces/{id}/versions/current/export` | Pull workspace |
+| `POST /v2/workspaces/{id}/versions/import` | Push workspace |
+
+**App Store & Instances**
+
+| Endpoint | Operation |
+|----------|-----------|
+| `GET /v2/apps` | List / search apps |
+| `GET /v2/apps/{slug}` | Get app details |
+| `POST /v2/workspaces/{id}/imports` | Install app instance |
+| `GET /v2/workspaces/{id}/imports` | List app instances |
+| `GET /v2/workspaces/{id}/imports/{slug}` | Get app instance |
+| `PATCH /v2/workspaces/{id}/imports/{slug}` | Update app instance |
+| `DELETE /v2/workspaces/{id}/imports/{slug}` | Uninstall app instance |
+
+**Events & Search**
+
+| Endpoint | Operation |
+|----------|-----------|
+| `POST /v2/workspaces/{id}/search` | Search events |
+
+**AI Knowledge**
+
+| Endpoint | Operation |
+|----------|-----------|
+| `POST /projects/{id}/query` | RAG query |
+| `POST /projects/{id}/chat/completions` | LLM completion |
+| `GET /projects/{id}/documents` | Document CRUD |
+| `GET /projects` | Project management |
 
 ## Error Handling
 
