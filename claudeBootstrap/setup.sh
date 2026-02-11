@@ -268,7 +268,7 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
         ENVIRONMENTS_JSON=$(echo "$ENVIRONMENTS_JSON" | jq --arg name "$ENV_NAME" --argjson env "$ENV_OBJ" '.[$name] = $env')
 
         CONFIGURED_ENVS+=("$ENV_NAME")
-        ((ENV_COUNT++))
+        ((++ENV_COUNT))
 
         echo "  Environment '$ENV_NAME' configured successfully"
     done
@@ -798,7 +798,7 @@ elif [[ "$INSTALL_MODE" == "migrate" ]]; then
                 fi
 
                 NEW_ENVIRONMENTS_JSON=$(echo "$NEW_ENVIRONMENTS_JSON" | jq --arg name "$env" --argjson env "$ENV_OBJ" '.[$name] = $env')
-                ((MIGRATED_COUNT++))
+                ((++MIGRATED_COUNT))
                 echo "    Migrated '$env' successfully"
             done
         fi
@@ -817,7 +817,7 @@ elif [[ "$INSTALL_MODE" == "migrate" ]]; then
             '{"apiUrl": $apiUrl, "apiKey": $apiKey, "default": true}')
         NEW_ENVIRONMENTS_JSON=$(echo "$NEW_ENVIRONMENTS_JSON" | jq --arg name "$ENV_NAME" --argjson env "$ENV_OBJ" '.[$name] = $env')
         FIRST_ENV="$ENV_NAME"
-        ((MIGRATED_COUNT++))
+        ((++MIGRATED_COUNT))
         echo "  Created environment '$ENV_NAME'"
     fi
 
