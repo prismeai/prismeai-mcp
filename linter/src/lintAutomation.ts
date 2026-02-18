@@ -4,6 +4,35 @@ import { validateAutomation } from './automationSchema.js';
 import { validateStrictMode } from './strictMode.js';
 import { validateExpressions } from './expressionValidation.js';
 import { validateNamingConventions } from './namingConventions.js';
+import { traverseInstructions } from './instructionTraversal.js';
+
+/**
+ * Validates that each instruction object has exactly one top-level key.
+ * Multiple keys indicate a YAML indentation error where arguments
+ * (like `output`) ended up as siblings of the instruction instead of children.
+ */
+function validateInstructionKeys(automation: unknown): ErrorObject[] {
+  if (!automation || typeof automation !== 'object') return [];
+  const errors: ErrorObject[] = [];
+
+  traverseInstructions(automation as { do?: unknown[] }, (instruction, path) => {
+    const keys = Object.keys(instruction);
+    if (keys.length > 1) {
+      // Find which key is likely the instruction name (first key)
+      const instructionKey = keys[0];
+      const extraKeys = keys.slice(1);
+      errors.push({
+        keyword: 'maxProperties',
+        instancePath: path,
+        schemaPath: '#/maxProperties',
+        params: { limit: 1 },
+        message: `Instruction "${instructionKey}" has unexpected sibling keys: ${extraKeys.join(', ')}. These should be nested inside the instruction arguments (check YAML indentation).`,
+      } as ErrorObject);
+    }
+  });
+
+  return errors;
+}
 
 export function lintAutomation(
   automation: unknown,
@@ -20,6 +49,12 @@ export function lintAutomation(
 
     if (!valid) {
       return { valid: false, errors };
+    }
+
+    // Validate instruction structure (always enabled)
+    const instructionKeyErrors = validateInstructionKeys(automation);
+    if (instructionKeyErrors.length > 0) {
+      return { valid: false, errors: [...errors, ...instructionKeyErrors] };
     }
 
     // Strict mode validation

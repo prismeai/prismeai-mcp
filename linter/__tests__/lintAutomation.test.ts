@@ -55,6 +55,129 @@ describe('lintAutomation', () => {
     });
   });
 
+  describe('instruction structure validation', () => {
+    it('should reject instruction with sibling keys (wrong indentation)', () => {
+      const result = lintAutomation({
+        name: 'test',
+        do: [
+          {
+            'Knowledge Client.query': {
+              text: 'some query',
+              timeout: 120,
+            },
+            output: 'queryResult',
+          },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e =>
+        e.keyword === 'maxProperties' &&
+        e.message?.includes('output') &&
+        e.message?.includes('sibling')
+      )).toBe(true);
+    });
+
+    it('should accept instruction with output nested inside', () => {
+      const result = lintAutomation({
+        name: 'test',
+        do: [
+          {
+            'Knowledge Client.query': {
+              text: 'some query',
+              timeout: 120,
+              output: 'queryResult',
+            },
+          },
+        ],
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('should reject built-in instruction with sibling keys', () => {
+      const result = lintAutomation({
+        name: 'test',
+        do: [
+          {
+            set: { name: 'x', value: 1 },
+            output: 'result',
+          },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0].message).toContain('output');
+    });
+
+    it('should reject instruction with multiple sibling keys', () => {
+      const result = lintAutomation({
+        name: 'test',
+        do: [
+          {
+            fetch: { url: 'http://example.com' },
+            output: 'result',
+            timeout: 30,
+          },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0].message).toContain('output');
+      expect(result.errors[0].message).toContain('timeout');
+    });
+
+    it('should catch sibling keys in nested repeat instructions', () => {
+      const result = lintAutomation({
+        name: 'test',
+        do: [
+          {
+            repeat: {
+              on: '{{items}}',
+              do: [
+                {
+                  'Collection.find': { collection: 'users' },
+                  output: 'users',
+                },
+              ],
+            },
+          },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0].instancePath).toContain('repeat');
+    });
+
+    it('should catch sibling keys in nested conditions instructions', () => {
+      const result = lintAutomation({
+        name: 'test',
+        do: [
+          {
+            conditions: {
+              '{% true %}': [
+                {
+                  emit: { event: 'test' },
+                  output: 'emitResult',
+                },
+              ],
+              default: [],
+            },
+          },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0].instancePath).toContain('conditions');
+    });
+
+    it('should accept single-key instructions', () => {
+      const result = lintAutomation({
+        name: 'test',
+        do: [
+          { set: { name: 'x', value: 1 } },
+          { emit: { event: 'test' } },
+          { 'Knowledge Client.query': { text: 'hello', output: 'result' } },
+        ],
+      });
+      expect(result.valid).toBe(true);
+    });
+  });
+
   describe('strict mode', () => {
     it('should default to strict: false', () => {
       // Unknown argument INSIDE instruction args should NOT error in non-strict mode

@@ -8,7 +8,8 @@ export type ExpressionErrorType =
   | 'unclosedExpression'
   | 'unknownFunction'
   | 'invalidSyntax'
-  | 'missingBrackets';
+  | 'missingBrackets'
+  | 'operatorInVariable';
 
 /**
  * Parameters for expression validation errors

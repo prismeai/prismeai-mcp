@@ -10,6 +10,7 @@ import {
   extractIdentifiers,
   toJavaScript,
 } from './expressionParser.js';
+import type { ExpressionToken } from './expressionParser.js';
 import { isKnownFunction, isJsKeyword } from './knownFunctions.js';
 
 /**
@@ -171,6 +172,49 @@ function checkJsSyntax(
 }
 
 /**
+ * Detect operators inside {{}} variable references.
+ * Arithmetic/comparison operations must use {% %} expression blocks.
+ */
+function checkVariableContent(
+  token: ExpressionToken,
+  value: string,
+  path: string,
+  errors: ErrorObject[]
+): void {
+  const content = token.innerContent.trim();
+  if (!content) return;
+
+  // Strip matched bracket expressions to avoid false positives from bracket access
+  let stripped = content;
+  let prev = '';
+  while (stripped !== prev) {
+    prev = stripped;
+    stripped = stripped.replace(/\[[^\[\]]*\]/g, '');
+  }
+
+  // Strip everything after an unmatched '['
+  // (can happen when nested {{}} inside brackets breaks the regex match)
+  const unmatchedBracket = stripped.lastIndexOf('[');
+  if (unmatchedBracket >= 0 && stripped.indexOf(']', unmatchedBracket) === -1) {
+    stripped = stripped.substring(0, unmatchedBracket);
+  }
+
+  // Check for arithmetic/comparison operators with surrounding whitespace
+  const operatorPattern = /\s[-+*/%<>]\s|\s?[<>!=]=\s?|\s&&\s|\s\|\|\s/;
+
+  if (operatorPattern.test(stripped)) {
+    errors.push(
+      createError(
+        path,
+        'operatorInVariable',
+        `Operators are not supported inside {{}}. Use an expression block instead: {% ... %}`,
+        value
+      )
+    );
+  }
+}
+
+/**
  * Validate a single string value for expression errors.
  */
 function validateStringValue(
@@ -209,8 +253,10 @@ function validateStringValue(
       // Check JS syntax
       checkJsSyntax(exprContent, value, path, errors);
     }
-    // Variable tokens ({{...}}) don't need internal validation
-    // Their syntax is already validated by delimiter check
+    if (token.type === 'variable') {
+      // Check for operators that should use {% %} instead
+      checkVariableContent(token, value, path, errors);
+    }
   }
 }
 

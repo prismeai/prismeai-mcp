@@ -352,6 +352,80 @@ describe('expression validation', () => {
     });
   });
 
+  describe('operator in variable detection', () => {
+    it('should detect arithmetic operators inside {{}}', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{{user.groups.length - 1}}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const opErrors = errors.filter(
+        (e) => e.params?.expressionType === 'operatorInVariable'
+      );
+      expect(opErrors.length).toBe(1);
+    });
+
+    it('should detect addition operator inside {{}}', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{{a + b}}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const opErrors = errors.filter(
+        (e) => e.params?.expressionType === 'operatorInVariable'
+      );
+      expect(opErrors.length).toBe(1);
+    });
+
+    it('should detect comparison operators inside {{}}', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{{a >= b}}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const opErrors = errors.filter(
+        (e) => e.params?.expressionType === 'operatorInVariable'
+      );
+      expect(opErrors.length).toBe(1);
+    });
+
+    it('should not flag simple variable references', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{{user.email}}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const opErrors = errors.filter(
+        (e) => e.params?.expressionType === 'operatorInVariable'
+      );
+      expect(opErrors.length).toBe(0);
+    });
+
+    it('should not flag bracket access with numeric index', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{{items[0]}}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const opErrors = errors.filter(
+        (e) => e.params?.expressionType === 'operatorInVariable'
+      );
+      expect(opErrors.length).toBe(0);
+    });
+
+    it('should not flag bracket access with string key', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{{obj["key"]}}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const opErrors = errors.filter(
+        (e) => e.params?.expressionType === 'operatorInVariable'
+      );
+      expect(opErrors.length).toBe(0);
+    });
+  });
+
   describe('edge cases', () => {
     it('should skip empty string values', () => {
       const automation = {
