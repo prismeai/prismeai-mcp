@@ -9,7 +9,8 @@ export type ExpressionErrorType =
   | 'unknownFunction'
   | 'invalidSyntax'
   | 'missingBrackets'
-  | 'operatorInVariable';
+  | 'operatorInVariable'
+  | 'objectLiteralInExpression';
 
 /**
  * Parameters for expression validation errors

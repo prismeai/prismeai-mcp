@@ -145,6 +145,34 @@ function checkRawVariables(
 }
 
 /**
+ * Detect object literals in expression blocks.
+ * Object literals ({...}) are not valid in Prisme.ai expressions.
+ */
+function checkObjectLiterals(
+  exprContent: string,
+  value: string,
+  path: string,
+  errors: ErrorObject[]
+): void {
+  // Strip {{...}} variable references
+  let stripped = exprContent.replace(/\{\{.*?\}\}/g, ' ');
+  // Strip string literals "..." and '...'
+  stripped = stripped.replace(/"[^"]*"/g, ' ');
+  stripped = stripped.replace(/'[^']*'/g, ' ');
+
+  if (stripped.includes('{')) {
+    errors.push(
+      createError(
+        path,
+        'objectLiteralInExpression',
+        `Object literals are not supported in expression blocks`,
+        value
+      )
+    );
+  }
+}
+
+/**
  * Validate JavaScript syntax in expression blocks.
  */
 function checkJsSyntax(
@@ -252,6 +280,9 @@ function validateStringValue(
 
       // Check JS syntax
       checkJsSyntax(exprContent, value, path, errors);
+
+      // Check for object literals
+      checkObjectLiterals(exprContent, value, path, errors);
     }
     if (token.type === 'variable') {
       // Check for operators that should use {% %} instead

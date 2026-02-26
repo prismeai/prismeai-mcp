@@ -426,6 +426,92 @@ describe('expression validation', () => {
     });
   });
 
+  describe('object literal detection', () => {
+    it('should detect object literal with fallback pattern', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{% {{sort}} || {"createdAt": -1} %}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const objErrors = errors.filter(
+        (e) => e.params?.expressionType === 'objectLiteralInExpression'
+      );
+      expect(objErrors.length).toBe(1);
+    });
+
+    it('should detect standalone object literal', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{% {"key": "value"} %}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const objErrors = errors.filter(
+        (e) => e.params?.expressionType === 'objectLiteralInExpression'
+      );
+      expect(objErrors.length).toBe(1);
+    });
+
+    it('should detect empty object literal', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{% {{a}} || {} %}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const objErrors = errors.filter(
+        (e) => e.params?.expressionType === 'objectLiteralInExpression'
+      );
+      expect(objErrors.length).toBe(1);
+    });
+
+    it('should allow simple numeric fallback', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{% {{sort}} || 20 %}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const objErrors = errors.filter(
+        (e) => e.params?.expressionType === 'objectLiteralInExpression'
+      );
+      expect(objErrors.length).toBe(0);
+    });
+
+    it('should allow arithmetic expressions', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{% {{a}} + {{b}} %}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const objErrors = errors.filter(
+        (e) => e.params?.expressionType === 'objectLiteralInExpression'
+      );
+      expect(objErrors.length).toBe(0);
+    });
+
+    it('should allow function calls with property access', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{% date({{now}}).ts %}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const objErrors = errors.filter(
+        (e) => e.params?.expressionType === 'objectLiteralInExpression'
+      );
+      expect(objErrors.length).toBe(0);
+    });
+
+    it('should not flag braces inside string literals', () => {
+      const automation = {
+        name: 'test',
+        do: [{ set: { name: 'x', value: '{% "text with {braces}" %}' } }],
+      };
+      const errors = validateExpressions(automation);
+      const objErrors = errors.filter(
+        (e) => e.params?.expressionType === 'objectLiteralInExpression'
+      );
+      expect(objErrors.length).toBe(0);
+    });
+  });
+
   describe('edge cases', () => {
     it('should skip empty string values', () => {
       const automation = {
