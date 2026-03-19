@@ -575,6 +575,53 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "create_workspace",
+    description:
+      "Create a new Prisme.ai workspace. Returns the created workspace with its ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspace: {
+          type: "object",
+          description: "Workspace configuration",
+          properties: {
+            name: {
+              type: "string",
+              description: "Workspace name (required)",
+            },
+            description: {
+              description: "Workspace description (string or localized object)",
+              oneOf: [
+                { type: "string" },
+                { type: "object", additionalProperties: { type: "string" } },
+              ],
+            },
+            photo: {
+              type: "string",
+              description: "Workspace photo URL",
+            },
+            slug: {
+              type: "string",
+              description: "Optional workspace slug",
+            },
+            labels: {
+              type: "array",
+              items: { type: "string" },
+              description: "Labels for the workspace",
+            },
+          },
+          required: ["name"],
+        },
+        environment: {
+          type: "string",
+          description:
+            "Environment name (from PRISME_ENVIRONMENTS) to create the workspace in",
+        },
+      },
+      required: ["workspace", "environment"],
+    },
+  },
+  {
     name: "search_workspaces",
     description:
       "Search for workspaces by name, description, or slug. Returns workspace IDs and names. Use this to find a workspaceId from a text search.",
@@ -815,7 +862,7 @@ SECTIONS:
   {
     name: "validate_automation",
     description:
-      "Validate Prisme.ai automation(s). Checks schema compliance, expression syntax ({{variables}} and {% code %}), unknown functions, and optionally strict mode. Accepts a file path, folder path (validates all .yml/.yaml/.json files), or automation object.",
+      "Validate Prisme.ai automation(s). Checks schema compliance, expression syntax ({{variables}} and {% code %}), unknown functions, and optionally strict mode. Accepts a file path, folder path (validates all .yml/.yaml/.json files), or automation object. Returns warnings (e.g., missing arguments declaration) alongside errors even when the automation is valid.",
     inputSchema: {
       type: "object",
       properties: {

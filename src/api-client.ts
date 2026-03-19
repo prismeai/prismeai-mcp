@@ -386,6 +386,12 @@ export class PrismeApiClient {
         return response.data;
     }
 
+    async createWorkspace(workspace: { name: string; description?: string | Record<string, string>; photo?: string; slug?: string; labels?: string[] }, apiUrl?: string, environment?: string): Promise<any> {
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.post('/workspaces', workspace);
+        return response.data;
+    }
+
     async searchWorkspaces(params?: SearchWorkspacesParams, apiUrl?: string, environment?: string): Promise<WorkspaceSearchResult[]> {
         const client = this.getClient(apiUrl, environment);
         const response = await client.get('/workspaces', { params });

@@ -12,18 +12,29 @@ import { lintAutomation, type AutomationLintResult } from "../../linter/dist/ind
  * Format linting errors for human-readable output
  */
 function formatLintErrors(result: AutomationLintResult): string {
+  const lines: string[] = [];
+
   if (result.valid) {
-    return "Validation passed: No errors found.";
+    lines.push("Validation passed: No errors found.");
+  } else {
+    const errorLines = result.errors.map((err, i) => {
+      const path = err.instancePath || "(root)";
+      const message = err.message || "Unknown error";
+      const params = err.params ? ` (${JSON.stringify(err.params)})` : "";
+      return `${i + 1}. [${err.keyword}] ${path}: ${message}${params}`;
+    });
+    lines.push(`Validation failed with ${result.errors.length} error(s):\n${errorLines.join("\n")}`);
   }
 
-  const errorLines = result.errors.map((err, i) => {
-    const path = err.instancePath || "(root)";
-    const message = err.message || "Unknown error";
-    const params = err.params ? ` (${JSON.stringify(err.params)})` : "";
-    return `${i + 1}. [${err.keyword}] ${path}: ${message}${params}`;
-  });
+  if (result.warnings?.length > 0) {
+    const warningLines = result.warnings.map((w, i) => {
+      const path = w.instancePath || "(root)";
+      return `${i + 1}. [${w.keyword}] ${path}: ${w.message}`;
+    });
+    lines.push(`\nWarning(s):\n${warningLines.join("\n")}`);
+  }
 
-  return `Validation failed with ${result.errors.length} error(s):\n${errorLines.join("\n")}`;
+  return lines.join("\n");
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -296,6 +307,34 @@ export async function handleToolCall(
       };
     }
 
+    case "create_workspace": {
+      enforceReadonlyMode("create_workspace");
+      const { workspace, environment } = args as {
+        workspace: {
+          name: string;
+          description?: string | Record<string, string>;
+          photo?: string;
+          slug?: string;
+          labels?: string[];
+        };
+        environment: string;
+      };
+      const { apiUrl } = resolveWorkspaceAndEnvironment({ environment });
+      const result = await apiClient.createWorkspace(
+        workspace,
+        apiUrl,
+        environment
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
     case "search_workspaces": {
       const { search, name, slug, page, limit, labels, environment } =
         args as {
@@ -451,15 +490,22 @@ export async function handleToolCall(
       const lintOptions = { strict, validateExpressions: validateExprs, validateNaming };
 
       // Helper to validate a single file
-      const validateFile = (filePath: string): { path: string; valid: boolean; errors?: any[]; error?: string } => {
+      const validateFile = (filePath: string): { path: string; valid: boolean; errors?: any[]; warnings?: any[]; error?: string } => {
         try {
           const fileContent = readFileSync(filePath, "utf-8");
           const ext = filePath.toLowerCase();
           const parsed = ext.endsWith(".json") ? JSON.parse(fileContent) : yaml.load(fileContent);
           const result = lintAutomation(parsed, lintOptions);
+          const mappedWarnings = result.warnings?.length > 0
+            ? result.warnings.map((w) => ({
+                path: w.instancePath || "(root)",
+                keyword: w.keyword,
+                message: w.message,
+              }))
+            : undefined;
 
           if (result.valid) {
-            return { path: filePath, valid: true };
+            return { path: filePath, valid: true, ...(mappedWarnings && { warnings: mappedWarnings }) };
           }
           return {
             path: filePath,
@@ -469,6 +515,7 @@ export async function handleToolCall(
               keyword: err.keyword,
               message: err.message,
             })),
+            ...(mappedWarnings && { warnings: mappedWarnings }),
           };
         } catch (err) {
           return { path: filePath, valid: false, error: err instanceof Error ? err.message : "Parse error" };
@@ -501,6 +548,7 @@ export async function handleToolCall(
           const results = files.map(validateFile);
           const validCount = results.filter((r) => r.valid).length;
           const invalidCount = results.length - validCount;
+          const warningCount = results.filter((r) => r.warnings && r.warnings.length > 0).length;
 
           return {
             content: [
@@ -509,7 +557,7 @@ export async function handleToolCall(
                 text: JSON.stringify(
                   {
                     path: resolvedPath,
-                    summary: `${validCount}/${results.length} files valid${invalidCount > 0 ? `, ${invalidCount} with errors` : ""}`,
+                    summary: `${validCount}/${results.length} files valid${invalidCount > 0 ? `, ${invalidCount} with errors` : ""}${warningCount > 0 ? `, ${warningCount} with warnings` : ""}`,
                     results,
                   },
                   null,
@@ -527,10 +575,21 @@ export async function handleToolCall(
         }
       } else if (automation) {
         const result = lintAutomation(automation, lintOptions);
+        const mappedWarnings = result.warnings?.length > 0
+          ? result.warnings.map((w) => ({
+              path: w.instancePath || "(root)",
+              keyword: w.keyword,
+              message: w.message,
+            }))
+          : undefined;
 
         if (result.valid) {
           return {
-            content: [{ type: "text", text: JSON.stringify({ valid: true, message: "Automation is valid." }, null, 2) }],
+            content: [{ type: "text", text: JSON.stringify({
+              valid: true,
+              message: "Automation is valid.",
+              ...(mappedWarnings && { warningCount: mappedWarnings.length, warnings: mappedWarnings }),
+            }, null, 2) }],
           };
         }
 
@@ -547,6 +606,7 @@ export async function handleToolCall(
                     keyword: err.keyword,
                     message: err.message,
                   })),
+                  ...(mappedWarnings && { warningCount: mappedWarnings.length, warnings: mappedWarnings }),
                 },
                 null,
                 2
