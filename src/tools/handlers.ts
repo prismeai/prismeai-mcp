@@ -307,6 +307,43 @@ export async function handleToolCall(
       };
     }
 
+    case "publish_app": {
+      enforceReadonlyMode("publish_app");
+      const { workspaceId, workspaceName, environment, slug, name, description, workspaceVersion } = args as {
+        workspaceId?: string;
+        workspaceName?: string;
+        environment?: string;
+        slug?: string;
+        name?: string;
+        description?: string | Record<string, string>;
+        workspaceVersion?: string;
+      };
+      const resolved = resolveWorkspaceAndEnvironment({
+        workspaceId,
+        workspaceName,
+        environment,
+      });
+      const result = await apiClient.publishApp(
+        {
+          workspaceId: resolved.workspaceId,
+          slug,
+          name,
+          description,
+          workspaceVersion,
+        },
+        resolved.apiUrl,
+        resolved.environment
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
     case "create_workspace": {
       enforceReadonlyMode("create_workspace");
       const { workspace, environment } = args as {

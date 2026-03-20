@@ -386,6 +386,12 @@ export class PrismeApiClient {
         return response.data;
     }
 
+    async publishApp(body: { workspaceId: string; slug?: string; name?: string; description?: string | Record<string, string>; workspaceVersion?: string }, apiUrl?: string, environment?: string): Promise<any> {
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.post('/apps', body);
+        return response.data;
+    }
+
     async createWorkspace(workspace: { name: string; description?: string | Record<string, string>; photo?: string; slug?: string; labels?: string[] }, apiUrl?: string, environment?: string): Promise<any> {
         const client = this.getClient(apiUrl, environment);
         const response = await client.post('/workspaces', workspace);

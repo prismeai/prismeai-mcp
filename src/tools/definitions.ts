@@ -575,6 +575,54 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "publish_app",
+    description:
+      "Publish a workspace as a new app version in the Prisme.ai app store. On first publish, a slug is required to create the app. Subsequent publishes update the existing app.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
+        slug: {
+          type: "string",
+          description:
+            "App slug: required on first publish to create the app in the store",
+        },
+        name: {
+          type: "string",
+          description: "An optional version name",
+        },
+        description: {
+          description:
+            "App description (string or localized object)",
+          oneOf: [
+            { type: "string" },
+            { type: "object", additionalProperties: { type: "string" } },
+          ],
+        },
+        workspaceVersion: {
+          type: "string",
+          description:
+            "An optional workspace version to publish. If empty, publishes the latest workspace version",
+        },
+      },
+      required: ["workspaceName"],
+    },
+  },
+  {
     name: "create_workspace",
     description:
       "Create a new Prisme.ai workspace. Returns the created workspace with its ID.",
