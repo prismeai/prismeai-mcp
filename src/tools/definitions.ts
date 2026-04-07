@@ -623,6 +623,34 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "unlock_workspace",
+    description:
+      "Remove the write lock from a Prisme.ai workspace. Use this when a workspace is stuck in a locked state.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name (as configured in PRISME_ENVIRONMENTS or PRISME_WORKSPACES)",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and credentials",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Optional workspace ID (overrides workspaceName resolution)",
+        },
+      },
+    },
+    annotations: {
+      destructiveHint: true,
+    },
+  },
+  {
     name: "create_workspace",
     description:
       "Create a new Prisme.ai workspace. Returns the created workspace with its ID.",

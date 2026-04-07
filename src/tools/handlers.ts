@@ -344,6 +344,33 @@ export async function handleToolCall(
       };
     }
 
+    case "unlock_workspace": {
+      enforceReadonlyMode("unlock_workspace");
+      const { workspaceName, environment, workspaceId } = args as {
+        workspaceName?: string;
+        environment?: string;
+        workspaceId?: string;
+      };
+      const resolved = resolveWorkspaceAndEnvironment({
+        workspaceId,
+        workspaceName,
+        environment,
+      });
+      const result = await apiClient.unlockWorkspace(
+        resolved.workspaceId,
+        resolved.apiUrl,
+        resolved.environment
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    }
+
     case "create_workspace": {
       enforceReadonlyMode("create_workspace");
       const { workspace, environment } = args as {

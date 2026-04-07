@@ -28,6 +28,7 @@ export const WRITE_TOOLS = new Set([
   "uninstall_app_instance",
   "update_app_instance_config",
   "publish_app",
+  "unlock_workspace",
 ]);
 
 export function enforceReadonlyMode(toolName: string): void {

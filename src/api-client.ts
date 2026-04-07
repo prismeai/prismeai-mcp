@@ -392,6 +392,13 @@ export class PrismeApiClient {
         return response.data;
     }
 
+    async unlockWorkspace(workspaceId?: string, apiUrl?: string, environment?: string): Promise<any> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.delete(`/workspaces/${wsId}/writeLock`);
+        return response.data;
+    }
+
     async createWorkspace(workspace: { name: string; description?: string | Record<string, string>; photo?: string; slug?: string; labels?: string[] }, apiUrl?: string, environment?: string): Promise<any> {
         const client = this.getClient(apiUrl, environment);
         const response = await client.post('/workspaces', workspace);
