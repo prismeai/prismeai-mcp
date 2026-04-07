@@ -277,14 +277,9 @@ export function resolveWorkspaceAndEnvironment(
 
     const workspaceId = envConfig.workspaces[params.workspaceName];
     if (!workspaceId) {
-      const availableWorkspaces = Object.keys(envConfig.workspaces);
       throw new Error(
         `Unknown workspace name: "${params.workspaceName}" in environment "${params.environment}". ` +
-          `Available: ${
-            availableWorkspaces.length > 0
-              ? availableWorkspaces.join(", ")
-              : "none configured"
-          }`
+          `Provide a valid workspaceName or use workspaceId directly.`
       );
     }
 
@@ -315,12 +310,9 @@ export function resolveWorkspaceAndEnvironment(
     // Fall back to legacy workspace mappings
     const resolvedId = workspaceMappings[params.workspaceName];
     if (!resolvedId) {
-      const available = Object.keys(workspaceMappings);
       throw new Error(
         `Unknown workspace name: "${params.workspaceName}". ` +
-          `Available: ${
-            available.length > 0 ? available.join(", ") : "none configured"
-          }`
+          `Provide a valid workspaceName or use workspaceId directly.`
       );
     }
     return {
