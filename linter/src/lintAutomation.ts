@@ -7,6 +7,28 @@ import { validateNamingConventions } from './namingConventions.js';
 import { traverseInstructions } from './instructionTraversal.js';
 
 /**
+ * Returns a warning when the automation has no `arguments` declared.
+ * Always-on check (not gated behind any option).
+ */
+function checkMissingArguments(automation: unknown): ErrorObject[] {
+  if (!automation || typeof automation !== 'object') return [];
+  const auto = automation as Record<string, unknown>;
+  if (!('arguments' in auto)) {
+    return [
+      {
+        keyword: 'warning',
+        instancePath: '/arguments',
+        schemaPath: '#/warnings/missingArguments',
+        params: {},
+        message:
+          'No arguments declared. If this automation receives input data as parameters (not read from user.*, session.*, or global.* contexts), declare them in "arguments" for documentation and validation.',
+      } as ErrorObject,
+    ];
+  }
+  return [];
+}
+
+/**
  * Validates that each instruction object has exactly one top-level key.
  * Multiple keys indicate a YAML indentation error where arguments
  * (like `output`) ended up as siblings of the instruction instead of children.
@@ -39,6 +61,9 @@ export function lintAutomation(
   options?: LintOptions
 ): AutomationLintResult {
   try {
+    // Collect warnings (always-on checks, independent of validation outcome)
+    const warnings = checkMissingArguments(automation);
+
     // Use local validateAutomation with minimal schema
     // @prisme.ai/validation schemas are outdated and too restrictive
     const valid = validateAutomation(automation);
@@ -48,20 +73,20 @@ export function lintAutomation(
       : [];
 
     if (!valid) {
-      return { valid: false, errors };
+      return { valid: false, errors, warnings };
     }
 
     // Validate instruction structure (always enabled)
     const instructionKeyErrors = validateInstructionKeys(automation);
     if (instructionKeyErrors.length > 0) {
-      return { valid: false, errors: [...errors, ...instructionKeyErrors] };
+      return { valid: false, errors: [...errors, ...instructionKeyErrors], warnings };
     }
 
     // Strict mode validation
     if (options?.strict) {
       const strictErrors = validateStrictMode(automation);
       if (strictErrors.length > 0) {
-        return { valid: false, errors: [...errors, ...strictErrors] };
+        return { valid: false, errors: [...errors, ...strictErrors], warnings };
       }
     }
 
@@ -69,7 +94,7 @@ export function lintAutomation(
     if (options?.validateExpressions !== false) {
       const expressionErrors = validateExpressions(automation);
       if (expressionErrors.length > 0) {
-        return { valid: false, errors: [...errors, ...expressionErrors] };
+        return { valid: false, errors: [...errors, ...expressionErrors], warnings };
       }
     }
 
@@ -77,11 +102,11 @@ export function lintAutomation(
     if (options?.validateNaming) {
       const namingErrors = validateNamingConventions(automation);
       if (namingErrors.length > 0) {
-        return { valid: false, errors: [...errors, ...namingErrors] };
+        return { valid: false, errors: [...errors, ...namingErrors], warnings };
       }
     }
 
-    return { valid: true, errors: [] };
+    return { valid: true, errors: [], warnings };
   } catch {
     // Never throw - return as invalid
     return {
@@ -95,6 +120,7 @@ export function lintAutomation(
           message: 'Invalid input: expected automation object',
         } as ErrorObject,
       ],
+      warnings: [],
     };
   }
 }

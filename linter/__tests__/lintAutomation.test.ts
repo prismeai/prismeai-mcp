@@ -664,6 +664,55 @@ describe('lintAutomation', () => {
     });
   });
 
+  describe('warnings', () => {
+    it('should produce a warning when arguments is absent', () => {
+      const result = lintAutomation({
+        name: 'test',
+        do: [],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0].keyword).toBe('warning');
+      expect(result.warnings[0].message).toContain('No arguments declared');
+    });
+
+    it('should not produce a warning when arguments is present (even empty)', () => {
+      const result = lintAutomation({
+        name: 'test',
+        do: [],
+        arguments: {},
+      });
+      expect(result.valid).toBe(true);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it('should not produce a warning when arguments has properties', () => {
+      const result = lintAutomation({
+        name: 'test',
+        do: [],
+        arguments: { text: { type: 'string' } },
+      });
+      expect(result.valid).toBe(true);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it('should return warning alongside errors when automation is invalid', () => {
+      // Missing required 'name' and 'do'
+      const result = lintAutomation({ description: 'no name or do' });
+      expect(result.valid).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+      // warnings array is always present
+      expect(Array.isArray(result.warnings)).toBe(true);
+    });
+
+    it('should always have warnings array even for null/invalid input', () => {
+      const result = lintAutomation(null);
+      expect(result.valid).toBe(false);
+      expect(Array.isArray(result.warnings)).toBe(true);
+      expect(result.warnings).toHaveLength(0);
+    });
+  });
+
   describe('expression validation option', () => {
     it('should validate expressions by default', () => {
       const result = lintAutomation({

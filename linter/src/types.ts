@@ -48,4 +48,5 @@ export type LintOptions = {
 export type AutomationLintResult = {
   valid: boolean;
   errors: ErrorObject[];
+  warnings: ErrorObject[];
 };
