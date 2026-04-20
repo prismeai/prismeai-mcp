@@ -344,6 +344,116 @@ export async function handleToolCall(
       };
     }
 
+    case "push_workspace_version": {
+      enforceReadonlyMode("push_workspace_version");
+      const {
+        description,
+        name,
+        repositoryId,
+        gitPlatform,
+        workspaceName,
+        environment,
+        workspaceId,
+      } = args as {
+        description: string | Record<string, string>;
+        name?: string;
+        repositoryId?: string;
+        gitPlatform?: string;
+        workspaceName?: string;
+        environment?: string;
+        workspaceId?: string;
+      };
+
+      if (repositoryId && gitPlatform) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Error: `repositoryId` and `gitPlatform` are mutually exclusive — provide only one.",
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const resolved = resolveWorkspaceAndEnvironment({
+        workspaceId,
+        workspaceName,
+        environment,
+      });
+
+      let resolvedRepositoryId = repositoryId;
+      if (gitPlatform) {
+        const workspace = await apiClient.getWorkspace(
+          resolved.workspaceId,
+          resolved.apiUrl,
+          resolved.environment
+        );
+        const platformRepos = (workspace?.platformRepositories || {}) as Record<string, unknown>;
+        if (!platformRepos[gitPlatform]) {
+          const available = Object.keys(platformRepos);
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `Error: Platform repository "${gitPlatform}" not found on workspace ${resolved.workspaceId}. ` +
+                  (available.length
+                    ? `Available platform repositories: ${available.join(", ")}.`
+                    : "No platform repositories are exposed on this workspace."),
+              },
+            ],
+            isError: true,
+          };
+        }
+        resolvedRepositoryId = gitPlatform;
+      }
+
+      const body: {
+        description: Record<string, string>;
+        name?: string;
+        repository?: { id: string };
+      } = {
+        description:
+          typeof description === "string" ? { en: description } : description,
+      };
+      if (name) body.name = name;
+      if (resolvedRepositoryId) body.repository = { id: resolvedRepositoryId };
+
+      const result = await apiClient.pushWorkspaceVersion(
+        body,
+        resolved.workspaceId,
+        resolved.apiUrl,
+        resolved.environment
+      );
+
+      const pushedRepositoryId: string | undefined =
+        result?.repository?.id ?? resolvedRepositoryId;
+      const pushedToGit = Boolean(pushedRepositoryId);
+      const target = pushedToGit
+        ? `git repository "${pushedRepositoryId}"`
+        : "local (non-git) workspace version";
+      const log = `Version "${result?.name ?? name ?? "(unnamed)"}" created — pushed to ${target}.`;
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                pushedToGit,
+                target,
+                log,
+                version: result,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+
     case "unlock_workspace": {
       enforceReadonlyMode("unlock_workspace");
       const { workspaceName, environment, workspaceId } = args as {

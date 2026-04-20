@@ -421,6 +421,29 @@ export class PrismeApiClient {
         return response.data;
     }
 
+    async getWorkspace(workspaceId?: string, apiUrl?: string, environment?: string): Promise<any> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.get(`/workspaces/${wsId}`);
+        return response.data;
+    }
+
+    async pushWorkspaceVersion(
+        body: {
+            description: Record<string, string>;
+            name?: string;
+            repository?: { id: string };
+        },
+        workspaceId?: string,
+        apiUrl?: string,
+        environment?: string
+    ): Promise<any> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const response = await client.post(`/workspaces/${wsId}/versions`, body);
+        return response.data;
+    }
+
     async exportWorkspace(workspaceId?: string, apiUrl?: string, environment?: string): Promise<Buffer> {
         const wsId = workspaceId || this.workspaceId;
         const client = this.getClient(apiUrl, environment);

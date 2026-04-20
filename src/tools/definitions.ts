@@ -1162,6 +1162,69 @@ Use this to cancel a report, edit its message, or change its type.`,
       destructiveHint: true,
     },
   },
+  {
+    name: "push_workspace_version",
+    description:
+      "Push a workspace to a git repository by creating a new version.\n\n" +
+      "**If the user asks to push to git, you MUST pass `gitPlatform` (or `repositoryId`) — do not call this tool without one of these selectors.** Omitting both is only valid when the caller explicitly wants a non-git local snapshot.\n\n" +
+      "Selector choice:\n" +
+      "- `gitPlatform` — the default for pushing to git on Prisme.ai. Pass the platform repository id (key under the workspace's `platformRepositories`). If you don't know the id, pass any plausible value; the tool will reject it and return the list of available platform repos so you can retry. Prefer this selector unless the user specifically names a workspace-level repo.\n" +
+      "- `repositoryId` — only when the user explicitly references a repo declared on the workspace itself (under `repositories:` with mode `read-write`).\n\n" +
+      "Response includes `pushedToGit: true|false` — if `false` after a \"push to git\" request, the call was wrong; retry with `gitPlatform`.\n\n" +
+      "Common errors:\n" +
+      "- 400 \"not up-to-date\": the remote has newer commits — pull the workspace and retry.\n" +
+      "- A successful push holds a ~30 min write lock on the workspace; use `unlock_workspace` to release it early.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        description: {
+          description:
+            "Version description. Provide a plain string (wrapped as `{ en: <value> }`) or a localized object like `{ en: \"...\", fr: \"...\" }`.",
+          oneOf: [
+            { type: "string" },
+            {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
+          ],
+        },
+        name: {
+          type: "string",
+          description:
+            "Optional version name (e.g. \"v1.2.0\"). Auto-generated server-side if omitted.",
+        },
+        repositoryId: {
+          type: "string",
+          description:
+            "Workspace-level repository id (key under `repositories:` in the workspace config). Mutually exclusive with `gitPlatform`. Omit if the workspace has a single repository.",
+        },
+        gitPlatform: {
+          type: "string",
+          description:
+            "Platform-wide git repository id (key under `platformRepositories` on the workspace). **Pass this whenever the user asks to push to git on Prisme.ai** — it is the primary selector for git pushes. If you don't know the exact id, pass your best guess; the tool validates it and returns the list of available platform repos so you can retry. Mutually exclusive with `repositoryId`.",
+        },
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
+      },
+      required: ["description", "workspaceName"],
+    },
+    annotations: {
+      destructiveHint: true,
+    },
+  },
   // AI Knowledge tools
   {
     name: "ai_knowledge_query",
