@@ -1,0 +1,96 @@
+appSlug: Custom Code
+slug: Custom Code
+config:
+  functions:
+    # ===================== REQUIRED: MCP auth-install =====================
+    generateSignedKey:
+      parameters:
+        workspaceId:
+          type: string
+        getConfigUrl:
+          type: string
+        secret:
+          type: string
+      code: >
+        const crypto = require('crypto');
+
+        const data = JSON.stringify({ wid: workspaceId, url: getConfigUrl });
+
+        const payload = Buffer.from(data).toString('base64url');
+
+        const signature = crypto.createHmac('sha256',
+        secret).update(data).digest('hex');
+
+        return payload + '.' + signature;
+
+    verifyAndDecodeKey:
+      parameters:
+        apiKey:
+          type: string
+        secret:
+          type: string
+      code: >
+        const crypto = require('crypto');
+
+        const parts = (apiKey || '').split('.');
+
+        if (parts.length !== 2) return { error: 'Invalid key format' };
+
+        const data = Buffer.from(parts[0], 'base64url').toString();
+
+        const expected = crypto.createHmac('sha256',
+        secret).update(data).digest('hex');
+
+        if (parts[1] !== expected) return { error: 'Invalid signature' };
+
+        try {
+          const parsed = JSON.parse(data);
+          return { workspaceId: parsed.wid, getConfigUrl: parsed.url };
+        } catch (e) {
+          return { error: 'Invalid payload' };
+        }
+
+    # ===================== GENERAL HELPERS =====================
+    buildQueryString:
+      parameters:
+        params:
+          type: object
+      code: |
+        const p = params || {};
+        const parts = [];
+        for (const [k, v] of Object.entries(p)) {
+          if (v === null || v === undefined || v === '') continue;
+          parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v)));
+        }
+        return parts.length ? '?' + parts.join('&') : '';
+
+    pruneEmpty:
+      parameters:
+        obj:
+          type: object
+      code: |
+        const o = obj || {};
+        const out = {};
+        for (const [k, v] of Object.entries(o)) {
+          if (v === null || v === undefined || v === '') continue;
+          if (Array.isArray(v) && v.length === 0) continue;
+          out[k] = v;
+        }
+        return out;
+
+    # ===================== OPTIONAL: GraphQL registry =====================
+    # If the service exposes a GraphQL API, keep this function and list all
+    # operations + their queries here. Otherwise delete it.
+    #
+    # getGraphqlQuery:
+    #   parameters:
+    #     operationName: { type: string }
+    #   code: |
+    #     const FIELDS = `id name ...`;
+    #     const queries = {
+    #       getItems: { rootField: 'getItems', query: `query getItems($jql: String, $limit: Int!) { getItems(jql: $jql, limit: $limit) { total results { ${FIELDS} } } }` },
+    #       // ...
+    #     };
+    #     const entry = queries[operationName];
+    #     if (!entry) return { error: 'Unknown operation: ' + operationName };
+    #     return { query: entry.query, rootField: entry.rootField };

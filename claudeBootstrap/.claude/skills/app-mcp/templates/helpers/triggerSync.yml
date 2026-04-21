@@ -1,0 +1,14 @@
+slug: triggerSync
+name: 00_MCP/triggerSync
+description: Trigger MCP tool discovery via MCP Core on DSUL changes or manually
+when:
+  endpoint: true
+  events:
+    - workspaces.imported
+    - workspaces.automations.created
+    - workspaces.automations.updated
+    - workspaces.automations.deleted
+do:
+  - MCP Core.syncMcpTools:
+      output: syncResult
+output: "{{syncResult}}"

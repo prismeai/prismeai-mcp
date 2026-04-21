@@ -1,0 +1,123 @@
+slug: executeApiCall
+name: /01_Helpers/executeApiCall
+description: >-
+  Execute a <<SERVICE_NAME>> API call with auth. Returns
+  { success, data, status } or { success: false, error, data, status }.
+private: true
+arguments:
+  path:
+    type: string
+    description: Relative path (no leading slash).
+  method:
+    type: string
+    description: HTTP method (POST default, GET, PUT, DELETE).
+  body:
+    type: object
+    description: Request JSON body.
+  rawBody:
+    type: string
+    description: Raw body (e.g. XML) — takes precedence over `body` when set.
+  contentType:
+    type: string
+    description: Override Content-Type (e.g. application/xml).
+  query:
+    type: object
+    description: Query string parameters.
+  accessToken:
+    type: string
+  baseUrl:
+    type: string
+  operation:
+    type: string
+    description: Short description used in error messages.
+do:
+  - set:
+      name: effectiveBaseUrl
+      value: '{% {{baseUrl}} || "<<BASE_URL>>" %}'
+  - set:
+      name: effectiveMethod
+      value: '{% {{method}} || "POST" %}'
+  - set:
+      name: qs
+      value: ''
+  - conditions:
+      '{{query}}':
+        - Custom Code.run:
+            function: buildQueryString
+            parameters:
+              params: '{{query}}'
+            output: qs
+  - set:
+      name: fetchHeaders
+      # <<ADAPT>>: auth header shape depends on the service:
+      #   Bearer:     "Authorization: Bearer {{accessToken}}"
+      #   API-Key:    "X-API-Key: {{accessToken}}"
+      #   Basic:      "Authorization: Basic {{accessToken}}" (accessToken = base64(email:token))
+      #   Custom:     some services have their own header (e.g. "Api-Token: ...")
+      value:
+        Authorization: Bearer {{accessToken}}
+        Accept: application/json
+  - conditions:
+      '{{effectiveMethod}} == "POST" || {{effectiveMethod}} == "PUT" || {{effectiveMethod}} == "PATCH"':
+        - set:
+            name: fetchHeaders.Content-Type
+            value: '{% {{contentType}} || "application/json" %}'
+  - conditions:
+      '{{effectiveMethod}} == "GET" || {{effectiveMethod}} == "DELETE"':
+        - fetch:
+            url: '{{effectiveBaseUrl}}/{{path}}{{qs}}'
+            method: '{{effectiveMethod}}'
+            headers: '{{fetchHeaders}}'
+            output: response
+            outputMode: detailed_response
+            emitErrors: false
+      default:
+        - conditions:
+            '{{rawBody}}':
+              - fetch:
+                  url: '{{effectiveBaseUrl}}/{{path}}{{qs}}'
+                  method: '{{effectiveMethod}}'
+                  headers: '{{fetchHeaders}}'
+                  body: '{{rawBody}}'
+                  output: response
+                  outputMode: detailed_response
+                  emitErrors: false
+            '{{body}}':
+              - fetch:
+                  url: '{{effectiveBaseUrl}}/{{path}}{{qs}}'
+                  method: '{{effectiveMethod}}'
+                  headers: '{{fetchHeaders}}'
+                  body: '{{body}}'
+                  output: response
+                  outputMode: detailed_response
+                  emitErrors: false
+            default:
+              - fetch:
+                  url: '{{effectiveBaseUrl}}/{{path}}{{qs}}'
+                  method: '{{effectiveMethod}}'
+                  headers: '{{fetchHeaders}}'
+                  body: {}
+                  output: response
+                  outputMode: detailed_response
+                  emitErrors: false
+  - handleApiError:
+      response: '{{response}}'
+      operation: '{{operation}}'
+      output: errorResult
+  - conditions:
+      '{{errorResult}}':
+        - set:
+            name: result
+            value:
+              success: false
+              error: '{{errorResult}}'
+              data: '{{response.body}}'
+              status: '{{response.status}}'
+        - break: {}
+  - set:
+      name: result
+      value:
+        success: true
+        data: '{{response.body}}'
+        status: '{{response.status}}'
+output: '{{result}}'

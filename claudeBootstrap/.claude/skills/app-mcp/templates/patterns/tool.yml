@@ -1,0 +1,47 @@
+slug: tool-<<OPERATION_NAME>>
+name: /02_Tools/tool-<<OPERATION_NAME>>
+description: <<OPERATION_DESCRIPTION>>
+private: true
+arguments:
+  body:
+    type: object
+    properties:
+      arguments:
+        type: object
+      accessToken:
+        type: string
+      baseUrl:
+        type: string
+do:
+  - method-<<OPERATION_NAME>>:
+      accessToken: '{{body.accessToken}}'
+      baseUrl: '{{body.baseUrl}}'
+      # <<ADAPT>>: forward each arg from body.arguments.*
+      output: methodResult
+  - conditions:
+      '{{methodResult.isError}}':
+        - set:
+            name: output
+            value: '{{methodResult}}'
+        - break: {}
+      '{{methodResult.error}}':
+        - set:
+            name: output
+            value: '{{methodResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: '{{methodResult.operation}}'
+      structuredData: '{{methodResult.structuredData}}'
+      outputFormat: '{{body.arguments.outputFormat}}'
+      itemType: '{{methodResult.itemType}}'
+      itemName: '{{methodResult.itemName}}'
+      identifier: '{{methodResult.identifier}}'
+      properties: '{{methodResult.properties}}'
+      items: '{{methodResult.items}}'
+      location: '{{methodResult.location}}'
+      hint: '{{methodResult.hint}}'
+      jsonData: '{{methodResult.jsonData}}'
+      additionalInfo: '{{methodResult.additionalInfo}}'
+      message: '{{methodResult.message}}'
+      output: output
+output: '{{output}}'

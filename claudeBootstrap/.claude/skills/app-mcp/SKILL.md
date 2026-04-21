@@ -1,0 +1,257 @@
+---
+name: app-mcp
+description: Scaffold a brand-new Prisme.ai App + MCP workspace for a third-party SaaS (REST or GraphQL). Produces index.yml, security.yml, .import.yml, helpers, Custom Code, MCP Core, tool/method automations, public App-mode instructions, and pushes to prod. Use when the user says "build an app+mcp for X", "créer une app+mcp pour X", or similar. Reuses patterns from the existing workspaces in `./prismeai-workspaces/workspaces/`.
+argument-hint: "[service-name] [?api-docs-url]"
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, Agent, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__search_workspaces
+---
+
+# App + MCP workspace builder
+
+You are scaffolding a **Prisme.ai workspace** that exposes a third-party SaaS both as:
+- A **Prisme.ai App** — tenants can call `<ServiceName>.operation:` directly from their automations
+- An **MCP server** — external AI agents (Claude Desktop, etc.) can call tools via JSON-RPC 2.0 on a central endpoint
+
+Reference implementations live in `./prismeai-workspaces/workspaces/`. List the folder and inspect whichever existing workspace matches the target API shape (auth model, REST vs GraphQL, hybrid) before writing new code.
+
+The definitive auth pattern is `mcp-auto-install.md` (copied into this skill folder) — read it first if you haven't. It explains the HMAC-signed, single-header MCP key scheme used by all modern app+mcp workspaces.
+
+---
+
+## Output layout
+
+The final workspace must look like this, anchored at `prismeai-workspaces/workspaces/<slug>/`:
+
+```
+<slug>/
+├── .import.yml
+├── index.yml                   # config + secrets + mcpTools list
+├── security.yml                # standard ruleset (copy verbatim)
+├── swagger.yml                 # full OpenAPI 3.0 — must be generated first
+├── automations/
+│   ├── buildAppAuth.yml        # helper — reads config.* (App) or args (MCP)
+│   ├── executeApiCall.yml      # helper
+│   ├── handleApiError.yml      # helper
+│   ├── formatToolOutput.yml    # helper
+│   ├── routeToolCall.yml       # helper — dispatches toolName → tool-*
+│   ├── mcp.yml                 # endpoint — JSON-RPC 2.0
+│   ├── onInstall.yml           # event-driven — calls generateKey
+│   ├── generateKey.yml         # endpoint — central-only
+│   ├── getConfig.yml           # endpoint — tenant-only
+│   ├── triggerSync.yml         # event-driven + endpoint — keeps MCP Core's mcpTools in sync
+│   ├── method-<op>.yml         # private — one per tool (API call logic)
+│   ├── tool-<op>.yml           # private — one per tool (MCP wrapper)
+│   └── <op>.yml                # PUBLIC ("instructions") — one per tool
+├── imports/
+│   ├── Custom Code.yml         # JS helpers (HMAC, buildQueryString, pruneEmpty, [getGraphqlQuery])
+│   └── MCP Core.yml            # mirrors config.value.mcpTools
+└── pages/
+    └── _doc.yml                # optional doc page (TabsView with "As App" / "As MCP")
+```
+
+**Naming rules**:
+- `<slug>` = folder name = workspace slug = lowercased-with-dashes (e.g. `example-service`, `my-saas`)
+- Private helpers (`method-*`, `tool-*`, `buildAppAuth`, `executeApiCall`, `handleApiError`, `formatToolOutput`, `routeToolCall`) all have `private: true`
+- Public App-mode automations (the "instructions") use the bare operation name (e.g. `getTests.yml`, `createTest.yml`) and are **NOT** `private:`
+
+---
+
+## Workflow — 6 phases
+
+Run phases sequentially. Pause after each for confirmation when a decision affects the contract (service URL, slug, logo, swagger scope).
+
+### Phase 1 — Gather the service identity
+
+**Goal**: lock in service name, slug, base URL, auth model.
+
+1. If `$ARGUMENTS` is empty, ask via `AskUserQuestion`:
+   - "Quel service SaaS veux-tu intégrer ?"
+   - "Quelle est l'URL de la doc de l'API REST (ou GraphQL) ?" (can be skipped if you can find it)
+2. Propose a **slug** (`kebab-case`, used for folder + workspace slug). Confirm with the user before creating the folder.
+3. Identify the **base URL** of the API (ask if ambiguous — e.g. on-prem vs. cloud, v1 vs. v2). Typical shapes:
+   - Cloud SaaS → `https://api.<service>.com/v1` or `https://<service>.cloud.<vendor>.app/api/v2`
+   - On-prem → user-provided deployment URL
+4. Identify the **auth model** (one of):
+   - **Static token**: pass as `Authorization: Bearer <token>` or a custom header
+   - **OAuth2 / client-credentials**: exchange `client_id + client_secret` for a short-lived JWT via a dedicated endpoint — requires caching in session
+   - **Basic auth**: `Basic base64(email:token)`
+5. Pick the **existing workspace ID** if the user already created one on the platform. Otherwise we'll use `<placeholder>` and let `push_workspace` create it.
+
+**Do NOT** proceed to phase 2 without these 4 facts confirmed.
+
+### Phase 2 — Generate `swagger.yml`
+
+**Goal**: concrete, validated OpenAPI 3.0 listing every endpoint/operation we'll expose.
+
+1. Read the API docs. Prefer authoritative sources:
+   - Official doc site (usually the canonical source)
+   - GitHub Postman collections (`<service>/postman-collections` repos are common)
+   - Public OpenAPI spec if one exists
+2. For **pure REST APIs**, list every endpoint with path + method + request/response schemas.
+3. For **GraphQL APIs**, expose each operation as a logical pseudo-endpoint under `/graphql/ops/<operationName>` with extensions `x-graphql-operation: <name>` and `x-graphql-kind: query|mutation`. The actual HTTP call will always be `POST /graphql` — the MCP layer maps the logical operation name to the right GraphQL query (see Phase 5).
+4. For **hybrid APIs** (REST + GraphQL on the same domain): include both — real REST endpoints as plain operations, GraphQL ops as `/graphql/ops/*`.
+5. Save at `<slug>/swagger.yml`. Validate with `python3 -c "import yaml; yaml.safe_load(open('swagger.yml'))"`.
+
+**Checkpoint**: report the number of REST endpoints + GraphQL ops to the user. If an API is huge (>100 ops), ask which subset to expose initially.
+
+### Phase 3 — Fetch the service logo
+
+**Goal**: find a square, high-quality logo URL to set as `photo` on the workspace.
+
+1. Try in order:
+   - `WebFetch` the service homepage; look for a `<link rel="icon">` or `<meta property="og:image">`
+   - Search `<service> logo svg OR png site:official-domain`
+   - Check the favicon at `https://<domain>/favicon.ico` or `https://<domain>/favicon.svg`
+   - Last resort: use `https://logo.clearbit.com/<domain>` (free, returns a square PNG)
+2. Prefer **SVG** > **PNG square** > other. Avoid wide banner logos.
+3. Confirm the URL with the user before locking it into `index.yml`.
+
+### Phase 4 — Scaffold the workspace files
+
+**Goal**: create all non-tool files (config, security, imports, helpers) from the templates in `./templates/`.
+
+Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
+- `<<SERVICE_NAME>>` → Human-readable name (e.g. `AcmeCorp`, `MySaas`)
+- `<<SERVICE_SLUG>>` → camelCase slug used in event names (e.g. `acmeCorp`, `mySaas`)
+- `<<WORKSPACE_ID>>` → Prisme.ai workspace ID (e.g. `_gwEr1h`) — only known after the workspace is created on the platform, use a placeholder then update
+- `<<BASE_URL>>` → API base URL
+- `<<LOGO_URL>>` → URL chosen in phase 3
+
+**Steps**:
+1. `mkdir -p prismeai-workspaces/workspaces/<slug>/{automations,imports,pages}`
+2. Copy `templates/security.yml` verbatim.
+3. Copy `templates/.import.yml` and substitute placeholders.
+4. Copy `templates/index.yml` and fill in:
+   - Description (2 sentences summarising the service)
+   - `config.schema` — one field per credential + the standard `mcpEndpoint` / `mcpApiKey` (readOnly)
+   - `config.value` — NEVER add `mcpApiKey` (see mcp-auto-install.md §"Don't put auto-generated config in config.value")
+   - `config.value.mcpTools` — one entry per operation, with `inputSchema` pulled from swagger + always adding an `outputFormat` enum property
+   - `secrets.schema` — one field per credential + `appSecret` (HMAC secret)
+5. Copy `templates/helpers/*.yml` into `automations/` and substitute placeholders. **This includes `triggerSync.yml`** — mandatory for every app+mcp workspace (see "MCP tool discovery" below).
+6. **Adapt `buildAppAuth`** for the auth model (see the `<<ADAPT>>` comment inside):
+   - Static token: keep simple, just read `config.token`
+   - OAuth2: add a `fetch` to exchange credentials + session cache (look at an existing OAuth2 workspace's `buildAppAuth.yml` as reference)
+7. **Adapt `executeApiCall`** for the auth header shape:
+   - Bearer: `Authorization: Bearer {{accessToken}}` (default)
+   - Custom: rename the header, adjust pruning of Content-Type for GET, etc.
+8. **Adapt `getConfig`**: return **exactly** the shape that `mcp.yml` expects in the `creds` block. If buildAppAuth needs `clientId/clientSecret`, getConfig must return them; if it just needs `token`, only forward that.
+9. Copy `templates/imports/Custom-Code.yml` into `imports/Custom Code.yml`. If the API is GraphQL, add a `getGraphqlQuery` function with the full registry of operations (look at an existing GraphQL workspace's `imports/Custom Code.yml` — the registry is a big JS object keyed by operation name).
+10. Create `imports/MCP Core.yml` by mirroring `config.value.mcpTools` from `index.yml`. Automate this with a short Python script:
+    ```python
+    import yaml
+    d = yaml.safe_load(open('index.yml'))
+    out = {'appSlug': 'MCP Core', 'slug': 'MCP Core', 'config': {'apiKey': '', 'mcpTools': d['config']['value']['mcpTools']}}
+    yaml.dump(out, open('imports/MCP Core.yml','w'), sort_keys=False)
+    ```
+
+### Phase 5 — Generate tool, method and public automations
+
+**Goal**: three automations per operation — `method-<op>`, `tool-<op>`, `<op>` (public).
+
+For each entry in `config.value.mcpTools`:
+
+1. **`method-<op>.yml`** (private) — core API call logic. Arguments = flat operation params + `accessToken` + `baseUrl`. Calls `executeApiCall` (REST) or `executeGraphqlOperation` (GraphQL). Returns `{ operation, itemType, structuredData, ... }` ready for `formatToolOutput`.
+2. **`tool-<op>.yml`** (private) — MCP wrapper. Arguments = `{ body: { arguments, accessToken, baseUrl } }`. Delegates to `method-<op>`, then to `formatToolOutput`.
+3. **`<op>.yml`** (public, "instruction") — the App-mode interface. Arguments = flat operation params (mirror the `inputSchema` properties minus `outputFormat`). Calls `buildAppAuth` (reads `config.*` in tenant context), then `method-<op>`.
+
+**Dispatcher optimization for large APIs**: if the service has 40+ GraphQL operations, don't generate 40 `tool-*` files. Instead:
+- Create **one** `tool-graphqlOp.yml` (generic dispatcher that reads `toolName`, looks up the GraphQL query, calls `executeGraphqlOperation`, formats via `formatToolOutput`)
+- Add a `default:` branch in `routeToolCall.yml` that routes any unmatched toolName to `tool-graphqlOp`
+- Public automations stay 1-per-op (they're what tenants see as `<Service>.<operation>`)
+
+**Generation tips**:
+- Use a Python script reading `index.yml` to scaffold all three files in one pass — look at any existing reference workspace for a concrete example. Do it programmatically; don't write 60 files by hand.
+- Always run `Custom Code.run: pruneEmpty` on request bodies / GraphQL variables to strip nulls.
+- For operations with **no arguments** (e.g. `getTestStatuses`), omit the `arguments:` key entirely — do NOT write `arguments: {}` or `arguments:\n  # comment` (invalid schema).
+
+### Phase 6 — Validate + push
+
+**Goal**: clean workspace, validated, deployed to prod.
+
+1. `validate_automation` on the full `automations/` folder. Must be 100% valid — expect warnings on webhook automations (no `arguments:`), those are fine.
+2. Human review: list `method-*`, `tool-*`, `<op>` counts to the user. Confirm before pushing.
+3. `push_workspace` to `_<WORKSPACE_ID>` on `prod` with a short message (`initial`, `add-tools`, etc., max 15 chars, alphanumeric + `-_`).
+4. **Verify the MCP tool sync**: `workspaces.imported` should fire `triggerSync` automatically. Call `tools/list` on the `/mcp` endpoint (or execute `triggerSync` once by hand) to confirm the returned tools match `config.value.mcpTools`. If the list is stale or empty, see "MCP tool discovery" above.
+5. Instruct the user how to **activate**:
+   - Configure secrets (`<slug>Token` or `<slug>ClientId`/`<slug>ClientSecret` + `appSecret`) on the central workspace.
+   - Install the app in a tenant workspace; configure credentials. `mcpEndpoint` + `mcpApiKey` populate automatically via `onInstall`.
+   - Call `<ServiceName>.<op>:` from a tenant automation, or point an MCP client at `mcpEndpoint` using `mcp-api-key`.
+6. Optionally create `pages/_doc.yml` — look at an existing workspace's `pages/_doc.yml` as reference (TabsView with "Usage as App" / "Usage as MCP").
+
+---
+
+## MCP tool discovery — keep `MCP Core` in sync
+
+The `/mcp` endpoint does **not** read `config.value.mcpTools` from `index.yml` directly. It reads from the **MCP Core app instance's config**, which is populated by `MCP Core.syncMcpTools`. That sync must be triggered whenever tools are added, renamed, or removed — otherwise `tools/list` will still return the old set and clients will call tools that no longer exist (or miss newly added ones).
+
+**Solution — ship the `triggerSync` automation in every app+mcp workspace**. It runs on DSUL change events and can also be fired manually via its endpoint.
+
+```yaml
+slug: triggerSync
+name: 00_MCP/triggerSync
+description: Trigger MCP tool discovery via MCP Core on DSUL changes or manually
+when:
+  endpoint: true
+  events:
+    - workspaces.imported
+    - workspaces.automations.created
+    - workspaces.automations.updated
+    - workspaces.automations.deleted
+do:
+  - MCP Core.syncMcpTools:
+      output: syncResult
+output: "{{syncResult}}"
+```
+
+**When you must force a sync manually** (e.g. you edited `config.value.mcpTools` in `index.yml` without touching any automation, so the DSUL events above didn't fire):
+1. Curl the `triggerSync` endpoint on the central workspace, **or**
+2. Execute it via `execute_automation` with an empty payload, **or**
+3. As a last resort, briefly edit any automation (no-op save) to emit `workspaces.automations.updated`.
+
+**Checkpoint in Phase 6**: after `push_workspace`, either rely on the import event (`workspaces.imported`) firing `triggerSync` automatically, or call `triggerSync` once manually and inspect its output for a non-empty `tools` array. Don't assume sync happened — verify.
+
+**Do not** use the older "create a temporary automation that calls `syncMcpTools`, then delete it" workaround. `triggerSync` is the canonical mechanism going forward; it's idempotent and already listens to every relevant event.
+
+---
+
+## Common traps
+
+All of these were already hit on existing workspaces — don't rediscover them:
+
+- **`config.value.mcpApiKey`** — if set, it defeats `onInstall`'s "key already generated" guard (the template string is truthy even when secret is empty). Solution: do NOT add `mcpApiKey` to `config.value`.
+- **Trailing `/v2` on `global.apiUrl`** — `{{global.apiUrl}}` already includes `/v2`. Do not append it in `onInstall`.
+- **`break: { scope: all }` in `try/catch`** — propagates as `$error = {"break":{}}`. Use nested `conditions` with `default:` instead.
+- **MCP Core's internal break on invalid API key** — we bypass MCP Core for `tools/call`. MCP Core is kept only for `tools/list` / `initialize`.
+- **`integer` type** — DSUL only accepts `number`. Convert every `type: integer` in the swagger to `number` in DSUL.
+- **`arguments: {}` or empty comment body** — YAML-parse-invalid schema. If the automation has no arguments, omit the key.
+- **Hyphenated keys in expressions** — use `{{obj["key-name"]}}`, never `{{obj.key-name}}` (parsed as subtraction).
+- **Dispatcher default branch** — only needed when you have a generic fallback (GraphQL dispatcher). Without it, set `result: null` and `!{{result}}` becomes an "Unknown tool" error — that's fine.
+
+See `mcp-auto-install.md` (in this skill folder) for the full reasoning behind the auto-install flow and all its gotchas.
+
+---
+
+## Reference workspaces
+
+When in doubt, list `prismeai-workspaces/workspaces/` and read the closest-matching existing workspace. Match by API shape, not by name:
+
+| Target API shape | Look for a reference workspace with |
+|------------------|-------------------------------------|
+| REST-RPC, static token | Flat operation set, `Authorization: Bearer` header |
+| Pure GraphQL, static token | Single `/graphql` endpoint, one `Authorization` header |
+| Hybrid REST + GraphQL, OAuth2 client-credentials | JWT exchange with session cache, generic GraphQL dispatcher |
+| OAuth2 with token refresh | Session-cached refresh flow |
+| Basic auth, rich REST | `Basic base64(email:token)` header |
+
+Run `Read` on the matching workspace before starting phase 4, especially on the helpers and `imports/Custom Code.yml`. The skill templates here are deliberately minimal — the existing workspaces contain all the nuanced cases.
+
+---
+
+## Output format to the user
+
+At the end of each phase, summarise in ≤5 bullets what was done and what's next. Never dump entire files — reference them by path.
+
+When the whole skill finishes, produce a final summary:
+- Paths of every created file (grouped by purpose)
+- Number of tools / public instructions / helpers
+- Deploy command that was run
+- Next actions for the user (secrets to configure, how to install, how to test)

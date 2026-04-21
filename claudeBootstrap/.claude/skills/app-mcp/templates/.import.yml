@@ -1,0 +1,11 @@
+workspaceId: <<WORKSPACE_ID>>
+groups:
+  - extended
+dependsOn:
+  - app/Custom Code
+  - app/MCP Core
+app:
+  slug: <<SERVICE_NAME>>
+  name: <<SERVICE_NAME>>
+  description: >-
+    MCP server and Prisme.ai app for <<SERVICE_NAME>>.
