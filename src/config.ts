@@ -338,18 +338,13 @@ export function resolveWorkspaceAndEnvironment(
       );
     }
 
-    // Try to get a default workspace from this environment
+    // Try to get a default workspace from this environment.
+    // It's OK if none is configured — some tools (get_app, searchWorkspaces,
+    // createWorkspace, list_apps without workspaceName) only need the apiUrl.
     const envWorkspaceId = envConfig.workspaces
       ? Object.values(envConfig.workspaces)[0]
       : undefined;
-    const workspaceId = envWorkspaceId || PRISME_WORKSPACE_ID;
-
-    if (!workspaceId) {
-      throw new Error(
-        `Environment "${params.environment}" has no default workspace. ` +
-          `Please provide workspaceId or workspaceName parameter.`
-      );
-    }
+    const workspaceId = envWorkspaceId || PRISME_WORKSPACE_ID || "";
 
     return {
       workspaceId,
