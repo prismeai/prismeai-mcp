@@ -410,12 +410,11 @@ export async function handleToolCall(
       }
 
       const body: {
-        description: Record<string, string>;
+        description: string | Record<string, string>;
         name?: string;
         repository?: { id: string };
       } = {
-        description:
-          typeof description === "string" ? { en: description } : description,
+        description,
       };
       if (name) body.name = name;
       if (resolvedRepositoryId) body.repository = { id: resolvedRepositoryId };

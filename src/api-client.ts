@@ -430,7 +430,7 @@ export class PrismeApiClient {
 
     async pushWorkspaceVersion(
         body: {
-            description: Record<string, string>;
+            description: string | Record<string, string>;
             name?: string;
             repository?: { id: string };
         },

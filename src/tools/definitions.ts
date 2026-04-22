@@ -1179,7 +1179,7 @@ Use this to cancel a report, edit its message, or change its type.`,
       properties: {
         description: {
           description:
-            "Version description. Provide a plain string (wrapped as `{ en: <value> }`) or a localized object like `{ en: \"...\", fr: \"...\" }`.",
+            "Version description — used as the git commit message when pushing to a repository. Provide a plain string (preferred for git pushes, as the localized object form is stringified to \"[object Object]\" in the commit message) or a localized object like `{ en: \"...\", fr: \"...\" }`.",
           oneOf: [
             { type: "string" },
             {
