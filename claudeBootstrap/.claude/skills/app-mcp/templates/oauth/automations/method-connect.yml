@@ -1,0 +1,44 @@
+slug: method-connect
+name: /03_Methods/method-connect
+description: >-
+  Build a connect URL so the user can authorize <<SERVICE_NAME>> access with their own
+  account. Returns a `connector_auth_required` structured payload that the
+  frontend recognizes and renders as an OAuth connect card.
+private: true
+arguments:
+  tenantId:
+    type: string
+  tenantConfig:
+    type: object
+  mcpApiKey:
+    type: string
+do:
+  - conditions:
+      '!{{tenantConfig.oauth.clientId}}':
+        - set:
+            name: output
+            value:
+              error: >-
+                No OAuth provider is configured for this <<SERVICE_NAME>> app instance.
+                Administrator must set oauthClientId + oauthClientSecret in
+                the app config before users can connect their own account.
+        - break: {}
+  - set:
+      name: connectUrl
+      value: '{{global.apiUrl}}/workspaces/slug:<<SERVICE_SLUG>>/webhooks/initiateOAuth?mcpApiKey={{mcpApiKey}}'
+  - set:
+      name: output
+      value:
+        operation: action
+        itemType: <<SERVICE_NAME>> connection
+        message: >-
+          Open this URL to authorize <<SERVICE_NAME>> access with your own account:
+          {{connectUrl}}
+        structuredData:
+          type: connector_auth_required
+          catalog_id: connector-<<SERVICE_KEBAB>>
+          name: <<SERVICE_NAME>>
+          auth_type: oauth2
+          connect_url: '{{connectUrl}}'
+          scopes: '{{tenantConfig.oauth.scopes}}'
+output: '{{output}}'

@@ -1,0 +1,32 @@
+# Prepend these two tools at the top of config.value.mcpTools in index.yml
+# so tools/list surfaces them to the LLM before the service's regular tools.
+
+- name: disconnect
+  description: >
+    Disconnect the current <<SERVICE_NAME>> OAuth session. Deletes the stored
+    access token and refresh token for this user, and revokes the access
+    token at the provider (RFC 7009). Call this when the user asks to sign
+    out, disconnect, or revoke access to <<SERVICE_NAME>>.
+  inputSchema:
+    type: object
+    properties:
+      outputFormat:
+        type: string
+        enum: [structured, verbose, both]
+        default: verbose
+        description: Response format for the MCP client.
+
+- name: connect
+  description: >
+    Ask the user to connect their <<SERVICE_NAME>> account via OAuth2. Returns
+    a connect_url that the frontend renders as an OAuth card. Use this when
+    the user asks to sign in with their own account, or when a shared PAT is
+    working but the user wants to switch to their own identity.
+  inputSchema:
+    type: object
+    properties:
+      outputFormat:
+        type: string
+        enum: [structured, verbose, both]
+        default: verbose
+        description: Response format for the MCP client.

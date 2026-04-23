@@ -1,0 +1,234 @@
+slug: oauthCallback
+name: 00_OAuth/oauthCallback
+description: >-
+  Handle OAuth2 callback from <<SERVICE_NAME>>. Validates state CSRF, looks up the
+  tenant's OAuth config (stored in pending from initiateOAuth), exchanges the
+  code for tokens using the tenant's OAuth client, then stores the result as
+  tenant-prefixed user-scoped secrets.
+when:
+  endpoint: true
+do:
+  - conditions:
+      '!{{user.id}}':
+        - set:
+            name: $http
+            value:
+              status: 401
+        - set:
+            name: output
+            value: Authentication required. Session may have expired during OAuth flow.
+        - break: {}
+  - comment: Validate state parameter (CSRF protection)
+  - conditions:
+      '{{query.state}} != {{user.<<SERVICE_SLUG>>.oauthPending.state}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: output
+            value: 'Error: invalid state parameter. Please retry the connection.'
+        - break: {}
+  - comment: Provider-level errors (user denied, etc.)
+  - conditions:
+      '{{query.error}}':
+        - set:
+            name: redirectTo
+            value: '{{user.<<SERVICE_SLUG>>.oauthPending.redirectTo}}'
+        - delete:
+            name: user.<<SERVICE_SLUG>>.oauthPending
+        - conditions:
+            '{{redirectTo}}':
+              - set:
+                  name: $http
+                  value:
+                    headers:
+                      Content-Type: text/html
+              - set:
+                  name: output
+                  value: >-
+                    <html><head><meta http-equiv="refresh"
+                    content="0;url={{redirectTo}}?status=error&catalog_id=connector-<<SERVICE_KEBAB>>&error={{query.error}}"></head></html>
+              - break: {}
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: output
+            value: '<<SERVICE_NAME>> OAuth error: {{query.error}} — {{query.error_description}}'
+        - break: {}
+
+  - comment: Fetch tenant OAuth config (need clientSecret for exchange)
+  - set:
+      name: tenantId
+      value: '{{user.<<SERVICE_SLUG>>.oauthPending.tenantId}}'
+  - fetch:
+      url: '{{user.<<SERVICE_SLUG>>.oauthPending.getConfigUrl}}'
+      method: GET
+      output: credResponse
+      outputMode: detailed_response
+      emitErrors: false
+  - conditions:
+      '{{credResponse.status}} != 200 || !{{credResponse.body.oauth.clientId}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: output
+            value: 'Tenant OAuth config no longer available. Admin may have removed it.'
+        - break: {}
+  - set:
+      name: tenantOAuth
+      value: '{{credResponse.body.oauth}}'
+
+  - comment: Exchange authorization code for tokens
+  - fetch:
+      method: POST
+      url: '{{tenantOAuth.tokenUrl}}'
+      headers:
+        Content-Type: application/x-www-form-urlencoded
+      body:
+        client_id: '{{tenantOAuth.clientId}}'
+        client_secret: '{{tenantOAuth.clientSecret}}'
+        code: '{{query.code}}'
+        redirect_uri: '{{global.apiUrl}}/workspaces/slug:<<SERVICE_SLUG>>/webhooks/oauthCallback'
+        grant_type: authorization_code
+        code_verifier: '{{user.<<SERVICE_SLUG>>.oauthPending.codeVerifier}}'
+      output: tokenResponse
+      outputMode: body
+      emitErrors: false
+  - conditions:
+      '{{tokenResponse.error}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: output
+            value: 'Token exchange failed: {{tokenResponse.error}} — {{tokenResponse.error_description}}'
+        - break: {}
+
+  - comment: Clean any previous tokens for this tenant (fresh connection)
+  - try:
+      do:
+        - run:
+            module: secrets
+            function: delete
+            parameters:
+              name: delegated_token_{{tenantId}}
+              scope: user
+      catch: []
+  - try:
+      do:
+        - run:
+            module: secrets
+            function: delete
+            parameters:
+              name: refresh_token_{{tenantId}}
+              scope: user
+      catch: []
+
+  - comment: >-
+      Normalize expires_in. Some providers (e.g. Monday) don't return
+      this field — tokens are permanent until app uninstall. Default to
+      10 years (315360000 seconds) when absent so the secret stays in
+      the store indefinitely and the stored expiresAt never looks bogus.
+      Without this, `{{tokenResponse.expires_in}} * 1000` yields NaN,
+      expiresAt is an invalid date, and ensureAuthentication's session
+      check wrongly treats the session as expired on every call.
+  - set:
+      name: effectiveExpiresIn
+      value: '{% {{tokenResponse.expires_in}} || 315360000 %}'
+
+  - comment: Store access_token (TTL = effectiveExpiresIn)
+  - run:
+      module: secrets
+      function: set
+      parameters:
+        name: delegated_token_{{tenantId}}
+        value: '{{tokenResponse.access_token}}'
+        scope: user
+        ttl: '{{effectiveExpiresIn}}'
+  - comment: Store refresh_token only if the provider returned one
+  - conditions:
+      '{{tokenResponse.refresh_token}}':
+        - run:
+            module: secrets
+            function: set
+            parameters:
+              name: refresh_token_{{tenantId}}
+              value: '{{tokenResponse.refresh_token}}'
+              scope: user
+              ttl: '{% {{tenantOAuth.refreshTokenTtl}} || 7200 %}'
+
+  - comment: Compute absolute expiration from effectiveExpiresIn
+  - set:
+      name: now
+      value: '{% date({{run.date}}).ts %}'
+  - set:
+      name: expiresAtTs
+      value: '{% {{now}} + {{effectiveExpiresIn}} * 1000 %}'
+  - set:
+      name: expiresAt
+      value: '{% date({{expiresAtTs}}).iso %}'
+
+  - comment: Store session metadata (non-secret). Single flat key — dynamic bracket keys in `name:` don't persist reliably in user scope.
+  - set:
+      name: user.<<SERVICE_SLUG>>.oauth
+      scope: user
+      value:
+        status: connected
+        authMethod: delegated
+        tenantId: '{{tenantId}}'
+        expiresAt: '{{expiresAt}}'
+        tokenType: '{{tokenResponse.token_type}}'
+        scopes: '{{tokenResponse.scope}}'
+        connectedAt: '{{run.date}}'
+
+  - comment: >-
+      Bump user.connectorsVersion so that any consumer that caches per-user
+      connector state (e.g. an agent orchestrator keying its tool list by
+      connectorsVersion) gets a cache miss on the next request.
+  - set:
+      name: user.connectorsVersion
+      scope: user
+      value: '{{run.date}}'
+
+  - comment: Save redirectTo before clearing pending
+  - set:
+      name: redirectTo
+      value: '{{user.<<SERVICE_SLUG>>.oauthPending.redirectTo}}'
+  - delete:
+      name: user.<<SERVICE_SLUG>>.oauthPending
+  - emit:
+      event: <<SERVICE_SLUG>>.oauth.connected
+      payload:
+        userId: '{{user.id}}'
+        tenantId: '{{tenantId}}'
+        authMethod: delegated
+        scopes: '{{tokenResponse.scope}}'
+
+  - comment: Final redirect (HTML meta-refresh)
+  - conditions:
+      '{{redirectTo}}':
+        - set:
+            name: finalRedirectUrl
+            value: '{{redirectTo}}'
+      default:
+        - set:
+            name: finalRedirectUrl
+            value: '{{global.pagesUrl}}/connector-callback'
+  - set:
+      name: $http
+      value:
+        headers:
+          Content-Type: text/html
+  - set:
+      name: output
+      value: >-
+        <html><head><meta http-equiv="refresh"
+        content="0;url={{finalRedirectUrl}}?status=connected&catalog_id=connector-<<SERVICE_KEBAB>>"><title>Connected</title></head><body><p>Authentication
+        successful. Redirecting...</p></body></html>
+output: '{{output}}'

@@ -73,10 +73,13 @@ Run phases sequentially. Pause after each for confirmation when a decision affec
 4. Identify the **auth model** (one of):
    - **Static token**: pass as `Authorization: Bearer <token>` or a custom header
    - **OAuth2 / client-credentials**: exchange `client_id + client_secret` for a short-lived JWT via a dedicated endpoint — requires caching in session
+   - **OAuth2 / authorization-code + PKCE** (user-delegated): user logs in with their own provider account and we store a refresh token per (user × tenant). **See Phase 4.5** — requires the full OAuth scaffolding block. Detect this when the docs mention: "OAuth 2.0 Authorization Code flow", endpoints like `/oauth/authorize` + `/oauth/token`, scopes granted by the end user, or when the user explicitly wants "each user signs in with their own account".
    - **Basic auth**: `Basic base64(email:token)`
 5. Pick the **existing workspace ID** if the user already created one on the platform. Otherwise we'll use `<placeholder>` and let `push_workspace` create it.
 
 **Do NOT** proceed to phase 2 without these 4 facts confirmed.
+
+**When the service offers OAuth2 authorization-code**, always ask the user whether to enable it (in addition to or instead of a static PAT). If yes, Phase 4.5 is mandatory. If unsure, default to offering both — tenants pick per-instance in `index.yml` → `config.schema`.
 
 ### Phase 2 — Generate `swagger.yml`
 
@@ -142,6 +145,64 @@ Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
     out = {'appSlug': 'MCP Core', 'slug': 'MCP Core', 'config': {'apiKey': '', 'mcpTools': d['config']['value']['mcpTools']}}
     yaml.dump(out, open('imports/MCP Core.yml','w'), sort_keys=False)
     ```
+
+### Phase 4.5 — OAuth2 user-delegated scaffolding (conditional)
+
+**Skip this phase entirely if Phase 1 determined the service uses static token / basic auth / client-credentials only.** Otherwise, the OAuth templates live in `./templates/oauth/` and extend (not replace) the non-OAuth scaffold.
+
+**Steps:**
+
+1. **Copy all automations + page verbatim** — substitute `<<SERVICE_SLUG>>`, `<<SERVICE_NAME>>`, `<<SERVICE_KEBAB>>`, `<<BASE_URL>>`, `<<PROVIDER_AUTHORIZE_URL>>`, `<<PROVIDER_TOKEN_URL>>`, `<<PROVIDER_REVOKE_URL>>` as usual:
+
+   ```
+   templates/oauth/automations/
+     ├─ initiateOAuth.yml          endpoint — PKCE + redirect to provider
+     ├─ oauthCallback.yml          endpoint — exchange code, store tokens, bump connectorsVersion
+     ├─ disconnectOAuth.yml        endpoint + internal — revoke + delete secrets + bump version
+     ├─ refreshOAuthToken.yml      internal — refresh access_token
+     ├─ checkAuthStatus.yml        endpoint — { connected, expiresAt, scopes }
+     ├─ ensureAuthentication.yml   internal — 4-priority token resolution (PAT vs OAuth vs needsConnect)
+     ├─ connect.yml                App-mode public — returns connect_url
+     ├─ method-connect.yml         shared core
+     ├─ tool-connect.yml           MCP wrapper
+     ├─ disconnect.yml             App-mode public
+     ├─ method-disconnect.yml      shared core
+     └─ tool-disconnect.yml        MCP wrapper
+   templates/oauth/pages/
+     └─ connector-callback.yml     success page (postMessage + manual close)
+   ```
+
+2. **REPLACE `automations/mcp.yml`** with `templates/oauth/fragments/mcp.yml`. The OAuth version special-cases `connect` / `disconnect` before auth, then delegates to `ensureAuthentication` for every other tool (falls through to `needsConnect + connectUrl` when there's no session).
+
+3. **REPLACE `automations/getConfig.yml`** with `templates/oauth/fragments/getConfig.yml`. It returns an `oauth` block when `oauthClientId` + `oauthClientSecret` are set, guards against unresolved `{{secret.xxx}}` templates, and still forwards a static PAT if the tenant has one.
+
+4. **Merge `templates/oauth/imports/Custom-Code-oauth-fragment.yml`** into `imports/Custom Code.yml` under `config.functions` — adds `generatePkce`, `generateState`, `buildAuthorizeUrl`. **Do NOT use `URLSearchParams` or `URL` in Custom Code** (sandbox is Node without web globals — see Gotchas).
+
+5. **Merge `templates/oauth/fragments/index-config-schema.yml`** into `index.yml` under `config.schema` (adds `oauthClientId`, `oauthClientSecret`, `authorizationUrl`, `tokenUrl`, `revocationUrl`, `scopes`, `refreshTokenTtl`).
+
+6. **Merge `templates/oauth/fragments/index-config-value.yml`** into `index.yml` under `config.value` (provider URL defaults, `scopes: api`, `refreshTokenTtl: 7200`). **Never** set `oauthClientId` / `oauthClientSecret` at `config.value` — they're per-tenant.
+
+7. **Prepend `templates/oauth/fragments/index-mcptools.yml`** to `config.value.mcpTools`: the `disconnect` and `connect` tools MUST be listed first so `tools/list` surfaces them to the LLM. Regenerate `imports/MCP Core.yml` afterwards so it mirrors the new mcpTools array (see Phase 4 step 10).
+
+8. **Rename the user-scope namespace** across all copied files: the templates use `user.<<SERVICE_SLUG>>.oauth*` — confirm the substitution happened (grep for `<<SERVICE_SLUG>>.oauth` in the final files; should be zero matches).
+
+9. **Provider-specific tweaks** (only if the provider deviates from RFC 6749):
+   - Extra body fields in `oauthCallback.yml` `/oauth/token` fetch (e.g. `audience` for Auth0, `tenant` for Azure)
+   - Same for `refreshOAuthToken.yml` if refresh deviates
+   - Adjust `scopes` default in `config.value` if `api` doesn't fit the provider
+   - **Providers that don't issue refresh tokens and don't return `expires_in`** (e.g. Monday — "tokens do not expire until app uninstall"). The templates already handle this: `oauthCallback.yml` defaults `expires_in` to 10 years when absent, and `ensureAuthentication.yml` Priority 1 tries the stored secret first without checking `expiresAt`. No code change required — just set realistic provider-native scopes in `config.value.scopes`.
+
+10. **Register the OAuth app at the provider** (GitHub / GitLab / Slack / Monday / ...) with callback URL. The templates construct webhook URLs using `slug:<<SERVICE_SLUG>>` (not the raw workspace ID) so the callback URL stays stable even if the central workspace is recreated and becomes:
+
+    ```
+    https://<platform-api>/v2/workspaces/slug:<SERVICE_SLUG>/webhooks/oauthCallback
+    ```
+
+    Example for a service with slug `monday`: `https://api.studio.prisme.ai/v2/workspaces/slug:monday/webhooks/oauthCallback`.
+
+    The central workspace admin sets `oauthClientId` + `oauthClientSecret` on the app instance config (not as workspace secrets — per-tenant).
+
+**Deliverables of this phase:** 12 new `automations/*.yml`, 1 new `pages/*.yml`, `mcp.yml` + `getConfig.yml` replaced, `Custom Code.yml` + `index.yml` + `MCP Core.yml` extended.
 
 ### Phase 5 — Generate tool, method and public automations
 
@@ -226,7 +287,21 @@ All of these were already hit on existing workspaces — don't rediscover them:
 - **Hyphenated keys in expressions** — use `{{obj["key-name"]}}`, never `{{obj.key-name}}` (parsed as subtraction).
 - **Dispatcher default branch** — only needed when you have a generic fallback (GraphQL dispatcher). Without it, set `result: null` and `!{{result}}` becomes an "Unknown tool" error — that's fine.
 
-See `mcp-auto-install.md` (in this skill folder) for the full reasoning behind the auto-install flow and all its gotchas.
+### OAuth-specific traps (only relevant if Phase 4.5 was run)
+
+- **`break: { scope: all }` does NOT exist in DSUL** — observed to propagate unexpectedly to the caller, so `mcp.yml` silently stops after `ensureAuthentication` and never reaches `routeToolCall`. The only valid scopes are `automation` (exits the current automation) and `repeat` (exits a loop). The OAuth template for `ensureAuthentication.yml` is written **flag-based** (`resolved: false` guard on each priority) with no `break` at all — keep it that way.
+- **URLSearchParams / URL are not defined in Custom Code sandbox.** Use `encodeURIComponent` + manual `&`-joined string. See the `buildAuthorizeUrl` template.
+- **Unresolved `{{secret.xxx}}` stays as a literal truthy string.** `getConfig.yml` must guard with `matches "{{"` and wipe the value — otherwise the PAT priority in `ensureAuthentication` wrongly short-circuits the OAuth branch. The OAuth template's `getConfig.yml` already has this guard.
+- **Missing OBJECT fields stay as literal truthy strings too.** If `getConfig` doesn't emit an `oauth` field when OAuth isn't configured, `{{tenantConfig.oauth.clientId}}` in `ensureAuthentication` resolves to the literal template string (truthy) and wrongly triggers the `needsConnect` branch — even when the tenant only has a PAT. The OAuth `getConfig.yml` template always emits `oauth: {clientId: '', clientSecret: '', …}` as a default and only populates real values when both guarded credentials are present. Never return `oauth: undefined`.
+- **DSUL `'{{a}} && {{b}}'` is unsafe when both sides may be empty.** After substitution the string becomes `' && '` which some DSUL expressions treat as a truthy non-empty string. Use **nested conditions** (`conditions: {{a}}:` → `conditions: {{b}}:`) instead of a single `&&` string when either side is a potentially-empty config value.
+- **Providers without `expires_in` / `refresh_token` (Monday, similar).** The `oauthCallback.yml` template defaults `expires_in` to 315360000 (10 years) when absent — otherwise `expires_in * 1000` yields NaN, `expiresAt` is an invalid date, and every subsequent call looks "expired". Priority 1 in `ensureAuthentication.yml` fetches the stored access_token secret FIRST (no expiry check) and only attempts refresh if the secret is missing. If refresh also fails, it `delete`s `user.<slug>.oauth` so Priority 2 (tenant PAT) can take over. These three behaviours together make OAuth + PAT coexistence robust even for providers whose tokens never expire.
+- **`session.tenantConfig[{{tenantId}}]` cache hides fixes.** The 10-min cache in `mcp.yml` means a freshly-pushed `getConfig` fix won't take effect on the next call if the user's session already has stale data. When debugging OAuth auth, either wait out the TTL, use a fresh session, or verify the bug reproduces with a never-cached session first. `user.*` variables persist across Prisme.ai logout/login for authenticated users, so a simple deco/reco does NOT reset them.
+- **User-scope variables are per-workspace.** `user.connectorsVersion` set in this workspace is NOT visible to other workspaces (e.g. an upstream agent orchestrator in a different workspace). Cross-workspace cache invalidation needs a different mechanism — the bump is nonetheless useful for same-workspace consumers.
+- **`window.close()` from inline page scripts can be blocked** on the legacy `*.pages.prisme.ai` host. The `connector-callback.yml` template doesn't auto-close — it posts a message and asks the user to close manually.
+- **Provider rotates refresh tokens.** Some providers issue a new refresh token on each refresh. `refreshOAuthToken.yml` writes the new one if present.
+- **Webhook URLs accept `slug:<workspaceSlug>` too.** Prisme.ai's webhook URL format `/workspaces/{idOrSlugRef}/webhooks/{automationSlug}` accepts either the raw ID (`Ha9hyWW`) or `slug:<workspace-slug>` (e.g. `slug:monday`). Prefer the slug form for OAuth redirect URIs: it's readable, stable across workspace recreations, and obviously tied to the central workspace (not the tenant). Hardcode `slug:<SERVICE_SLUG>` in the templates that run on the central workspace (`initiateOAuth`, `oauthCallback`, `method-connect`, `mcp.yml` connectUrl) — but KEEP `{{global.workspaceId}}` in `onInstall.yml` because there it runs in the tenant's context and must use the tenant's ID.
+
+See `mcp-auto-install.md` (in this skill folder) for the full reasoning behind the auto-install flow and all its gotchas. For OAuth, see `./prismeai-workspaces/workspaces/gitlab-debug-oauth/README.md` — it's the canonical reference implementation.
 
 ---
 
@@ -239,7 +314,8 @@ When in doubt, list `prismeai-workspaces/workspaces/` and read the closest-match
 | REST-RPC, static token | Flat operation set, `Authorization: Bearer` header |
 | Pure GraphQL, static token | Single `/graphql` endpoint, one `Authorization` header |
 | Hybrid REST + GraphQL, OAuth2 client-credentials | JWT exchange with session cache, generic GraphQL dispatcher |
-| OAuth2 with token refresh | Session-cached refresh flow |
+| OAuth2 with token refresh (service-to-service) | Session-cached refresh flow |
+| **OAuth2 authorization-code (user-delegated)** | **`gitlab-debug-oauth`** — the canonical reference for Phase 4.5. Read its `README.md` for the full flow + gotchas. |
 | Basic auth, rich REST | `Basic base64(email:token)` header |
 
 Run `Read` on the matching workspace before starting phase 4, especially on the helpers and `imports/Custom Code.yml`. The skill templates here are deliberately minimal — the existing workspaces contain all the nuanced cases.

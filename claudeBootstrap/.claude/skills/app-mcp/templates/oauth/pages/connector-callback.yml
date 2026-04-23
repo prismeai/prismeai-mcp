@@ -1,0 +1,113 @@
+slug: connector-callback
+name:
+  en: Connector callback
+  fr: Connector callback
+accessControl: public
+blocks:
+  - slug: RichText
+    content: |
+      <style>
+        :root {
+          --bg: #f7f8fa;
+          --card-bg: #ffffff;
+          --border: #e8eaed;
+          --title: #1a1a2e;
+          --text: #4b5563;
+          --error: #b91c1c;
+          --success: #059669;
+        }
+        @media (prefers-color-scheme: dark) {
+          :root {
+            --bg: #0f1115;
+            --card-bg: #1a1d23;
+            --border: #2a2f38;
+            --title: #f3f4f6;
+            --text: #9ca3af;
+            --error: #f87171;
+            --success: #34d399;
+          }
+        }
+        html, body {
+          margin: 0;
+          padding: 0;
+          background: var(--bg);
+          min-height: 100vh;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .cc-card {
+          max-width: 420px;
+          margin: 60px auto;
+          padding: 28px 24px;
+          background: var(--card-bg);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          text-align: center;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+        .cc-card h2 {
+          margin: 0 0 12px;
+          color: var(--title);
+          font-size: 18px;
+          font-weight: 600;
+        }
+        .cc-card h2.success::before {
+          content: '✓ ';
+          color: var(--success);
+        }
+        .cc-card h2.error::before {
+          content: '✕ ';
+          color: var(--error);
+        }
+        .cc-card p {
+          margin: 0 0 8px;
+          color: var(--text);
+          font-size: 14px;
+          line-height: 1.5;
+        }
+        .cc-card .cc-error {
+          color: var(--error);
+          display: none;
+          margin-top: 8px;
+        }
+      </style>
+      <div class="cc-card">
+        <h2 id="cc-title" class="success">Connection complete</h2>
+        <p>You can now close this window and return to your conversation.</p>
+        <p id="cc-error" class="cc-error"></p>
+      </div>
+      <script>
+        (function () {
+          var params = new URLSearchParams(window.location.search);
+          var status = params.get("status") || "connected";
+          var catalogId = params.get("catalog_id") || "";
+          var error = params.get("error") || "";
+
+          if (status === "error") {
+            var title = document.getElementById("cc-title");
+            if (title) {
+              title.textContent = "Connection failed";
+              title.className = "error";
+            }
+            var errEl = document.getElementById("cc-error");
+            if (errEl) {
+              errEl.style.display = "block";
+              errEl.textContent = error ? "Error: " + error : "Authentication failed.";
+            }
+          }
+
+          try {
+            if (window.opener) {
+              window.opener.postMessage({
+                type: "connector_auth_complete",
+                catalog_id: catalogId,
+                status: status,
+                error: error || undefined
+              }, "*");
+            }
+          } catch (e) {
+            // opener cross-origin or closed — silent
+          }
+        })();
+      </script>
+    allowUnsecure: true
+colorScheme: auto

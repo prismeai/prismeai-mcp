@@ -1,0 +1,52 @@
+# Fragment to APPEND to imports/Custom Code.yml under config.functions
+# when the target service supports OAuth2 authorization-code (PKCE).
+# The non-OAuth template's Custom-Code.yml already has generateSignedKey,
+# verifyAndDecodeKey, buildQueryString, pruneEmpty — don't duplicate those.
+
+# ===================== OAUTH2 (PKCE + state + authorize URL) =====================
+
+generatePkce:
+  parameters: {}
+  code: |
+    const crypto = require('crypto');
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+    const codeChallenge = crypto
+      .createHash('sha256')
+      .update(codeVerifier)
+      .digest('base64url');
+    return { codeVerifier, codeChallenge };
+
+generateState:
+  parameters: {}
+  code: |
+    const crypto = require('crypto');
+    return { state: crypto.randomBytes(16).toString('base64url') };
+
+buildAuthorizeUrl:
+  parameters:
+    authorizeUrl:
+      type: string
+    clientId:
+      type: string
+    redirectUri:
+      type: string
+    scopes:
+      type: string
+    state:
+      type: string
+    codeChallenge:
+      type: string
+  code: |
+    # IMPORTANT: Custom Code sandbox is Node WITHOUT web globals.
+    # URLSearchParams / URL are NOT defined. Use encodeURIComponent manually.
+    const enc = encodeURIComponent;
+    const qs = [
+      'client_id=' + enc(clientId || ''),
+      'redirect_uri=' + enc(redirectUri || ''),
+      'response_type=code',
+      'state=' + enc(state || ''),
+      'scope=' + enc(scopes || 'api'),
+      'code_challenge=' + enc(codeChallenge || ''),
+      'code_challenge_method=S256',
+    ].join('&');
+    return { url: (authorizeUrl || '') + '?' + qs };

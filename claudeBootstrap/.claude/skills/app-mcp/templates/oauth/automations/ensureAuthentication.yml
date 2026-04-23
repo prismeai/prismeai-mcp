@@ -1,0 +1,129 @@
+slug: ensureAuthentication
+name: /01_Helpers/ensureAuthentication
+description: >-
+  Resolve an access token for the current MCP tool call, scoped to a specific
+  tenant. Priority order:
+    1. User OAuth session for this tenant (auto-refresh expired tokens)
+    2. Tenant static PAT (`tenantConfig.accessToken`)
+    3. Tenant OAuth provider configured but no session → needsConnect
+    4. Nothing → error
+  Returns { authenticated, accessToken, baseUrl, authMethod } or
+  { authenticated: false, needsConnect, message }.
+private: true
+arguments:
+  tenantId:
+    type: string
+    description: Workspace ID of the tenant that owns the app instance.
+  tenantConfig:
+    type: object
+    description: Tenant config fetched from getConfig webhook.
+do:
+  - set:
+      name: effectiveBaseUrl
+      value: '{% {{tenantConfig.baseUrl}} || "<<BASE_URL>>" %}'
+
+  - comment: >-
+      Default: nothing configured. Each priority block below overrides `output`
+      only when its condition matches. No `break` is used — instead, later
+      priorities are gated by `!{{output}}` so they become no-ops once a prior
+      branch has resolved auth.
+  - set:
+      name: output
+      value:
+        authenticated: false
+        needsConnect: false
+        message: >-
+          This <<SERVICE_NAME>> app instance is not configured. The administrator must
+          set either a static token or an OAuth provider.
+  - set:
+      name: resolved
+      value: false
+
+  - comment: >-
+      'Priority 1: user has an OAuth session for this tenant.'
+      Strategy: try fetching the stored access_token secret FIRST. If it
+      exists, use it directly — no refresh. Only attempt refresh if the
+      secret is genuinely missing. This handles providers that don't
+      issue refresh tokens and don't return expires_in (e.g. Monday) —
+      their tokens stay valid until the user uninstalls the app and must
+      be reused as-is. If refresh ALSO fails, wipe user.<<SERVICE_SLUG>>.oauth
+      so that Priority 2 (tenant PAT) can take over instead of forcing a
+      reconnect when a PAT is configured.
+  - conditions:
+      '!{{resolved}} && {{user.<<SERVICE_SLUG>>.oauth.authMethod}} == "delegated" && {{user.<<SERVICE_SLUG>>.oauth.tenantId}} == {{tenantId}}':
+        - run:
+            module: secrets
+            function: get
+            parameters:
+              name: delegated_token_{{tenantId}}
+              scope: user
+            output: accessTokenRef
+        - conditions:
+            '!{{accessTokenRef.error}}':
+              - comment: Stored token exists — use it directly (no refresh needed)
+              - set:
+                  name: output
+                  value:
+                    authenticated: true
+                    accessToken: '{{accessTokenRef}}'
+                    baseUrl: '{{effectiveBaseUrl}}'
+                    authMethod: delegated
+              - set:
+                  name: resolved
+                  value: true
+            default:
+              - comment: Secret missing — try refresh
+              - refreshOAuthToken:
+                  tenantId: '{{tenantId}}'
+                  tenantConfig: '{{tenantConfig}}'
+                  output: refreshResult
+              - conditions:
+                  '{{refreshResult.error}}':
+                    - comment: >-
+                        Refresh failed too. Clear stale oauth state so the
+                        user can fall through to tenant PAT (Priority 2)
+                        instead of being forced to reconnect when a
+                        configured PAT would work.
+                    - delete:
+                        name: user.<<SERVICE_SLUG>>.oauth
+                  default:
+                    - set:
+                        name: output
+                        value:
+                          authenticated: true
+                          accessToken: '{{refreshResult.accessToken}}'
+                          baseUrl: '{{effectiveBaseUrl}}'
+                          authMethod: delegated
+                    - set:
+                        name: resolved
+                        value: true
+
+  - comment: 'Priority 2: tenant has a static PAT → use it'
+  - conditions:
+      '!{{resolved}} && {{tenantConfig.accessToken}}':
+        - set:
+            name: output
+            value:
+              authenticated: true
+              accessToken: '{{tenantConfig.accessToken}}'
+              baseUrl: '{{effectiveBaseUrl}}'
+              authMethod: tenant_pat
+        - set:
+            name: resolved
+            value: true
+
+  - comment: 'Priority 3: tenant has OAuth provider configured → prompt OAuth'
+  - conditions:
+      '!{{resolved}} && {{tenantConfig.oauth.clientId}}':
+        - set:
+            name: output
+            value:
+              authenticated: false
+              needsConnect: true
+              message: >-
+                <<SERVICE_NAME>> is not connected for this user. Authorize access with
+                your own <<SERVICE_NAME>> account to continue.
+        - set:
+            name: resolved
+            value: true
+output: '{{output}}'

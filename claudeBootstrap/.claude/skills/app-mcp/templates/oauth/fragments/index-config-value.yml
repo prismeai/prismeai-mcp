@@ -1,0 +1,9 @@
+# Fragment to MERGE into index.yml under config.value
+# These are provider-level defaults that tenants can override per instance.
+# DO NOT set oauthClientId/oauthClientSecret here — they're per-tenant.
+
+authorizationUrl: <<PROVIDER_AUTHORIZE_URL>>
+tokenUrl: <<PROVIDER_TOKEN_URL>>
+revocationUrl: <<PROVIDER_REVOKE_URL>>
+scopes: api
+refreshTokenTtl: 7200
