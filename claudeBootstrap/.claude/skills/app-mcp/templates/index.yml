@@ -1,0 +1,83 @@
+id: <<WORKSPACE_ID>>
+name: <<SERVICE_NAME>>
+slug: <<SERVICE_SLUG>>
+description: >-
+  MCP server and Prisme.ai app for <<SERVICE_NAME>>. Provides AI agents with
+  read/write access to the <<SERVICE_NAME>> API.
+  <<ADAPT>>: customize with a 1-2 sentence summary of what the service does
+  and the resources it exposes.
+photo: <<LOGO_URL>>
+labels:
+  - app-builder
+  - <<SERVICE_NAME>>
+  - MCP
+  - production:app
+  - App
+  - AI
+  - importFrom:<<WORKSPACE_ID>>
+customDomains: []
+repositories: {}
+
+config:
+  schema:
+    # <<ADAPT>>: one field per user-facing credential
+    baseUrl:
+      type: string
+      title: <<SERVICE_NAME>> API Base URL
+      description: Base URL of the <<SERVICE_NAME>> API.
+    token:
+      type: string
+      title: API Token
+      description: <<SERVICE_NAME>> API token.
+      secret: true
+    # Auto-generated (readOnly — populated by onInstall)
+    mcpEndpoint:
+      type: string
+      title: MCP Endpoint
+      description: URL of the MCP endpoint for this app instance.
+      readOnly: true
+    mcpApiKey:
+      type: string
+      title: MCP API Key
+      description: >-
+        API key for the MCP endpoint. Pass as the `mcp-api-key` header value.
+        Auto-generated on install, do not modify.
+      readOnly: true
+  value:
+    baseUrl: <<BASE_URL>>
+    token: '{{secret.<<SERVICE_SLUG>>Token}}'
+    appSecret: '{{secret.appSecret}}'
+    # NOTE: DO NOT set mcpApiKey in config.value — it would be truthy on
+    # fresh installs (template string is non-empty) and onInstall would
+    # skip key generation. Let onInstall merge it in.
+    mcpTools:
+      # <<ADAPT>>: one entry per tool (must match tool-* automations + routeToolCall)
+      - name: TOOL_NAME_1
+        description: Describe what the tool does (LLM-facing).
+        inputSchema:
+          type: object
+          required: []
+          properties:
+            # tool-specific args...
+            outputFormat:
+              type: string
+              enum: [structured, verbose, both]
+              default: verbose
+              description: Response format for the MCP client.
+
+secrets:
+  schema:
+    <<SERVICE_SLUG>>Token:
+      type: string
+      title: <<SERVICE_NAME>> API Token
+      description: API token for <<SERVICE_NAME>>.
+      ui:widget: password
+    appSecret:
+      type: string
+      title: App HMAC Secret
+      description: >-
+        HMAC secret used by the central <<SERVICE_NAME>> workspace to sign
+        MCP API keys. Only set on the central workspace.
+      ui:widget: password
+
+registerWorkspace: true

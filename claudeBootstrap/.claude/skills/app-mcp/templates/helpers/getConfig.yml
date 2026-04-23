@@ -1,0 +1,28 @@
+slug: getConfig
+name: 00_MCP/getConfig
+description: >-
+  Webhook run in the tenant workspace's app instance context. Returns the
+  tenant's <<SERVICE_NAME>> credentials (token + base URL) to the central MCP
+  endpoint on each tools/call.
+when:
+  endpoint: true
+do:
+  - conditions:
+      # <<ADAPT>>: validate whatever fields your service needs
+      '!{{config.token}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: response
+            value:
+              error: <<SERVICE_NAME>> token not configured on this app instance.
+        - break: {}
+  - set:
+      name: response
+      # <<ADAPT>>: return exactly what mcp.yml expects in `creds` block
+      value:
+        accessToken: '{{config.token}}'
+        baseUrl: '{% {{config.baseUrl}} || "<<BASE_URL>>" %}'
+output: '{{response}}'

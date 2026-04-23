@@ -1,0 +1,116 @@
+# REPLACE templates/helpers/getConfig.yml with this OAuth-aware version.
+# Returns either a static PAT, an oauth block, or both — the central
+# mcp.yml uses whichever is appropriate per tools/call.
+#
+# IMPORTANT — always emit an `oauth` field with an empty clientId default.
+# If `oauth` is absent from the response, mcp.yml's session cache stores
+# `tenantConfig.oauth` as undefined, and DSUL keeps `{{tenantConfig.oauth.clientId}}`
+# as a literal template string (which is TRUTHY) in ensureAuthentication.
+# That wrongly triggers Priority 3 (needsConnect) even when the tenant
+# only configured a PAT.
+
+slug: getConfig
+name: 00_MCP/getConfig
+description: >-
+  Webhook run in the tenant's app instance context. Returns the tenant's
+  <<SERVICE_NAME>> credentials (PAT and/or OAuth provider config) to the central
+  MCP endpoint. Supports three modes:
+    1. PAT only (tenant shares a single token across its users)
+    2. OAuth only (each user authorizes with their own account)
+    3. Both (PAT as fallback, OAuth per-user when available)
+when:
+  endpoint: true
+do:
+  - comment: >-
+      Default oauth block with empty clientId. Even when OAuth isn't
+      configured, we return this so `tenantConfig.oauth.clientId` is a
+      real empty string ('') — falsy — rather than an unresolved template
+      literal that would be truthy.
+  - set:
+      name: oauthBlock
+      value:
+        clientId: ''
+        clientSecret: ''
+        authorizationUrl: ''
+        tokenUrl: ''
+        revocationUrl: ''
+        scopes: ''
+        refreshTokenTtl: 7200
+
+  - comment: >-
+      Guard unresolved template strings on oauth client id/secret.
+      When `config.oauthClientSecret` has `secret: true` in the schema
+      and the tenant hasn't set it, it can stay as a literal "{{secret.xxx}}"
+      string that is truthy.
+  - set:
+      name: cleanOauthClientId
+      value: '{{config.oauthClientId}}'
+  - conditions:
+      '{{cleanOauthClientId}} matches "{{"':
+        - set:
+            name: cleanOauthClientId
+            value: ''
+  - set:
+      name: cleanOauthClientSecret
+      value: '{{config.oauthClientSecret}}'
+  - conditions:
+      '{{cleanOauthClientSecret}} matches "{{"':
+        - set:
+            name: cleanOauthClientSecret
+            value: ''
+
+  - comment: >-
+      Populate oauth block only when BOTH clientId AND clientSecret are
+      present. Use nested conditions — a single `'{{a}} && {{b}}'` string
+      gets mis-evaluated when both sides are empty (the rendered ' && '
+      can be treated as a truthy string in some DSUL expressions).
+  - conditions:
+      '{{cleanOauthClientId}}':
+        - conditions:
+            '{{cleanOauthClientSecret}}':
+              - set:
+                  name: oauthBlock
+                  value:
+                    clientId: '{{cleanOauthClientId}}'
+                    clientSecret: '{{cleanOauthClientSecret}}'
+                    authorizationUrl: '{% {{config.authorizationUrl}} || "<<PROVIDER_AUTHORIZE_URL>>" %}'
+                    tokenUrl: '{% {{config.tokenUrl}} || "<<PROVIDER_TOKEN_URL>>" %}'
+                    revocationUrl: '{% {{config.revocationUrl}} || "<<PROVIDER_REVOKE_URL>>" %}'
+                    scopes: '{% {{config.scopes}} || "api" %}'
+                    refreshTokenTtl: '{% {{config.refreshTokenTtl}} || 7200 %}'
+
+  - comment: >-
+      Guard: unresolved "{{secret.xxx}}" template stays as a literal truthy
+      string when the secret is not set. Wipe it if detected, otherwise the
+      PAT priority in ensureAuthentication would incorrectly short-circuit.
+  - set:
+      name: cleanAccessToken
+      value: '{{config.token}}'
+  - conditions:
+      '{{cleanAccessToken}} matches "{{"':
+        - set:
+            name: cleanAccessToken
+            value: ''
+
+  - comment: Fail fast if neither a PAT nor a populated OAuth block is present
+  - conditions:
+      '!{{cleanAccessToken}} && !{{oauthBlock.clientId}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: response
+            value:
+              error: >-
+                No credentials configured. Set a <<SERVICE_NAME>> token (PAT) or
+                an OAuth provider (clientId + clientSecret) on this app instance.
+        - break: {}
+
+  - set:
+      name: response
+      value:
+        accessToken: '{{cleanAccessToken}}'
+        baseUrl: '{% {{config.baseUrl}} || "<<BASE_URL>>" %}'
+        oauth: '{{oauthBlock}}'
+output: '{{response}}'

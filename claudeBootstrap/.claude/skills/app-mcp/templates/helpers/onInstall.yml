@@ -1,0 +1,81 @@
+slug: onInstall
+name: 00_MCP/onInstall
+description: >-
+  On install of the <<SERVICE_NAME>> app in a tenant workspace, request a
+  signed MCP API key from the central <<SERVICE_NAME>> workspace. The key
+  encodes the tenant workspace ID and the getConfig URL, and is stored in the
+  tenant's config so the central endpoint can verify future calls.
+when:
+  events:
+    - workspaces.apps.installed
+    - workspaces.apps.configured
+do:
+  - emit:
+      event: <<SERVICE_SLUG>>.onInstall.started
+      payload:
+        appInstanceSlug: '{{run.appInstanceSlug}}'
+        workspaceId: '{{global.workspaceId}}'
+        apiUrl: '{{global.apiUrl}}'
+        hasMcpApiKey: '{{config.mcpApiKey}}'
+  - conditions:
+      '!{{run.appInstanceSlug}}':
+        - emit:
+            event: <<SERVICE_SLUG>>.onInstall.skipped
+            payload:
+              reason: no-app-instance-slug
+        - break: {}
+  - conditions:
+      '{{config.mcpApiKey}} matches "\\."':
+        - emit:
+            event: <<SERVICE_SLUG>>.onInstall.skipped
+            payload:
+              reason: key-already-set
+        - break: {}
+  - set:
+      name: getConfigUrl
+      value: >-
+        {{global.apiUrl}}/workspaces/{{global.workspaceId}}/webhooks/{{run.appInstanceSlug}}.getConfig
+  - emit:
+      event: <<SERVICE_SLUG>>.onInstall.callingGenerateKey
+      payload:
+        getConfigUrl: '{{getConfigUrl}}'
+        generateKeyUrl: '{{global.apiUrl}}/workspaces/<<WORKSPACE_ID>>/webhooks/generateKey'
+  - fetch:
+      url: '{{global.apiUrl}}/workspaces/<<WORKSPACE_ID>>/webhooks/generateKey'
+      method: POST
+      headers:
+        Content-Type: application/json
+      body:
+        workspaceId: '{{global.workspaceId}}'
+        getConfigUrl: '{{getConfigUrl}}'
+      output: keyResponse
+      outputMode: detailed_response
+      emitErrors: false
+  - emit:
+      event: <<SERVICE_SLUG>>.onInstall.generateKeyResponse
+      payload:
+        status: '{{keyResponse.status}}'
+        body: '{{keyResponse.body}}'
+  - conditions:
+      '{{keyResponse.status}} != 200':
+        - emit:
+            event: <<SERVICE_SLUG>>.onInstall.failed
+            payload:
+              status: '{{keyResponse.status}}'
+              body: '{{keyResponse.body}}'
+        - break: {}
+  - set:
+      name: mcpEndpoint
+      value: '{{global.apiUrl}}/workspaces/<<WORKSPACE_ID>>/webhooks/mcp'
+  - set:
+      name: config
+      type: merge
+      value:
+        mcpApiKey: '{{keyResponse.body.mcpApiKey}}'
+        mcpEndpoint: '{{mcpEndpoint}}'
+  - emit:
+      event: <<SERVICE_SLUG>>.onInstall.completed
+      payload:
+        mcpEndpoint: '{{mcpEndpoint}}'
+        hasKey: true
+output: '{{keyResponse.body.mcpApiKey}}'

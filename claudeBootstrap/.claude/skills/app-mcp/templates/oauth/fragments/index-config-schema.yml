@@ -1,0 +1,40 @@
+# Fragment to MERGE into index.yml under config.schema
+# Adds the OAuth2 provider fields that each tenant can fill in their app
+# instance config. clientId/clientSecret are per-tenant — never set them at
+# config.value level on the central workspace.
+
+oauthClientId:
+  type: string
+  title: OAuth2 Client ID
+  description: <<SERVICE_NAME>> OAuth Application Client ID.
+
+oauthClientSecret:
+  type: string
+  title: OAuth2 Client Secret
+  description: <<SERVICE_NAME>> OAuth Application Client Secret.
+  secret: true
+
+authorizationUrl:
+  type: string
+  title: OAuth Authorize URL
+  description: "Default <<PROVIDER_AUTHORIZE_URL>>"
+
+tokenUrl:
+  type: string
+  title: OAuth Token URL
+  description: "Default <<PROVIDER_TOKEN_URL>>"
+
+revocationUrl:
+  type: string
+  title: OAuth Revoke URL
+  description: "Default <<PROVIDER_REVOKE_URL>>"
+
+scopes:
+  type: string
+  title: OAuth Scopes
+  description: "Space-separated scopes. Default: api"
+
+refreshTokenTtl:
+  type: number
+  title: Refresh Token TTL (seconds)
+  description: "Default: 7200 (2h)"

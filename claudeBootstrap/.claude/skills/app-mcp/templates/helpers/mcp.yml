@@ -1,0 +1,110 @@
+slug: mcp
+name: 00_MCP/endpoint
+description: >-
+  Central MCP JSON-RPC 2.0 endpoint for <<SERVICE_NAME>>. For tools/call, the
+  mcp-api-key header contains an HMAC-signed token that encodes the workspace
+  ID and the getConfig URL. No separate workspace-id header needed.
+when:
+  endpoint: true
+do:
+  - conditions:
+      '{{body.method}} == "tools/call"':
+        - comment: Validate mcp-api-key header
+        - conditions:
+            '!{{headers["mcp-api-key"]}}':
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    error:
+                      code: -32001
+                      message: 'Missing required header: mcp-api-key'
+            default:
+              - comment: Decode and verify signed API key
+              - Custom Code.run:
+                  function: verifyAndDecodeKey
+                  parameters:
+                    apiKey: '{{headers["mcp-api-key"]}}'
+                    secret: '{{config.appSecret}}'
+                  output: decoded
+              - conditions:
+                  '{{decoded.error}}':
+                    - set:
+                        name: response
+                        value:
+                          jsonrpc: '2.0'
+                          id: '{{body.id}}'
+                          error:
+                            code: -32001
+                            message: 'Invalid API key: {{decoded.error}}'
+                  default:
+                    - set:
+                        name: workspaceId
+                        value: '{{decoded.workspaceId}}'
+                    - comment: Per-tenant session cache (10 min TTL)
+                    - conditions:
+                        '{{session.tenantCreds[{{workspaceId}}].accessToken}} and {{session.tenantCreds[{{workspaceId}}].expiresAt}} > {% date({{run.date}}).ts %}':
+                          - set:
+                              name: creds
+                              value: '{{session.tenantCreds[{{workspaceId}}]}}'
+                        default:
+                          - comment: Fetch credentials via tenant's getConfig webhook
+                          - fetch:
+                              url: '{{decoded.getConfigUrl}}'
+                              method: GET
+                              output: credResponse
+                              outputMode: detailed_response
+                              emitErrors: false
+                          - conditions:
+                              '{{credResponse.status}} != 200':
+                                - set:
+                                    name: response
+                                    value:
+                                      jsonrpc: '2.0'
+                                      id: '{{body.id}}'
+                                      error:
+                                        code: -32001
+                                        message: >-
+                                          Credentials lookup failed
+                                          ({{credResponse.status}}):
+                                          {{credResponse.body.error}}
+                              default:
+                                - set:
+                                    name: creds
+                                    value:
+                                      # <<ADAPT>>: shape matches what getConfig returns
+                                      accessToken: '{{credResponse.body.accessToken}}'
+                                      baseUrl: '{{credResponse.body.baseUrl}}'
+                                      expiresAt: '{% date({{run.date}}).ts + 600000 %}'
+                                - set:
+                                    name: session.tenantCreds[{{workspaceId}}]
+                                    value: '{{creds}}'
+                    - comment: Route to tool if credentials resolved
+                    - conditions:
+                        '{{creds.accessToken}}':
+                          - routeToolCall:
+                              toolName: '{{body.params.name}}'
+                              toolArgs:
+                                arguments: '{{body.params.arguments}}'
+                                accessToken: '{{creds.accessToken}}'
+                                baseUrl: '{{creds.baseUrl}}'
+                              output: toolResult
+                          - set:
+                              name: response
+                              value:
+                                jsonrpc: '2.0'
+                                id: '{{body.id}}'
+                                result: '{{toolResult}}'
+      default:
+        - comment: tools/list, initialize, etc. — delegate to MCP Core
+        - MCP Core.handleMcpMethod:
+            body: '{{body}}'
+            serverName: <<SERVICE_SLUG>>-mcp
+            serverVersion: 1.0.0
+            headers: '{{headers}}'
+            output: mcpResult
+        - set:
+            name: response
+            value: '{{mcpResult.response}}'
+output: '{{response}}'

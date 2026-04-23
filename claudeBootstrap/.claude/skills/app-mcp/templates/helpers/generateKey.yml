@@ -1,0 +1,43 @@
+slug: generateKey
+name: 00_MCP/generateKey
+description: >-
+  Webhook called by tenant app instances to generate a signed MCP API key.
+  Only the central <<SERVICE_NAME>> workspace (<<WORKSPACE_ID>>) has the
+  appSecret, so key generation must happen here.
+when:
+  endpoint: true
+do:
+  - conditions:
+      '!{{body.workspaceId}} || !{{body.getConfigUrl}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: response
+            value:
+              error: 'Missing required fields: workspaceId, getConfigUrl'
+        - break: {}
+  - conditions:
+      '!{{config.appSecret}}':
+        - set:
+            name: $http
+            value:
+              status: 500
+        - set:
+            name: response
+            value:
+              error: appSecret not configured on central workspace
+        - break: {}
+  - Custom Code.run:
+      function: generateSignedKey
+      parameters:
+        workspaceId: '{{body.workspaceId}}'
+        getConfigUrl: '{{body.getConfigUrl}}'
+        secret: '{{config.appSecret}}'
+      output: signedKey
+  - set:
+      name: response
+      value:
+        mcpApiKey: '{{signedKey}}'
+output: '{{response}}'

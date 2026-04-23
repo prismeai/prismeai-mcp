@@ -1,0 +1,91 @@
+slug: handleApiError
+name: /01_Helpers/handleApiError
+description: >-
+  Normalize <<SERVICE_NAME>> API errors into MCP-compatible error format.
+  Returns null on 2xx (no error), or { isError, content } on non-2xx.
+private: true
+arguments:
+  response:
+    type: object
+    description: The detailed_response from fetch {body, headers, status}.
+  operation:
+    type: string
+    description: Description of the operation for error messages.
+do:
+  - set:
+      name: result
+      value: null
+  - conditions:
+      '{{response.status}} >= 200 && {{response.status}} < 300':
+        - comment: "HTTP 2xx — check for GraphQL-style envelope"
+        - conditions:
+            '{{response.body.errors[0].message}}':
+              - set:
+                  name: result
+                  value:
+                    isError: true
+                    content:
+                      - type: text
+                        text: 'GraphQL error while {{operation}}: {{response.body.errors[0].message}}'
+        - break: {}
+  - comment: Extract the service-specific error body shape
+  - conditions:
+      '{{response.body.error_description}}':
+        # <<ADAPT>>: some APIs return `{error_type, error_description}` — adjust to the actual body shape
+        - set:
+            name: bodyDetail
+            value: '{{response.body.error_type}}: {{response.body.error_description}}'
+      '{{response.body.error}}':
+        - set:
+            name: bodyDetail
+            value: '{{response.body.error}}'
+      '{{response.body.errors[0].message}}':
+        - set:
+            name: bodyDetail
+            value: '{{response.body.errors[0].message}}'
+      '{{response.body.message}}':
+        - set:
+            name: bodyDetail
+            value: '{{response.body.message}}'
+      default:
+        - set:
+            name: bodyDetail
+            value: '{% json({{response.body}}) %}'
+  - conditions:
+      '{{response.status}} == 400':
+        - set:
+            name: errorMessage
+            value: 'Bad request while {{operation}}: {{bodyDetail}}'
+      '{{response.status}} == 401':
+        - set:
+            name: errorMessage
+            value: 'Authentication failed while {{operation}}. Check credentials. Detail: {{bodyDetail}}'
+      '{{response.status}} == 403':
+        - set:
+            name: errorMessage
+            value: 'Forbidden while {{operation}}. Check permissions. Detail: {{bodyDetail}}'
+      '{{response.status}} == 404':
+        - set:
+            name: errorMessage
+            value: 'Resource not found while {{operation}}. Detail: {{bodyDetail}}'
+      '{{response.status}} == 429':
+        - set:
+            name: errorMessage
+            value: 'Rate limit exceeded while {{operation}}. Wait and retry. Detail: {{bodyDetail}}'
+      '{{response.status}} == 500':
+        - set:
+            name: errorMessage
+            value: '<<SERVICE_NAME>> server error while {{operation}}. Detail: {{bodyDetail}}'
+      default:
+        - set:
+            name: errorMessage
+            value: 'Error {{response.status}} while {{operation}}: {{bodyDetail}}'
+  - set:
+      name: result
+      value:
+        isError: true
+        content:
+          - type: text
+            text: '{{errorMessage}}'
+validateArguments: true
+output: '{{result}}'

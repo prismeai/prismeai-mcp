@@ -1,0 +1,44 @@
+slug: routeToolCall
+name: /01_Helpers/routeToolCall
+description: >-
+  Route an MCP tool call to the appropriate tool automation by name.
+  Centralizes tool dispatch so mcp.yml doesn't need modification when adding
+  tools. The `default` branch is useful for patterns where many tools share
+  a dispatcher (e.g. GraphQL ops routed to tool-graphqlOp).
+private: true
+arguments:
+  toolName:
+    type: string
+  toolArgs:
+    type: object
+do:
+  - conditions:
+      # <<ADAPT>>: one branch per tool. Example:
+      # '{{toolName}} == "createCustomer"':
+      #   - tool-createCustomer:
+      #       body: '{{toolArgs}}'
+      #       output: result
+      '{{toolName}} == "TOOL_NAME_1"':
+        - tool-TOOL_NAME_1:
+            body: '{{toolArgs}}'
+            output: result
+      default:
+        # <<OPTIONAL>>: if your service exposes many ops through a single
+        # generic dispatcher (e.g. GraphQL), route them here:
+        # - tool-graphqlOp:
+        #     toolName: '{{toolName}}'
+        #     body: '{{toolArgs}}'
+        #     output: result
+        - set:
+            name: result
+            value: null
+  - conditions:
+      '!{{result}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown tool: {{toolName}}'
+              isError: true
+output: '{{result}}'

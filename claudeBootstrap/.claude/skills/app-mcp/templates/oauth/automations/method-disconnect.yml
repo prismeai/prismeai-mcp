@@ -1,0 +1,27 @@
+slug: method-disconnect
+name: /03_Methods/method-disconnect
+description: >-
+  Clear the current user's <<SERVICE_NAME>> OAuth session for a specific tenant.
+  Delegates to `disconnectOAuth` which revokes at the provider (RFC 7009) and
+  deletes the tenant-prefixed secrets.
+private: true
+arguments:
+  tenantId:
+    type: string
+  tenantConfig:
+    type: object
+do:
+  - disconnectOAuth:
+      tenantId: '{{tenantId}}'
+      tenantConfig: '{{tenantConfig}}'
+      output: disconnectResult
+  - set:
+      name: output
+      value:
+        operation: action
+        itemType: <<SERVICE_NAME>> OAuth session
+        structuredData: '{{disconnectResult}}'
+        message: >-
+          <<SERVICE_NAME>> OAuth session disconnected for this user. Access and refresh
+          tokens have been revoked and deleted.
+output: '{{output}}'

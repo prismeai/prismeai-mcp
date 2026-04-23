@@ -1,0 +1,29 @@
+slug: tool-disconnect
+name: /02_Tools/tool-disconnect
+description: >-
+  MCP wrapper for the `disconnect` tool. Clears the current user's <<SERVICE_NAME>>
+  OAuth session for the calling tenant.
+private: true
+arguments:
+  body:
+    type: object
+    properties:
+      arguments:
+        type: object
+      tenantId:
+        type: string
+      tenantConfig:
+        type: object
+do:
+  - method-disconnect:
+      tenantId: '{{body.tenantId}}'
+      tenantConfig: '{{body.tenantConfig}}'
+      output: methodResult
+  - formatToolOutput:
+      operation: '{{methodResult.operation}}'
+      structuredData: '{{methodResult.structuredData}}'
+      outputFormat: '{{body.arguments.outputFormat}}'
+      itemType: '{{methodResult.itemType}}'
+      message: '{{methodResult.message}}'
+      output: output
+output: '{{output}}'

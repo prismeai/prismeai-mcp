@@ -1,0 +1,44 @@
+slug: buildAppAuth
+name: /01_Helpers/buildAppAuth
+description: >-
+  Build <<SERVICE_NAME>> authentication from workspace config. Accepts
+  credentials as arguments (MCP mode) or falls back to `config.*` (App mode —
+  direct `<<SERVICE_NAME>>.xxx` automation calls).
+  Returns { accessToken, baseUrl } or { error }.
+  # <<ADAPT>>: if the service requires a JWT exchange step (e.g. POST
+  # /authenticate with client_id/client_secret → short-lived JWT), do it here
+  # and cache the JWT in `session.<service>Jwt[cacheKey]`. For APIs with a
+  # direct static API token, skip the exchange and return the token as-is.
+private: true
+arguments:
+  # <<ADAPT>>: shape of credentials depends on the service.
+  # Static token:     token
+  # OAuth2:           clientId, clientSecret (exchanged for accessToken)
+  # Basic auth:       email, apiToken (passed through)
+  token:
+    type: string
+  baseUrl:
+    type: string
+do:
+  - comment: Resolve credentials — arguments take precedence over config
+  - set:
+      name: effectiveToken
+      value: '{% {{token}} || {{config.token}} %}'
+  - set:
+      name: effectiveBaseUrl
+      value: '{% {{baseUrl}} || {{config.baseUrl}} || "<<BASE_URL>>" %}'
+  - conditions:
+      '!{{effectiveToken}}':
+        - set:
+            name: output
+            value:
+              error: >-
+                <<SERVICE_NAME>> not configured. Set token in the workspace
+                config.
+        - break: {}
+  - set:
+      name: output
+      value:
+        accessToken: '{{effectiveToken}}'
+        baseUrl: '{{effectiveBaseUrl}}'
+output: '{{output}}'

@@ -1,0 +1,35 @@
+slug: connect
+name:
+  fr: Connecter un compte <<SERVICE_NAME>>
+  en: Connect a <<SERVICE_NAME>> account
+description: >-
+  Produce a connect URL for the current user to authorize <<SERVICE_NAME>> access with
+  their own account via OAuth2. Requires the app instance to have an OAuth
+  provider configured (oauthClientId + oauthClientSecret).
+
+  Since this public App-mode call does NOT go through the MCP endpoint, it
+  does not have an mcpApiKey. The connect URL falls back to using tenantId in
+  the query param (trusted: we're running in the tenant's context).
+do:
+  - set:
+      name: tenantId
+      value: '{{global.workspaceId}}'
+  - set:
+      name: tenantConfig
+      value:
+        accessToken: '{{config.token}}'
+        baseUrl: '{% {{config.baseUrl}} || "<<BASE_URL>>" %}'
+        oauth:
+          clientId: '{{config.oauthClientId}}'
+          clientSecret: '{{config.oauthClientSecret}}'
+          authorizationUrl: '{% {{config.authorizationUrl}} || "<<PROVIDER_AUTHORIZE_URL>>" %}'
+          tokenUrl: '{% {{config.tokenUrl}} || "<<PROVIDER_TOKEN_URL>>" %}'
+          revocationUrl: '{% {{config.revocationUrl}} || "<<PROVIDER_REVOKE_URL>>" %}'
+          scopes: '{% {{config.scopes}} || "api" %}'
+          refreshTokenTtl: '{% {{config.refreshTokenTtl}} || 7200 %}'
+  - method-connect:
+      tenantId: '{{tenantId}}'
+      tenantConfig: '{{tenantConfig}}'
+      mcpApiKey: '{{config.mcpApiKey}}'
+      output: result
+output: '{{result}}'

@@ -1,0 +1,211 @@
+# REPLACE templates/helpers/mcp.yml with this OAuth-aware version when the
+# target service supports OAuth. Key differences from the non-OAuth template:
+#   - session.mcpApiKey stored (initiateOAuth reads it later)
+#   - tenantConfig cache includes the oauth block from getConfig
+#   - Special-cases "connect" and "disconnect" tools BEFORE auth resolution
+#   - Uses ensureAuthentication to resolve user OAuth token / tenant PAT
+#   - Returns needsConnect error with connect_url when auth is missing
+
+slug: mcp
+name: 00_MCP/endpoint
+description: >-
+  Central MCP JSON-RPC 2.0 endpoint for <<SERVICE_NAME>>.
+  Every tools/call requires the `mcp-api-key` header (HMAC-signed token that
+  encodes the tenant workspaceId and getConfigUrl). The central workspace
+  fetches the tenant's config (static PAT and/or OAuth provider) via its
+  getConfig webhook, then delegates to `ensureAuthentication` to resolve an
+  access token — prompting OAuth if the tenant has an OAuth provider configured
+  and the user has no active session for that tenant.
+when:
+  endpoint: true
+do:
+  - conditions:
+      '{{body.method}} == "tools/call"':
+        - set:
+            name: toolName
+            value: '{{body.params.name}}'
+
+        - conditions:
+            '!{{headers["mcp-api-key"]}}':
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    error:
+                      code: -32001
+                      message: 'Missing required header: mcp-api-key'
+              - break: {}
+
+        - Custom Code.run:
+            function: verifyAndDecodeKey
+            parameters:
+              apiKey: '{{headers["mcp-api-key"]}}'
+              secret: '{{config.appSecret}}'
+            output: decoded
+        - conditions:
+            '{{decoded.error}}':
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    error:
+                      code: -32001
+                      message: 'Invalid API key: {{decoded.error}}'
+              - break: {}
+
+        - set:
+            name: tenantId
+            value: '{{decoded.workspaceId}}'
+
+        - comment: >-
+            Persist the mcp-api-key in session so that initiateOAuth (triggered
+            later from a connect card click) can identify the tenant without
+            the frontend having to append it to the connect_url.
+        - set:
+            name: session.mcpApiKey
+            value: '{{headers["mcp-api-key"]}}'
+
+        - comment: Tenant config 10-min session cache
+        - conditions:
+            '{{session.tenantConfig[{{tenantId}}].baseUrl}} and {{session.tenantConfig[{{tenantId}}].expiresAt}} > {% date({{run.date}}).ts %}':
+              - set:
+                  name: tenantConfig
+                  value: '{{session.tenantConfig[{{tenantId}}]}}'
+            default:
+              - fetch:
+                  url: '{{decoded.getConfigUrl}}'
+                  method: GET
+                  output: credResponse
+                  outputMode: detailed_response
+                  emitErrors: false
+              - conditions:
+                  '{{credResponse.status}} != 200':
+                    - set:
+                        name: response
+                        value:
+                          jsonrpc: '2.0'
+                          id: '{{body.id}}'
+                          error:
+                            code: -32001
+                            message: 'Tenant config lookup failed ({{credResponse.status}}): {{credResponse.body.error}}'
+                    - break: {}
+              - set:
+                  name: tenantConfig
+                  value:
+                    accessToken: '{{credResponse.body.accessToken}}'
+                    baseUrl: '{{credResponse.body.baseUrl}}'
+                    oauth: '{{credResponse.body.oauth}}'
+                    getConfigUrl: '{{decoded.getConfigUrl}}'
+                    expiresAt: '{% date({{run.date}}).ts + 600000 %}'
+              - set:
+                  name: session.tenantConfig[{{tenantId}}]
+                  value: '{{tenantConfig}}'
+
+        - comment: Special-case connect/disconnect tools — skip ensureAuthentication
+        - conditions:
+            '{{toolName}} == "disconnect"':
+              - tool-disconnect:
+                  body:
+                    arguments: '{{body.params.arguments}}'
+                    tenantId: '{{tenantId}}'
+                    tenantConfig: '{{tenantConfig}}'
+                  output: toolResult
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    result: '{{toolResult}}'
+              - break: {}
+            '{{toolName}} == "connect"':
+              - tool-connect:
+                  body:
+                    arguments: '{{body.params.arguments}}'
+                    tenantId: '{{tenantId}}'
+                    tenantConfig: '{{tenantConfig}}'
+                    mcpApiKey: '{{headers["mcp-api-key"]}}'
+                  output: toolResult
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    result: '{{toolResult}}'
+              - break: {}
+
+        - comment: Resolve auth for this (user, tenant)
+        - ensureAuthentication:
+            tenantId: '{{tenantId}}'
+            tenantConfig: '{{tenantConfig}}'
+            output: auth
+        - conditions:
+            '{{auth.authenticated}}':
+              - routeToolCall:
+                  toolName: '{{toolName}}'
+                  toolArgs:
+                    arguments: '{{body.params.arguments}}'
+                    accessToken: '{{auth.accessToken}}'
+                    baseUrl: '{{auth.baseUrl}}'
+                  output: toolResult
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    result: '{{toolResult}}'
+              - break: {}
+
+        - comment: Not authenticated — prompt OAuth if provider is configured
+        - conditions:
+            '{{auth.needsConnect}}':
+              - set:
+                  name: connectUrl
+                  value: '{{global.apiUrl}}/workspaces/slug:<<SERVICE_SLUG>>/webhooks/initiateOAuth?mcpApiKey={{headers["mcp-api-key"]}}'
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    result:
+                      content:
+                        - type: text
+                          text: >-
+                            I need to connect to <<SERVICE_NAME>> before I can use
+                            this tool. Please open this URL in a new tab to
+                            authorize access, then retry: {{connectUrl}}
+                      isError: true
+                      structuredContent:
+                        type: connector_auth_required
+                        catalog_id: connector-<<SERVICE_KEBAB>>
+                        name: <<SERVICE_NAME>>
+                        auth_type: oauth2
+                        connect_url: '{{connectUrl}}'
+                        message: '{{auth.message}}'
+              - break: {}
+
+        - comment: No credentials at all — config error
+        - set:
+            name: response
+            value:
+              jsonrpc: '2.0'
+              id: '{{body.id}}'
+              result:
+                content:
+                  - type: text
+                    text: '{% {{auth.message}} || "Authentication failed." %}'
+                isError: true
+
+      default:
+        - comment: 'tools/list, initialize, etc. — delegate to MCP Core'
+        - MCP Core.handleMcpMethod:
+            body: '{{body}}'
+            serverName: <<SERVICE_KEBAB>>-mcp
+            serverVersion: 1.0.0
+            headers: '{{headers}}'
+            output: mcpResult
+        - set:
+            name: response
+            value: '{{mcpResult.response}}'
+output: '{{response}}'

@@ -1,0 +1,26 @@
+# Public App-mode automation — callable by tenants as `<<SERVICE_NAME>>.<<OPERATION_NAME>>`
+# Created per tool exposed in mcpTools.
+slug: <<OPERATION_NAME>>
+name:
+  fr: <<FR_LABEL>>
+  en: <<EN_LABEL>>
+description: <<OPERATION_DESCRIPTION>>
+# NOT private — this is the App's public surface
+arguments:
+  # <<ADAPT>>: one per exposed parameter (mirror the tool's inputSchema minus outputFormat)
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - method-<<OPERATION_NAME>>:
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      # <<ADAPT>>: forward each argument
+      output: result
+output: '{{result}}'

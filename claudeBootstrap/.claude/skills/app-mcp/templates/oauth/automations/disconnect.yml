@@ -1,0 +1,31 @@
+slug: disconnect
+name:
+  fr: Se déconnecter de <<SERVICE_NAME>>
+  en: Disconnect from <<SERVICE_NAME>>
+description: >-
+  Disconnect the current user's <<SERVICE_NAME>> OAuth session for this app instance
+  (tenant). Revokes tokens at the provider (RFC 7009) and deletes the tenant-prefixed
+  platform secrets. When called via `GitlabDebugOAuth.disconnect:` from a
+  tenant automation, the tenantId is inferred from the calling workspace.
+do:
+  - set:
+      name: tenantId
+      value: '{{global.workspaceId}}'
+  - set:
+      name: tenantConfig
+      value:
+        accessToken: '{{config.token}}'
+        baseUrl: '{% {{config.baseUrl}} || "<<BASE_URL>>" %}'
+        oauth:
+          clientId: '{{config.oauthClientId}}'
+          clientSecret: '{{config.oauthClientSecret}}'
+          authorizationUrl: '{% {{config.authorizationUrl}} || "<<PROVIDER_AUTHORIZE_URL>>" %}'
+          tokenUrl: '{% {{config.tokenUrl}} || "<<PROVIDER_TOKEN_URL>>" %}'
+          revocationUrl: '{% {{config.revocationUrl}} || "<<PROVIDER_REVOKE_URL>>" %}'
+          scopes: '{% {{config.scopes}} || "api" %}'
+          refreshTokenTtl: '{% {{config.refreshTokenTtl}} || 7200 %}'
+  - method-disconnect:
+      tenantId: '{{tenantId}}'
+      tenantConfig: '{{tenantConfig}}'
+      output: result
+output: '{{result}}'

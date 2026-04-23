@@ -1,0 +1,52 @@
+slug: method-<<OPERATION_NAME>>
+name: /03_Methods/method-<<OPERATION_NAME>>
+description: <<OPERATION_DESCRIPTION>>
+private: true
+arguments:
+  accessToken:
+    type: string
+  baseUrl:
+    type: string
+  # <<ADAPT>>: add one argument per operation parameter
+do:
+  - set:
+      name: reqBody
+      value:
+        # <<ADAPT>>: map arguments into request body
+        {}
+  - Custom Code.run:
+      function: pruneEmpty
+      parameters:
+        obj: '{{reqBody}}'
+      output: reqBody
+  - executeApiCall:
+      path: <<API_PATH>>
+      method: <<HTTP_METHOD>>
+      body: '{{reqBody}}'
+      accessToken: '{{accessToken}}'
+      baseUrl: '{{baseUrl}}'
+      operation: <<OPERATION_HUMAN_DESCRIPTION>>
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: output
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - set:
+      name: output
+      # <<ADAPT>>: shape depends on operation type.
+      # Choose one of:
+      #   create: { operation: create, itemType, itemName, structuredData }
+      #   list:   { operation: list, itemType, items, structuredData, location, hint }
+      #   read:   { operation: read, itemType, identifier, properties, structuredData, jsonData }
+      #   update: { operation: update, itemType, identifier, properties, structuredData }
+      #   delete: { operation: delete, itemType, identifier, additionalInfo, structuredData }
+      #   action: { operation: action, itemType, message, structuredData }
+      value:
+        operation: action
+        itemType: <<ITEM_TYPE>>
+        structuredData: '{{apiResult.data}}'
+        message: '<<SUCCESS_MESSAGE>>'
+output: '{{output}}'
