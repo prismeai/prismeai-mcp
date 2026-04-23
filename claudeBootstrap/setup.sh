@@ -9,6 +9,8 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_PATH="$PROJECT_DIR/build/index.js"
 CLAUDE_CONFIG_DIR="$HOME/.claude"
 API_KEY_HELPER_PATH="$CLAUDE_CONFIG_DIR/anthropic-api-key.sh"
+CODEX_CONFIG_DIR="$HOME/.codex"
+CODEX_CONFIG_FILE="$CODEX_CONFIG_DIR/config.toml"
 
 # Color codes (defined early for use throughout)
 YELLOW='\033[1;33m'
@@ -16,6 +18,124 @@ CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 DIM='\033[2m'
 NC='\033[0m' # No Color
+
+ensure_jq() {
+    if ! command -v jq >/dev/null; then
+        echo "  jq not found, installing..."
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            if command -v brew >/dev/null; then
+                brew install jq
+            else
+                echo "Error: Homebrew required to install jq on macOS"
+                echo "Install Homebrew: https://brew.sh"
+                exit 1
+            fi
+        elif command -v apt-get >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y jq
+        elif command -v yum >/dev/null; then
+            sudo yum install -y jq
+        elif command -v apk >/dev/null; then
+            sudo apk add jq
+        else
+            echo "Error: Could not install jq. Please install it manually."
+            exit 1
+        fi
+        echo "  jq installed"
+    else
+        echo "  jq available"
+    fi
+}
+
+get_claude_mcp_config() {
+    local config
+
+    if [[ ! -f "$HOME/.claude.json" ]]; then
+        return 1
+    fi
+
+    config=$(jq -c '.mcpServers."prisme-ai-builder" // empty' "$HOME/.claude.json" 2>/dev/null || true)
+    if [[ -n "$config" && "$config" != "null" ]]; then
+        printf '%s\n' "$config"
+        return 0
+    fi
+
+    config=$(jq -c --arg proj "$PROJECT_DIR" '.projects[$proj].mcpServers."prisme-ai-builder" // empty' "$HOME/.claude.json" 2>/dev/null || true)
+    if [[ -n "$config" && "$config" != "null" ]]; then
+        printf '%s\n' "$config"
+        return 0
+    fi
+
+    config=$(jq -c '.projects // {} | to_entries[] | .value.mcpServers."prisme-ai-builder" // empty' "$HOME/.claude.json" 2>/dev/null | head -1 || true)
+    if [[ -n "$config" && "$config" != "null" ]]; then
+        printf '%s\n' "$config"
+        return 0
+    fi
+
+    return 1
+}
+
+copy_claude_install_to_codex() {
+    local existing_config
+    local tmp_config
+    local tmp_block
+    local backup_file
+    local env_count
+
+    ensure_jq
+
+    existing_config=$(get_claude_mcp_config || true)
+    if [[ -z "$existing_config" ]]; then
+        echo "  Error: No existing prisme-ai-builder MCP server found in ~/.claude.json"
+        echo "  Run a fresh Claude install first, then retry this option."
+        exit 1
+    fi
+
+    mkdir -p "$CODEX_CONFIG_DIR"
+    tmp_config=$(mktemp)
+    tmp_block=$(mktemp)
+
+    if [[ -f "$CODEX_CONFIG_FILE" ]]; then
+        backup_file="$CODEX_CONFIG_FILE.bak.$(date +%Y%m%d%H%M%S)"
+        cp "$CODEX_CONFIG_FILE" "$backup_file"
+        awk '
+            /^\[mcp_servers\.prisme-ai-builder(\.env)?\]$/ || /^\[mcp_servers\."prisme-ai-builder"(\.env)?\]$/ { skip=1; next }
+            /^\[/ { skip=0 }
+            !skip { print }
+        ' "$CODEX_CONFIG_FILE" > "$tmp_config"
+    else
+        : > "$tmp_config"
+        backup_file=""
+    fi
+
+    {
+        echo ""
+        echo "[mcp_servers.prisme-ai-builder]"
+        echo "command = $(echo "$existing_config" | jq -r '.command // "node" | @json')"
+        echo "args = [$(echo "$existing_config" | jq -r '(.args // []) | map(@json) | join(", ")')]"
+
+        env_count=$(echo "$existing_config" | jq -r '.env // {} | length')
+        if [[ "$env_count" -gt 0 ]]; then
+            echo ""
+            echo "[mcp_servers.prisme-ai-builder.env]"
+            echo "$existing_config" | jq -r '.env // {} | to_entries[] | "\(.key) = \(.value | tostring | @json)"'
+        fi
+    } > "$tmp_block"
+
+    cat "$tmp_block" >> "$tmp_config"
+    mv "$tmp_config" "$CODEX_CONFIG_FILE"
+    chmod 600 "$CODEX_CONFIG_FILE"
+    rm -f "$tmp_block"
+
+    echo "  Codex MCP server configured at $CODEX_CONFIG_FILE"
+    if [[ -n "$backup_file" ]]; then
+        echo "  Backup created at $backup_file"
+    fi
+    if command -v codex >/dev/null; then
+        echo "  Codex CLI installed"
+    else
+        echo "  Warning: Codex CLI was not found on PATH. The config was written anyway."
+    fi
+}
 
 echo "=== Claude Code + Prisme.ai Setup ==="
 echo ""
@@ -35,6 +155,10 @@ echo -e "  ${GREEN}3. Environment Configuration${NC}"
 echo -e "     API keys and endpoints for your Prisme.ai environments"
 echo -e "     ${DIM}Location: ~/.claude.json${NC}"
 echo ""
+echo -e "  ${GREEN}4. Optional Codex Configuration${NC}"
+echo -e "     Copy an existing Claude MCP install to local Codex"
+echo -e "     ${DIM}Location: ~/.codex/config.toml${NC}"
+echo ""
 
 # 0. Select installation mode
 echo "Installation mode:"
@@ -44,8 +168,9 @@ echo "  3) Update API key - Add or update a Prisme.ai environment API key"
 echo "  4) Toggle feedback tools - Enable/disable bug reporting tools"
 echo "  5) Delete environment - Remove a configured environment"
 echo "  6) Migrate - Fix old configuration format (run this if MCP server fails to start)"
+echo "  7) Copy Claude install to Codex - Configure local Codex from the current Claude install"
 echo ""
-read -p "Select mode [1/2/3/4/5/6]: " MODE_CHOICE
+read -p "Select mode [1/2/3/4/5/6/7]: " MODE_CHOICE
 
 case "$MODE_CHOICE" in
     1)
@@ -72,12 +197,27 @@ case "$MODE_CHOICE" in
         INSTALL_MODE="migrate"
         echo "Mode: Migrate configuration"
         ;;
+    7)
+        INSTALL_MODE="copy_to_codex"
+        echo "Mode: Copy Claude install to Codex"
+        ;;
     *)
         echo "Invalid choice. Defaulting to fresh install."
         INSTALL_MODE="fresh"
         ;;
 esac
 echo ""
+
+if [[ "$INSTALL_MODE" == "copy_to_codex" ]]; then
+    echo "[1/1] Copying Claude MCP configuration to Codex..."
+    copy_claude_install_to_codex
+    echo ""
+    echo "=== Setup Complete ==="
+    echo ""
+    echo "Codex can now use the prisme-ai-builder MCP server from your local Codex install."
+    echo "Restart Codex if it is already running so it reloads $CODEX_CONFIG_FILE."
+    exit 0
+fi
 
 # 1. Check prerequisites
 echo "[1/5] Checking prerequisites..."
@@ -87,31 +227,7 @@ command -v claude >/dev/null || { echo "Error: Claude Code CLI required. Install
 echo "  Node.js $(node --version)"
 echo "  Claude CLI installed"
 
-# Install jq if not available (needed for JSON manipulation)
-if ! command -v jq >/dev/null; then
-    echo "  jq not found, installing..."
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        if command -v brew >/dev/null; then
-            brew install jq
-        else
-            echo "Error: Homebrew required to install jq on macOS"
-            echo "Install Homebrew: https://brew.sh"
-            exit 1
-        fi
-    elif command -v apt-get >/dev/null; then
-        sudo apt-get update && sudo apt-get install -y jq
-    elif command -v yum >/dev/null; then
-        sudo yum install -y jq
-    elif command -v apk >/dev/null; then
-        sudo apk add jq
-    else
-        echo "Error: Could not install jq. Please install it manually."
-        exit 1
-    fi
-    echo "  jq installed"
-else
-    echo "  jq available"
-fi
+ensure_jq
 
 # 2. Configure Anthropic API key
 if [[ "$INSTALL_MODE" == "fresh" ]]; then
