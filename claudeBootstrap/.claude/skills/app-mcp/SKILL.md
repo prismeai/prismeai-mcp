@@ -235,6 +235,15 @@ For each entry in `config.value.mcpTools`:
 - Always run `Custom Code.run: pruneEmpty` on request bodies / GraphQL variables to strip nulls.
 - For operations with **no arguments** (e.g. `getTestStatuses`), omit the `arguments:` key entirely — do NOT write `arguments: {}` or `arguments:\n  # comment` (invalid schema).
 
+**Tool description enrichment for list/search ops** — the swagger `summary` is usually too thin for a good LLM tool description. When the API's default behavior is BROADER than a common user intent, enrich the mcpTools description explicitly. Common case: a `list*` or `search*` endpoint that returns "all accessible" things by default, when the user usually means "mine":
+- **GitLab `listProjects`**: `/projects` returns all accessible including public → description must say "**When the user says 'my repos / mes repos', pass `membership: true` or `owned: true`**".
+- **GitLab `listIssues`**: `/issues` returns all → surface `scope=assigned_to_me` / `scope=created_by_me`.
+- **GitHub repos**: `/repositories` is a global feed → prefer `/user/repos` with `affiliation=owner,collaborator`.
+- **Jira `/search`**: unfiltered JQL returns everything the user can see → surface `jql=assignee=currentUser()` for "my issues".
+- **Slack `conversations.list`**: excludes private channels by default → surface `types=public_channel,private_channel`.
+
+Auto-detection heuristic during Phase 5: for any tool whose name matches `^(list|search)` and whose `inputSchema.properties` contains any of `membership`, `owned`, `starred`, `mine`, `affiliation`, `assigned_to_me`, `created_by_me`, `scope`, append one bolded sentence to the description: **"When the user asks for *their* X (my X, mes X), pass `<param>: true` / `scope=...`."** It costs nothing, and without it the LLM picks generic defaults and returns confusing results to the user.
+
 ### Phase 6 — Validate + push + smoke-check
 
 **Goal**: clean workspace, validated, deployed to prod, smoke-tested end-to-end.
@@ -331,6 +340,7 @@ All of these were already hit on existing workspaces — don't rediscover them:
 
 ### OAuth-specific traps (only relevant if Phase 4.5 was run)
 
+- **LLM loops on `connect` instead of data tools after successful OAuth** — the LLM reads a permissive connect description as "the way to sign in" and calls it on every request, even when the user is already authenticated. Symptom: agent keeps returning connect cards after a successful OAuth flow, never calling listX/getY. **Three mitigations, apply ALL THREE** (MCP clients cache the tool registry per session so filtering alone doesn't help existing sessions): (1) **Balanced descriptions** on `connect` — one bolded positive recommendation ("**Prefer calling data tools directly — they auto-handle authentication…**") plus a short usage condition. Anti-pattern: heavy `[RARE, USER-INITIATED ONLY]` + caps-locked "DO NOT" language over-filtered the LLM into not calling ANY tool, hallucinating OAuth setup guidance instead. See `templates/oauth/fragments/index-mcptools.yml`. (2) State-aware tools/list filter in `mcp.yml`: hide `connect` when `user.<<SERVICE_SLUG>>.oauth.authMethod == "delegated" && user.<<SERVICE_SLUG>>.oauth.tenantId == decoded.workspaceId`. The `filterOAuthTools` Custom Code function accepts `remove: [<names>]`; pass `[connect]` or `[connect, disconnect]`. (3) Server-side short-circuit in `method-connect.yml`: before computing the connect URL, check the same `user.<<SERVICE_SLUG>>.oauth` state — if already connected AND secret exists, return `{operation: action, message: "You are already connected…", structuredData: {alreadyConnected: true, …}}` and `break`. This is the ONLY defense that works for sessions with the OLD cached tool registry — teaches the LLM in-context that connect is a no-op.
 - **`break: { scope: all }` does NOT exist in DSUL** — observed to propagate unexpectedly to the caller, so `mcp.yml` silently stops after `ensureAuthentication` and never reaches `routeToolCall`. The only valid scopes are `automation` (exits the current automation) and `repeat` (exits a loop). The OAuth template for `ensureAuthentication.yml` is written **flag-based** (`resolved: false` guard on each priority) with no `break` at all — keep it that way.
 - **URLSearchParams / URL are not defined in Custom Code sandbox.** Use `encodeURIComponent` + manual `&`-joined string. See the `buildAuthorizeUrl` template.
 - **Unresolved `{{secret.xxx}}` stays as a literal truthy string.** `getConfig.yml` must guard with `matches "{{"` and wipe the value — otherwise the PAT priority in `ensureAuthentication` wrongly short-circuits the OAuth branch. The OAuth template's `getConfig.yml` already has this guard.

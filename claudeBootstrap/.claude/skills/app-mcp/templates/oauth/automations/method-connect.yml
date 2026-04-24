@@ -23,6 +23,36 @@ do:
                 Administrator must set oauthClientId + oauthClientSecret in
                 the app config before users can connect their own account.
         - break: {}
+  - comment: >-
+      Short-circuit when the user is already connected for this tenant — the
+      LLM's cached tool registry may still expose `connect`. If it calls
+      connect anyway, return an "already connected" no-op so it routes to
+      data tools on the next turn.
+  - conditions:
+      '{{user.<<SERVICE_SLUG>>.oauth.authMethod}} == "delegated" && {{user.<<SERVICE_SLUG>>.oauth.tenantId}} == {{tenantId}}':
+        - run:
+            module: secrets
+            function: get
+            parameters:
+              name: delegated_token_{{tenantId}}
+              scope: user
+            output: accessTokenRef
+        - conditions:
+            '!{{accessTokenRef.error}}':
+              - set:
+                  name: output
+                  value:
+                    operation: action
+                    itemType: <<SERVICE_NAME>> connection
+                    message: >-
+                      You are already connected to <<SERVICE_NAME>> for this workspace (scope: {{user.<<SERVICE_SLUG>>.oauth.scopes}}).
+                      No action needed — call the data tools directly.
+                    structuredData:
+                      alreadyConnected: true
+                      tenantId: '{{tenantId}}'
+                      authMethod: delegated
+                      connectedAt: '{{user.<<SERVICE_SLUG>>.oauth.connectedAt}}'
+              - break: {}
   - set:
       name: connectUrl
       value: '{{global.apiUrl}}/workspaces/slug:<<SERVICE_SLUG>>/webhooks/initiateOAuth?mcpApiKey={{mcpApiKey}}'

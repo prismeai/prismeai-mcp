@@ -26,12 +26,20 @@ filterOAuthTools:
   parameters:
     tools:
       type: array
+    remove:
+      type: array
   code: |
-    // Used by mcp.yml on tools/list to hide the `connect` and `disconnect`
-    // tools when the tenant has no OAuth provider configured. Prevents the
-    // LLM from ever proposing an OAuth flow that isn't wired up.
+    // Used by mcp.yml on tools/list to filter connect/disconnect based on
+    // state. `remove` lists which tool names to hide:
+    //   - OAuth not configured on tenant     → ['connect', 'disconnect']
+    //   - OAuth configured, user NOT connected → no call (pass through)
+    //   - OAuth configured, user IS connected  → ['connect']
+    // Defaults to removing both when `remove` is empty/absent.
+    var toRemove = (remove && remove.length ? remove : ['connect', 'disconnect']);
+    var set = {};
+    for (var i = 0; i < toRemove.length; i++) set[toRemove[i]] = true;
     return (tools || []).filter(function (t) {
-      return t && t.name !== 'connect' && t.name !== 'disconnect';
+      return t && !set[t.name];
     });
 
 buildAuthorizeUrl:

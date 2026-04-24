@@ -2,11 +2,11 @@
 # so tools/list surfaces them to the LLM before the service's regular tools.
 
 - name: disconnect
-  description: >
-    Disconnect the current <<SERVICE_NAME>> OAuth session. Deletes the stored
-    access token and refresh token for this user, and revokes the access
-    token at the provider (RFC 7009). Call this when the user asks to sign
-    out, disconnect, or revoke access to <<SERVICE_NAME>>.
+  description: >-
+    Disconnect the current <<SERVICE_NAME>> OAuth session and revoke the
+    access token (RFC 7009). Only call when the user explicitly asks to sign
+    out, disconnect, or log out of <<SERVICE_NAME>>. For regular data
+    requests, call the relevant data tool — do not call disconnect.
   inputSchema:
     type: object
     properties:
@@ -17,11 +17,15 @@
         description: Response format for the MCP client.
 
 - name: connect
-  description: >
-    Ask the user to connect their <<SERVICE_NAME>> account via OAuth2. Returns
-    a connect_url that the frontend renders as an OAuth card. Use this when
-    the user asks to sign in with their own account, or when a shared PAT is
-    working but the user wants to switch to their own identity.
+  description: >-
+    Initiate an OAuth connection to <<SERVICE_NAME>>. Returns a connect_url
+    for the user to click. **Prefer calling data tools directly — they
+    auto-handle authentication and will themselves return a connect_url when
+    the user is not signed in.** Call this tool only when the user
+    explicitly asks to sign in, switch accounts, or when a data tool told
+    you authentication is required and the user asks to retry. Calling
+    connect when the user is already connected is a no-op (server returns
+    an 'already connected' message).
   inputSchema:
     type: object
     properties:
