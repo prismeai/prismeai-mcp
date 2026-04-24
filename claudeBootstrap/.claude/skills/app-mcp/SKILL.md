@@ -81,6 +81,8 @@ Run phases sequentially. Pause after each for confirmation when a decision affec
 
 **When the service offers OAuth2 authorization-code**, always ask the user whether to enable it (in addition to or instead of a static PAT). If yes, Phase 4.5 is mandatory. If unsure, default to offering both — tenants pick per-instance in `index.yml` → `config.schema`.
 
+**When Phase 4.5 is enabled**, also capture **`<<PROVIDER_APP_URL>>`** — the provider's OAuth-application management page where tenant admins will create their OAuth app (e.g. `https://gitlab.com/-/user_settings/applications`, `https://github.com/settings/applications/new`, `https://auth.monday.com/oauth2/*`). This URL is embedded in the `oauthClientId` and `oauthClientSecret` descriptions so the admin knows where to go. Ask the user in Phase 1 if you can't confidently derive it from the service docs.
+
 ### Phase 2 — Generate `swagger.yml`
 
 **Goal**: concrete, validated OpenAPI 3.0 listing every endpoint/operation we'll expose.
@@ -118,6 +120,7 @@ Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
 - `<<WORKSPACE_ID>>` → Prisme.ai workspace ID (e.g. `_gwEr1h`) — only known after the workspace is created on the platform, use a placeholder then update
 - `<<BASE_URL>>` → API base URL
 - `<<LOGO_URL>>` → URL chosen in phase 3
+- `<<PROVIDER_APP_URL>>` → OAuth-app management page URL (Phase 4.5 only — captured in Phase 1)
 
 **Steps**:
 1. `mkdir -p prismeai-workspaces/workspaces/<slug>/{automations,imports,pages}`
@@ -152,7 +155,7 @@ Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
 
 **Steps:**
 
-1. **Copy all automations + page verbatim** — substitute `<<SERVICE_SLUG>>`, `<<SERVICE_NAME>>`, `<<SERVICE_KEBAB>>`, `<<BASE_URL>>`, `<<PROVIDER_AUTHORIZE_URL>>`, `<<PROVIDER_TOKEN_URL>>`, `<<PROVIDER_REVOKE_URL>>` as usual:
+1. **Copy all automations + page verbatim** — substitute `<<SERVICE_SLUG>>`, `<<SERVICE_NAME>>`, `<<SERVICE_KEBAB>>`, `<<BASE_URL>>`, `<<PROVIDER_AUTHORIZE_URL>>`, `<<PROVIDER_TOKEN_URL>>`, `<<PROVIDER_REVOKE_URL>>`, **`<<PROVIDER_APP_URL>>`** as usual:
 
    ```
    templates/oauth/automations/
@@ -178,7 +181,7 @@ Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
 
 4. **Merge `templates/oauth/imports/Custom-Code-oauth-fragment.yml`** into `imports/Custom Code.yml` under `config.functions` — adds `generatePkce`, `generateState`, `buildAuthorizeUrl`. **Do NOT use `URLSearchParams` or `URL` in Custom Code** (sandbox is Node without web globals — see Gotchas).
 
-5. **Merge `templates/oauth/fragments/index-config-schema.yml`** into `index.yml` under `config.schema` (adds `oauthClientId`, `oauthClientSecret`, `authorizationUrl`, `tokenUrl`, `revocationUrl`, `scopes`, `refreshTokenTtl`).
+5. **Merge `templates/oauth/fragments/index-config-schema.yml`** into `index.yml` under `config.schema` (adds `oauthClientId`, `oauthClientSecret`, `oauthCallbackUrl` (readOnly, populated by onInstall), `authorizationUrl`, `tokenUrl`, `revocationUrl`, `scopes`, `refreshTokenTtl`). The `oauthClientId` / `oauthClientSecret` descriptions are enriched at scaffold time with `<<PROVIDER_APP_URL>>` so the tenant admin sees where to create the OAuth app.
 
 6. **Merge `templates/oauth/fragments/index-config-value.yml`** into `index.yml` under `config.value` (provider URL defaults, `scopes: api`, `refreshTokenTtl: 7200`). **Never** set `oauthClientId` / `oauthClientSecret` at `config.value` — they're per-tenant.
 
@@ -202,7 +205,15 @@ Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
 
     The central workspace admin sets `oauthClientId` + `oauthClientSecret` on the app instance config (not as workspace secrets — per-tenant).
 
-**Deliverables of this phase:** 12 new `automations/*.yml`, 1 new `pages/*.yml`, `mcp.yml` + `getConfig.yml` replaced, `Custom Code.yml` + `index.yml` + `MCP Core.yml` extended.
+### Tenant onboarding UX — auto-populate OAuth setup fields
+
+Tenant admins installing an OAuth-enabled app need to know two things the skill can pre-compute:
+- **Where to create the OAuth app** on the provider → hard-coded in the `oauthClientId` + `oauthClientSecret` descriptions at scaffold time via `<<PROVIDER_APP_URL>>` (captured in Phase 1).
+- **What redirect URI to paste back into the provider** → `{{global.apiUrl}}/workspaces/slug:<<SERVICE_SLUG>>/webhooks/oauthCallback`. Dynamic per environment, so NOT hard-codable in the template. Instead, `onInstall.yml` computes it at install time and merges it into a readOnly `oauthCallbackUrl` config field (right next to `mcpEndpoint`). Admin reads the value straight from the UI, copies it, pastes in the provider's OAuth app config.
+
+Both of these live in `templates/oauth/fragments/index-config-schema.yml` + `templates/helpers/onInstall.yml` — if you adapt either, mirror the change in the workspace's files to keep them in sync. **Do NOT** point tenants to a static documentation page for the callback URL: the URL depends on `global.apiUrl` (sandbox vs prod), so only the runtime computation is reliable.
+
+**Deliverables of this phase:** 12 new `automations/*.yml`, 1 new `pages/*.yml`, `mcp.yml` + `getConfig.yml` replaced, `Custom Code.yml` + `index.yml` + `MCP Core.yml` extended, `onInstall.yml` adapted (base template already populates `oauthCallbackUrl`).
 
 ### Phase 5 — Generate tool, method and public automations
 

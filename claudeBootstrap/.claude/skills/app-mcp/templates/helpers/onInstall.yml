@@ -85,12 +85,21 @@ do:
   - set:
       name: mcpEndpoint
       value: '{{global.apiUrl}}/workspaces/<<WORKSPACE_ID>>/webhooks/mcp'
+  - comment: >-
+      Compute the OAuth callback URL for the `oauthCallbackUrl` readOnly config
+      field. Admin copies it into the provider's OAuth app "Redirect URI".
+      slug:<<SERVICE_SLUG>> keeps the URL stable across central-workspace
+      recreations. Harmless for non-OAuth apps (unused field).
+  - set:
+      name: oauthCallbackUrl
+      value: '{{global.apiUrl}}/workspaces/slug:<<SERVICE_SLUG>>/webhooks/oauthCallback'
   - set:
       name: config
       type: merge
       value:
         mcpApiKey: '{{keyResponse.body.mcpApiKey}}'
         mcpEndpoint: '{{mcpEndpoint}}'
+        oauthCallbackUrl: '{{oauthCallbackUrl}}'
   - emit:
       event: <<SERVICE_SLUG>>.onInstall.completed
       payload:

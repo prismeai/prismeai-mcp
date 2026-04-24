@@ -6,13 +6,19 @@
 oauthClientId:
   type: string
   title: OAuth2 Client ID
-  description: <<SERVICE_NAME>> OAuth Application Client ID.
+  description: '<<SERVICE_NAME>> OAuth Application Client ID. Create an OAuth application at <<PROVIDER_APP_URL>> and paste its Application ID here. Set the redirect URI to the value shown in "OAuth Callback URL" below.'
 
 oauthClientSecret:
   type: string
   title: OAuth2 Client Secret
-  description: <<SERVICE_NAME>> OAuth Application Client Secret.
+  description: '<<SERVICE_NAME>> OAuth Application Client Secret (shown once on the application page at <<PROVIDER_APP_URL>>).'
   secret: true
+
+oauthCallbackUrl:
+  type: string
+  title: OAuth Callback URL
+  description: Copy this URL into the "Redirect URI" field of your OAuth application on the provider. Auto-generated on install.
+  readOnly: true
 
 authorizationUrl:
   type: string
