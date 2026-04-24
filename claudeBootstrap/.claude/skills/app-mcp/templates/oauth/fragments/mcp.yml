@@ -205,6 +205,49 @@ do:
             serverVersion: 1.0.0
             headers: '{{headers}}'
             output: mcpResult
+        - comment: >-
+            For tools/list: hide `connect` and `disconnect` when the tenant
+            has no OAuth provider configured. Prevents the LLM from even
+            proposing an OAuth flow that would be meaningless. If
+            mcp-api-key is absent (so we can't identify the tenant), we pass
+            the tools through unfiltered — rare in practice.
+        - conditions:
+            '{{body.method}} == "tools/list" && {{headers["mcp-api-key"]}}':
+              - Custom Code.run:
+                  function: verifyAndDecodeKey
+                  parameters:
+                    apiKey: '{{headers["mcp-api-key"]}}'
+                    secret: '{{config.appSecret}}'
+                  output: decoded
+              - conditions:
+                  '!{{decoded.error}}':
+                    - fetch:
+                        url: '{{decoded.getConfigUrl}}'
+                        method: GET
+                        output: credResponse
+                        outputMode: body
+                        emitErrors: false
+                    - conditions:
+                        '!{{credResponse.oauth.clientId}}':
+                          - Custom Code.run:
+                              function: filterOAuthTools
+                              parameters:
+                                tools: '{{mcpResult.response.result.tools}}'
+                              output: filteredTools
+                          - comment: >-
+                              Safety: only overwrite the tools array if the
+                              filter Custom Code returned a valid result. If
+                              it errored (Custom Code runtime cache didn't
+                              reload after a recent push), filteredTools =
+                              {error, logs, duration, path} — NOT an array —
+                              and assigning it would produce a malformed
+                              tools/list response (client silently gives up).
+                              Fall back to the unfiltered list in that case.
+                          - conditions:
+                              '!{{filteredTools.error}}':
+                                - set:
+                                    name: mcpResult.response.result.tools
+                                    value: '{{filteredTools}}'
         - set:
             name: response
             value: '{{mcpResult.response}}'

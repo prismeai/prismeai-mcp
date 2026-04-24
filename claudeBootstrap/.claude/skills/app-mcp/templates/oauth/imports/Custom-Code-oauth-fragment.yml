@@ -22,6 +22,18 @@ generateState:
     const crypto = require('crypto');
     return { state: crypto.randomBytes(16).toString('base64url') };
 
+filterOAuthTools:
+  parameters:
+    tools:
+      type: array
+  code: |
+    // Used by mcp.yml on tools/list to hide the `connect` and `disconnect`
+    // tools when the tenant has no OAuth provider configured. Prevents the
+    // LLM from ever proposing an OAuth flow that isn't wired up.
+    return (tools || []).filter(function (t) {
+      return t && t.name !== 'connect' && t.name !== 'disconnect';
+    });
+
 buildAuthorizeUrl:
   parameters:
     authorizeUrl:

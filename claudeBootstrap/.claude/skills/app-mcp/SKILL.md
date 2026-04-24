@@ -224,15 +224,44 @@ For each entry in `config.value.mcpTools`:
 - Always run `Custom Code.run: pruneEmpty` on request bodies / GraphQL variables to strip nulls.
 - For operations with **no arguments** (e.g. `getTestStatuses`), omit the `arguments:` key entirely — do NOT write `arguments: {}` or `arguments:\n  # comment` (invalid schema).
 
-### Phase 6 — Validate + push
+### Phase 6 — Validate + push + smoke-check
 
-**Goal**: clean workspace, validated, deployed to prod.
+**Goal**: clean workspace, validated, deployed to prod, smoke-tested end-to-end.
 
 1. `validate_automation` on the full `automations/` folder. Must be 100% valid — expect warnings on webhook automations (no `arguments:`), those are fine.
-2. Human review: list `method-*`, `tool-*`, `<op>` counts to the user. Confirm before pushing.
-3. `push_workspace` to `_<WORKSPACE_ID>` on `prod` with a short message (`initial`, `add-tools`, etc., max 15 chars, alphanumeric + `-_`).
-4. **Verify the MCP tool sync**: `workspaces.imported` should fire `triggerSync` automatically. Call `tools/list` on the `/mcp` endpoint (or execute `triggerSync` once by hand) to confirm the returned tools match `config.value.mcpTools`. If the list is stale or empty, see "MCP tool discovery" above.
-5. Instruct the user how to **activate**:
+2. **Pre-push sanity check** — script to catch issues that `validate_automation` misses:
+   ```python
+   import yaml
+   d = yaml.safe_load(open('index.yml'))
+   # 1. No type: array without items in mcpTools
+   for t in d['config']['value']['mcpTools']:
+       for pn, ps in (t['inputSchema'].get('properties') or {}).items():
+           if isinstance(ps, dict) and ps.get('type') == 'array' and 'items' not in ps:
+               print(f"MISSING items: {t['name']}.{pn}")
+   # 2. No `#` in any code: | block of imports/Custom Code.yml (JS comments must use //)
+   with open('imports/Custom Code.yml') as f:
+       in_code = False
+       for i, line in enumerate(f, 1):
+           stripped = line.rstrip()
+           if stripped.endswith('code: |'):
+               in_code = True
+               base_indent = len(line) - len(line.lstrip())
+               continue
+           if in_code:
+               if stripped and not line.startswith(' '): in_code = False; continue
+               cur_indent = len(line) - len(line.lstrip())
+               if cur_indent <= base_indent and stripped: in_code = False; continue
+               if line.lstrip().startswith('#'):
+                   print(f"JS-invalid `#` comment at Custom Code.yml:{i}")
+   ```
+3. Human review: list `method-*`, `tool-*`, `<op>` counts to the user. Confirm before pushing.
+4. `push_workspace` to `_<WORKSPACE_ID>` on `prod` with a short message (`initial`, `add-tools`, etc., max 15 chars, alphanumeric + `-_`).
+5. **Post-push smoke check — do not skip**, it catches deploy-time failures that validation can't:
+   - **Custom Code reload**: right after push, search events for `Custom Code.error` on `fetchAPI` / `onParentAppPublish` — if any, the CC runtime didn't reload and functions will be "not found" at runtime. Recovery: `update_app_instance_config` with the **complete** functions map (the tool replaces, doesn't merge — see memory). Then re-push.
+   - **generateKey round-trip**: `execute_automation generateKey` with a dummy `{body: {workspaceId: "test", getConfigUrl: "https://x.y/z"}}` and confirm the response is a proper signed key `^[A-Za-z0-9_-]+\.[a-f0-9]{64}$` — not an error object. Catches `#`-in-code-block-style Custom Code issues.
+   - **tools/list**: simulate a JSON-RPC `tools/list` via `execute_automation mcp` with `{body: {jsonrpc: "2.0", id: 1, method: "tools/list", params: {}}}`. Confirm `result.tools` is an array and that each tool's `inputSchema.properties` contains the declared properties (not just `{}`). MCP Core's internal formatter has historically stripped `inputSchema` properties — verify end-to-end what the LLM will actually see.
+   - **triggerSync**: `execute_automation triggerSync {}` should return `{synced: true, toolCount: <N>}` matching `config.value.mcpTools.length`.
+6. Instruct the user how to **activate**:
    - Configure secrets (`<slug>Token` or `<slug>ClientId`/`<slug>ClientSecret` + `appSecret`) on the central workspace.
    - Install the app in a tenant workspace; configure credentials. `mcpEndpoint` + `mcpApiKey` populate automatically via `onInstall`.
    - Call `<ServiceName>.<op>:` from a tenant automation, or point an MCP client at `mcpEndpoint` using `mcp-api-key`.
