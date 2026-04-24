@@ -1,0 +1,124 @@
+---
+title: '<<SERVICE_NAME>>'
+description: '<<ONE_LINE_DESCRIPTION>>'
+---
+
+<<INTRO_PARAGRAPH>>
+
+<<FEATURE_CARDS>>
+
+## Prerequisites
+
+<<PREREQUISITES>>
+
+---
+
+<Tabs>
+  <Tab title="Usage as App">
+    ## Installation
+
+    1. Go to **Apps** in your workspace
+    2. Search for **<<SERVICE_NAME>>** and install it
+    3. Open the app instance configuration and fill in the required fields
+
+    ## Configuration
+
+    <<CONFIG_TABLE>>
+
+    <Note>
+      `MCP Endpoint` and `MCP API Key` are generated automatically by the `onInstall` flow and are only needed to expose this instance as an MCP server (see the next tab).
+    </Note>
+
+    ## Available Instructions
+
+    Every instruction resolves credentials from the workspace configuration.
+
+    <<INSTRUCTIONS_TABLES>>
+
+    <Note>
+      Arguments flagged with `*` are required.
+    </Note>
+
+    ## DSUL Examples
+
+    <<DSUL_EXAMPLES>>
+  </Tab>
+
+  <Tab title="Usage as MCP">
+    The <<SERVICE_NAME>> app ships with a built-in MCP server. Each app instance gets its own signed `mcp-api-key` that encodes the workspace ID and a credentials lookup URL — the <<SERVICE_NAME>> API key itself is never passed through headers and is resolved server-side from the app configuration.
+
+    ## Legacy MCP Install (Advanced > Tools)
+
+    Use this flow to plug the <<SERVICE_NAME>> MCP into an AI Knowledge agent that does not yet support the native MCP picker.
+
+    <Steps>
+      <Step title="Install the <<SERVICE_NAME>> app">
+        Install and configure the app in the same workspace as your agent (see the *Usage as App* tab). Once configured, `mcpEndpoint` and `mcpApiKey` are auto-populated.
+      </Step>
+      <Step title="Copy the MCP credentials">
+        Open the app instance config and copy the values of **MCP Endpoint** and **MCP API Key**.
+      </Step>
+      <Step title="Open your AI Knowledge project">
+        Navigate to **Advanced > Tools**.
+      </Step>
+      <Step title="Add an MCP tool">
+        Click **Add** and select the **MCP** tab.
+      </Step>
+      <Step title="Fill in the endpoint">
+        Paste the **MCP Endpoint** URL copied from the app instance.
+      </Step>
+      <Step title="Add the auth header">
+        In the **Headers** field, add the signed API key:
+
+        ```json
+        {
+          "mcp-api-key": "your-mcp-api-key"
+        }
+        ```
+      </Step>
+      <Step title="Save">
+        The agent can now list and call <<SERVICE_NAME>> tools through the MCP endpoint.
+      </Step>
+    </Steps>
+
+    <Note>
+      The signed `mcp-api-key` encodes the workspace ID and the `getConfig` webhook URL. The MCP server validates the signature using the central app secret and transparently fetches the <<SERVICE_NAME>> API key and base URL from the installed app. Credentials are cached per tenant for 10 minutes.
+    </Note>
+
+    ## Output Formats
+
+    Every tool accepts an `outputFormat` parameter that controls the MCP response shape:
+
+    - **`verbose`** (default) — human-readable text for LLM consumption
+    - **`structured`** — machine-readable JSON in `structuredContent`
+    - **`both`** — both text and structured content
+
+    ## Available Tools
+
+    <<MCP_TOOLS_TABLES>>
+
+    ## Tool Details
+
+    <<TOOL_DETAILS>>
+  </Tab>
+</Tabs>
+
+---
+
+## Error Handling
+
+<<ERROR_HANDLING_TABLE>>
+
+### Common Issues
+
+**"Not configured"** — The app instance has no API key. Generate one at the provider and paste it in the app configuration.
+
+**"Invalid API key" (MCP)** — The `mcp-api-key` header does not match the central app secret. Reinstall the app instance to regenerate a signed key.
+
+**"Credentials lookup failed"** — The MCP endpoint could not reach the `getConfig` webhook of the installed app. Verify that the app instance is still installed in the expected workspace.
+
+<<SERVICE_SPECIFIC_ISSUES>>
+
+## External Resources
+
+<<EXTERNAL_RESOURCES>>
