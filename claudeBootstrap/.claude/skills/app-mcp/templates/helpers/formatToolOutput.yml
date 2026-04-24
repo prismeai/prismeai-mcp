@@ -130,26 +130,48 @@ do:
             name: verboseMessage
             value: '{% {{message}} || "Action completed successfully." %}'
       default:
-        - set:
-            name: verboseMessage
-            value: '{% json({{structuredData}}) %}'
+        - comment: >-
+            Fallback verbose — guard against empty structuredData. DELETE
+            endpoints typically respond HTTP 204 No Content with an empty
+            body, so structuredData is "" and json("") crashes with
+            InvalidExpressionSyntax.
+        - conditions:
+            '{{structuredData}}':
+              - set:
+                  name: verboseMessage
+                  value: '{% json({{structuredData}}) %}'
+            default:
+              - set:
+                  name: verboseMessage
+                  value: '{{itemType}} {{identifier}} — operation completed (no content returned).'
+  - comment: >-
+      Structured/both output: serialize structuredData when present. DELETE
+      responses (HTTP 204) and some action endpoints return empty bodies →
+      json("") crashes. Fall back to a minimal acknowledgement object in
+      that case so the tool still produces a well-formed MCP response.
   - conditions:
-      '{{outputFormat}} == "structured"':
-        - set:
-            name: result
-            value:
-              content:
-                - type: text
-                  text: '{% json({{structuredData}}) %}'
-              structuredContent: '{{structuredData}}'
-      '{{outputFormat}} == "both"':
-        - set:
-            name: result
-            value:
-              content:
-                - type: text
-                  text: '{% json({{structuredData}}) %}'
-              structuredContent: '{{structuredData}}'
+      '{{outputFormat}} == "structured" || {{outputFormat}} == "both"':
+        - conditions:
+            '{{structuredData}}':
+              - set:
+                  name: result
+                  value:
+                    content:
+                      - type: text
+                        text: '{% json({{structuredData}}) %}'
+                    structuredContent: '{{structuredData}}'
+            default:
+              - set:
+                  name: result
+                  value:
+                    content:
+                      - type: text
+                        text: '{{verboseMessage}}'
+                    structuredContent:
+                      operation: '{{operation}}'
+                      itemType: '{{itemType}}'
+                      identifier: '{{identifier}}'
+                      empty: true
       default:
         - set:
             name: result
