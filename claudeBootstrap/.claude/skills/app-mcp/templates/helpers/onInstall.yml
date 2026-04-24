@@ -24,8 +24,13 @@ do:
             payload:
               reason: no-app-instance-slug
         - break: {}
+  - comment: >-
+      Skip only if mcpApiKey is a proper signed key (base64url payload + "."
+      + 64 hex chars). A loose `matches "\."` wrongly matches a garbage
+      error-object sérialisation (stack traces contain dots) and can lock
+      the app in a broken state.
   - conditions:
-      '{{config.mcpApiKey}} matches "\\."':
+      '{{config.mcpApiKey}} matches "^[A-Za-z0-9_-]+\\.[a-f0-9]{64}$"':
         - emit:
             event: <<SERVICE_SLUG>>.onInstall.skipped
             payload:
@@ -62,6 +67,19 @@ do:
             event: <<SERVICE_SLUG>>.onInstall.failed
             payload:
               status: '{{keyResponse.status}}'
+              body: '{{keyResponse.body}}'
+        - break: {}
+  - comment: >-
+      Shape-validate the returned key before merging. Belt-and-braces: even
+      if generateKey returns 200, the body.mcpApiKey must match the real
+      signed-key format — rejects any garbage that slipped past generateKey's
+      own checks.
+  - conditions:
+      '!{{keyResponse.body.mcpApiKey}} matches "^[A-Za-z0-9_-]+\\.[a-f0-9]{64}$"':
+        - emit:
+            event: <<SERVICE_SLUG>>.onInstall.failed
+            payload:
+              reason: invalid-key-shape
               body: '{{keyResponse.body}}'
         - break: {}
   - set:

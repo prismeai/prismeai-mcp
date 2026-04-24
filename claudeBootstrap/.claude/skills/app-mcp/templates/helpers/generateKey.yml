@@ -36,6 +36,23 @@ do:
         getConfigUrl: '{{body.getConfigUrl}}'
         secret: '{{config.appSecret}}'
       output: signedKey
+  - comment: >-
+      Defense in depth: if the Custom Code module failed to load (e.g. a
+      stray "#" comment in any code: | block, see Common Traps), signedKey
+      will be { error: {message, stack}, logs, duration, path } — NOT a
+      string. Return 500 so onInstall's status check catches it instead of
+      merging garbage as mcpApiKey.
+  - conditions:
+      '{{signedKey.error}}':
+        - set:
+            name: $http
+            value:
+              status: 500
+        - set:
+            name: response
+            value:
+              error: 'Key generation failed: {{signedKey.error.message}}'
+        - break: {}
   - set:
       name: response
       value:

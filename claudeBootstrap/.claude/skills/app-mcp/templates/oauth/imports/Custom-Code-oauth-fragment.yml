@@ -37,8 +37,8 @@ buildAuthorizeUrl:
     codeChallenge:
       type: string
   code: |
-    # IMPORTANT: Custom Code sandbox is Node WITHOUT web globals.
-    # URLSearchParams / URL are NOT defined. Use encodeURIComponent manually.
+    // IMPORTANT: Custom Code sandbox is Node WITHOUT web globals.
+    // URLSearchParams / URL are NOT defined. Use encodeURIComponent manually.
     const enc = encodeURIComponent;
     const qs = [
       'client_id=' + enc(clientId || ''),
