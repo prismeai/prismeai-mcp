@@ -444,6 +444,25 @@ export class PrismeApiClient {
         return response.data;
     }
 
+    async pullWorkspaceVersion(
+        versionId: string,
+        body?: {
+            repository?: { id: string };
+        },
+        workspaceId?: string,
+        apiUrl?: string,
+        environment?: string
+    ): Promise<any> {
+        const wsId = workspaceId || this.workspaceId;
+        const client = this.getClient(apiUrl, environment);
+        const encodedVersionId = encodeURIComponent(versionId);
+        const response = await client.post(
+            `/workspaces/${wsId}/versions/${encodedVersionId}/pull`,
+            body || {}
+        );
+        return response.data;
+    }
+
     async exportWorkspace(workspaceId?: string, apiUrl?: string, environment?: string): Promise<Buffer> {
         const wsId = workspaceId || this.workspaceId;
         const client = this.getClient(apiUrl, environment);

@@ -1225,6 +1225,55 @@ Use this to cancel a report, edit its message, or change its type.`,
       destructiveHint: true,
     },
   },
+  {
+    name: "pull_workspace_version",
+    description:
+      "Pull a workspace version from a git repository, or roll back/import an existing workspace version.\n\n" +
+      "**If the user asks to pull from git, you MUST pass `gitPlatform` (or `repositoryId`) — do not call this tool without one of these selectors.** Omitting both is only valid when the caller explicitly wants to roll back/import an existing workspace version.\n\n" +
+      "Selector choice:\n" +
+      "- `gitPlatform` — the default for pulling from git on Prisme.ai. Pass the platform repository id (key under the workspace's `platformRepositories`). If you don't know the id, pass any plausible value; the tool will reject it and return the list of available platform repos so you can retry. Prefer this selector unless the user specifically names a workspace-level repo.\n" +
+      "- `repositoryId` — only when the user explicitly references a repo declared on the workspace itself.\n\n" +
+      "Response includes `pulledFromGit: true|false` — if `false` after a \"pull from git\" request, the call was wrong; retry with `gitPlatform`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        versionId: {
+          type: "string",
+          description:
+            "Workspace version id/name to pull, such as a version name or branch/ref understood by the Prisme.ai API.",
+        },
+        repositoryId: {
+          type: "string",
+          description:
+            "Workspace-level repository id. Mutually exclusive with `gitPlatform`. Omit when rolling back/importing an existing workspace version.",
+        },
+        gitPlatform: {
+          type: "string",
+          description:
+            "Platform-wide git repository id (key under `platformRepositories` on the workspace). **Pass this whenever the user asks to pull from git on Prisme.ai** — it is the primary selector for git pulls. If you don't know the exact id, pass your best guess; the tool validates it and returns the list of available platform repos so you can retry. Mutually exclusive with `repositoryId`.",
+        },
+        workspaceName: {
+          type: "string",
+          description:
+            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+        },
+        workspaceId: {
+          type: "string",
+          description:
+            "Alternative: direct workspace ID (use workspaceName instead when possible)",
+        },
+      },
+      required: ["versionId", "workspaceName"],
+    },
+    annotations: {
+      destructiveHint: true,
+    },
+  },
   // AI Knowledge tools
   {
     name: "ai_knowledge_query",

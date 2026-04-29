@@ -19,6 +19,8 @@ All tools are prefixed with `mcp__prisme-ai-builder__` when used in Claude.
 |------|-------------|
 | `pull_workspace` | Download workspace to local directory |
 | `push_workspace` | Upload local workspace to Prisme.ai |
+| `push_workspace_version` | Push workspace version to git or create local version |
+| `pull_workspace_version` | Pull workspace version from git or roll back to version |
 | `search_workspaces` | Search workspaces by name/description |
 
 ## Events & Search

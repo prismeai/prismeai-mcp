@@ -199,6 +199,8 @@ PRISME_FORCE_READONLY=true
 - `execute_automation`
 - `push_workspace`
 - `pull_workspace` (blocks local file modifications)
+- `push_workspace_version`
+- `pull_workspace_version`
 - `install_app_instance`
 - `update_app_instance`
 - `uninstall_app_instance`
