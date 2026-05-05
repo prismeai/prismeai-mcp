@@ -1,10 +1,11 @@
 slug: routeToolCall
 name: /01_Helpers/routeToolCall
 description: >-
-  Route an MCP tool call to the appropriate tool automation by name.
-  Centralizes tool dispatch so mcp.yml doesn't need modification when adding
-  tools. The `default` branch is useful for patterns where many tools share
-  a dispatcher (e.g. GraphQL ops routed to tool-graphqlOp).
+  Route an MCP tool call. Tools are grouped by entity (e.g. `workbooks`,
+  `users`, `projects`); each tool takes an `action` argument that maps to a
+  concrete operationId via the ENTITY_OPS registry in Custom Code. Falls
+  back to direct operationName dispatch (backward compat) if the toolName
+  isn't an entity but matches a real op.
 private: true
 arguments:
   toolName:
@@ -12,33 +13,63 @@ arguments:
   toolArgs:
     type: object
 do:
+  - comment: Try to resolve toolName as an entity + action
+  - Custom Code.run:
+      function: resolveToolAction
+      parameters:
+        toolName: '{{toolName}}'
+        action: '{{toolArgs.arguments.action}}'
+      output: resolved
   - conditions:
-      # <<ADAPT>>: one branch per tool. Example:
-      # '{{toolName}} == "createCustomer"':
-      #   - tool-createCustomer:
-      #       body: '{{toolArgs}}'
-      #       output: result
-      '{{toolName}} == "TOOL_NAME_1"':
-        - tool-TOOL_NAME_1:
-            body: '{{toolArgs}}'
-            output: result
-      default:
-        # <<OPTIONAL>>: if your service exposes many ops through a single
-        # generic dispatcher (e.g. GraphQL), route them here:
-        # - tool-graphqlOp:
-        #     toolName: '{{toolName}}'
-        #     body: '{{toolArgs}}'
-        #     output: result
+      '!{{resolved.error}}':
         - set:
-            name: result
-            value: null
+            name: operationName
+            value: '{{resolved.operationName}}'
+      default:
+        - comment: Backward-compat — toolName might already be a direct operationId
+        - Custom Code.run:
+            function: getOperation
+            parameters:
+              operationName: '{{toolName}}'
+            output: directOp
+        - conditions:
+            '{{directOp.error}}':
+              - set:
+                  name: result
+                  value:
+                    content:
+                      - type: text
+                        text: '{{resolved.error}}'
+                    isError: true
+              - break: {}
+        - set:
+            name: operationName
+            value: '{{toolName}}'
+  - comment: Look up op metadata to decide REST vs GraphQL dispatcher
+  - Custom Code.run:
+      function: getOperation
+      parameters:
+        operationName: '{{operationName}}'
+      output: opMeta
   - conditions:
-      '!{{result}}':
+      '{{opMeta.error}}':
         - set:
             name: result
             value:
               content:
                 - type: text
-                  text: 'Unknown tool: {{toolName}}'
+                  text: 'Internal error — resolved operation `{{operationName}}` not found in registry.'
               isError: true
+        - break: {}
+  - conditions:
+      '{{opMeta.graphql}}':
+        - tool-graphqlOp:
+            toolName: '{{operationName}}'
+            body: '{{toolArgs}}'
+            output: result
+      default:
+        - tool-restOp:
+            toolName: '{{operationName}}'
+            body: '{{toolArgs}}'
+            output: result
 output: '{{result}}'

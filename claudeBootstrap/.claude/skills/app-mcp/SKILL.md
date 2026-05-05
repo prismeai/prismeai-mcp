@@ -24,7 +24,7 @@ The final workspace must look like this, anchored at `prismeai-workspaces/worksp
 ```
 <slug>/
 ├── .import.yml
-├── index.yml                   # config + secrets + mcpTools list
+├── index.yml                   # config + secrets + entity-grouped mcpTools
 ├── security.yml                # standard ruleset (copy verbatim)
 ├── swagger.yml                 # full OpenAPI 3.0 — must be generated first
 ├── automations/
@@ -32,26 +32,31 @@ The final workspace must look like this, anchored at `prismeai-workspaces/worksp
 │   ├── executeApiCall.yml      # helper
 │   ├── handleApiError.yml      # helper
 │   ├── formatToolOutput.yml    # helper
-│   ├── routeToolCall.yml       # helper — dispatches toolName → tool-*
+│   ├── routeToolCall.yml       # helper — resolves (toolName=entity, action) → operationName, dispatches
 │   ├── mcp.yml                 # endpoint — JSON-RPC 2.0
 │   ├── onInstall.yml           # event-driven — calls generateKey
 │   ├── generateKey.yml         # endpoint — central-only
 │   ├── getConfig.yml           # endpoint — tenant-only
-│   ├── triggerSync.yml         # event-driven + endpoint — keeps MCP Core's mcpTools in sync
-│   ├── method-<op>.yml         # private — one per tool (API call logic)
-│   ├── tool-<op>.yml           # private — one per tool (MCP wrapper)
-│   └── <op>.yml                # PUBLIC ("instructions") — one per tool
+│   ├── method-restOp.yml       # generic REST/Pulse/VizQL dispatcher (uses CC registry)
+│   ├── method-graphqlOp.yml    # generic GraphQL dispatcher
+│   ├── tool-restOp.yml         # MCP wrapper around method-restOp
+│   ├── tool-graphqlOp.yml      # MCP wrapper around method-graphqlOp
+│   └── <op>.yml                # PUBLIC App-mode — one per op (kept for tenant ergonomics)
 ├── imports/
-│   ├── Custom Code.yml         # JS helpers (HMAC, buildQueryString, pruneEmpty, [getGraphqlQuery])
-│   └── MCP Core.yml            # mirrors config.value.mcpTools
+│   ├── Custom Code.yml         # JS helpers + ENTITY_OPS + getOperation + buildRequest + resolveToolAction
+│   └── MCP Core.yml            # entity-grouped mcpTools (mirror of index.yml)
 └── pages/
     └── _doc.yml                # optional doc page (TabsView with "As App" / "As MCP")
 ```
 
 **Naming rules**:
 - `<slug>` = folder name = workspace slug = lowercased-with-dashes (e.g. `example-service`, `my-saas`)
-- Private helpers (`method-*`, `tool-*`, `buildAppAuth`, `executeApiCall`, `handleApiError`, `formatToolOutput`, `routeToolCall`) all have `private: true`
-- Public App-mode automations (the "instructions") use the bare operation name (e.g. `getTests.yml`, `createTest.yml`) and are **NOT** `private:`
+- **Everything except the public App-mode "instructions" must be `private: true`.** That includes the helpers (`buildAppAuth`, `executeApiCall`, `handleApiError`, `formatToolOutput`, `routeToolCall`), the dispatchers (`tool-restOp`, `tool-graphqlOp`, `method-restOp`, `method-graphqlOp`), and the entire `00_MCP/*` set (`mcp`, `generateKey`, `getConfig`, `onInstall`). `private: true` only hides automations from the App's instructions list — it does NOT block `endpoint: true` HTTP webhook access nor event-triggered execution. So the webhook automations (`mcp`, `generateKey`, `getConfig`) stay reachable, and `onInstall` still fires on `workspaces.apps.installed`/`apps.configured`.
+- Public App-mode automations (the "instructions") use the bare operation name (e.g. `getTests.yml`, `createTest.yml`) and are **NOT** `private:`. They stay 1-per-op so tenants can keep calling `<Service>.<operation>:` from their automations.
+
+**No more 1-per-op `tool-*` / `method-*` files.** All ops are dispatched through the 4 generic dispatchers above. The `(toolName, action) → operationName` map lives in Custom Code (`ENTITY_OPS`).
+
+**No `triggerSync.yml`.** `MCP Core.syncMcpTools` scans `tool-*.yml` automations on disk; with the dispatcher pattern only 2 such files exist, so it would overwrite the real mcpTools array with 2 entries. The mcpTools array is set once via `imports/MCP Core.yml` at install time and that's it. (See memory entry `feedback_mcp_core_dispatcher_incompatible.md`.)
 
 ---
 
@@ -132,7 +137,7 @@ Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
    - `config.value` — NEVER add `mcpApiKey` (see mcp-auto-install.md §"Don't put auto-generated config in config.value")
    - `config.value.mcpTools` — one entry per operation, with `inputSchema` pulled from swagger + always adding an `outputFormat` enum property
    - `secrets.schema` — one field per credential + `appSecret` (HMAC secret)
-5. Copy `templates/helpers/*.yml` into `automations/` and substitute placeholders. **This includes `triggerSync.yml`** — mandatory for every app+mcp workspace (see "MCP tool discovery" below).
+5. Copy `templates/helpers/*.yml` into `automations/` and substitute placeholders. **Do NOT copy `triggerSync.yml`** even if it exists in the templates folder — it's incompatible with the dispatcher pattern (see "MCP tool discovery" + Common Traps).
 6. **Adapt `buildAppAuth`** for the auth model (see the `<<ADAPT>>` comment inside):
    - Static token: keep simple, just read `config.token`
    - OAuth2: add a `fetch` to exchange credentials + session cache (look at an existing OAuth2 workspace's `buildAppAuth.yml` as reference)
@@ -215,34 +220,101 @@ Both of these live in `templates/oauth/fragments/index-config-schema.yml` + `tem
 
 **Deliverables of this phase:** 12 new `automations/*.yml`, 1 new `pages/*.yml`, `mcp.yml` + `getConfig.yml` replaced, `Custom Code.yml` + `index.yml` + `MCP Core.yml` extended, `onInstall.yml` adapted (base template already populates `oauthCallbackUrl`).
 
-### Phase 5 — Generate tool, method and public automations
+### Phase 5 — Generate entity-grouped MCP tools + per-op public automations
 
-**Goal**: three automations per operation — `method-<op>`, `tool-<op>`, `<op>` (public).
+**Goal**: 1 MCP tool per **entity** (with an `action` enum), N public App-mode automations (1 per op for tenant ergonomics), 4 generic dispatchers handling everything.
 
-For each entry in `config.value.mcpTools`:
+**Why entity grouping is the default** (not 1-tool-per-op):
+- **OpenAI `gpt-5-chat-latest` caps tool arrays at 128.** Any mid-size API (40+ ops) blows past this; large APIs (Tableau: 131 ops, Jira: 200+) are blocked entirely. Anthropic Claude is more permissive but still benefits.
+- **LLM disambiguation is sharper** with 15-25 entity tools than with 100+ specific tools.
+- **No code-size penalty** — all ops still routable through one generic dispatcher backed by the JS registry.
+- **App-mode UX preserved** — tenants still call `<Service>.listProjects:` directly; the per-op public files are kept verbatim.
 
-1. **`method-<op>.yml`** (private) — core API call logic. Arguments = flat operation params + `accessToken` + `baseUrl`. Calls `executeApiCall` (REST) or `executeGraphqlOperation` (GraphQL). Returns `{ operation, itemType, structuredData, ... }` ready for `formatToolOutput`.
-2. **`tool-<op>.yml`** (private) — MCP wrapper. Arguments = `{ body: { arguments, accessToken, baseUrl } }`. Delegates to `method-<op>`, then to `formatToolOutput`.
-3. **`<op>.yml`** (public, "instruction") — the App-mode interface. Arguments = flat operation params (mirror the `inputSchema` properties minus `outputFormat`). Calls `buildAppAuth` (reads `config.*` in tenant context), then `method-<op>`.
+**Architecture (visualised)**:
 
-**Dispatcher optimization for large APIs**: if the service has 40+ GraphQL operations, don't generate 40 `tool-*` files. Instead:
-- Create **one** `tool-graphqlOp.yml` (generic dispatcher that reads `toolName`, looks up the GraphQL query, calls `executeGraphqlOperation`, formats via `formatToolOutput`)
-- Add a `default:` branch in `routeToolCall.yml` that routes any unmatched toolName to `tool-graphqlOp`
-- Public automations stay 1-per-op (they're what tenants see as `<Service>.<operation>`)
+```
+MCP client                              Workspace
+─────────                               ─────────
+tools/call("workbooks", {action:        ┌─ mcp.yml (extracts toolName + arguments)
+   "list", pageSize: 5})         ───▶  │
+                                        ├─ routeToolCall.yml
+                                        │    └─ Custom Code.resolveToolAction("workbooks","list")
+                                        │       → operationName = "listWorkbooks"
+                                        │
+                                        ├─ Custom Code.getOperation("listWorkbooks")
+                                        │    → { method: GET, path, ..., graphql: false }
+                                        │
+                                        └─ tool-restOp.yml  (or tool-graphqlOp.yml)
+                                            └─ method-restOp.yml
+                                                ├─ Custom Code.buildTableauRequest(...)
+                                                └─ executeApiCall.yml → HTTPS to API
+```
+
+**Step-by-step**:
+
+1. **Define `ENTITY_OPS`** — a Python dict mapping entity → action → operationName. Pick entity names from the API's resource taxonomy (`workbooks`, `users`, `projects`, etc.). Common action vocabulary: `list`, `get`, `create`, `update`, `delete`. Resource-specific actions are fine: `download`, `publish`, `run`, `addPermissions`, `getRecentlyViewed`, etc.
+
+   Example:
+   ```python
+   ENTITY_OPS = {
+     'projects': {'list':'listProjects','create':'createProject','update':'updateProject','delete':'deleteProject'},
+     'workbooks': {'list':'listWorkbooks','get':'getWorkbook','download':'downloadWorkbook',
+                   'update':'updateWorkbook','delete':'deleteWorkbook','publish':'publishWorkbook',
+                   'queryPermissions':'queryWorkbookPermissions', ...},
+     'metadata':  {'query':'metadataQuery','search':'searchAssets','workbookLineage':'getWorkbookLineage', ...},
+     ...
+   }
+   ```
+
+2. **Generate one `mcpTools` entry per entity**:
+   - `name`: the entity (e.g. `workbooks`)
+   - `description`: 1-line entity prefix + `Available actions:` block with one bullet per action: `**list** (listProjects): summary — params: filter, pageSize, ...`. Verbose but the LLM uses it to pick the right action.
+   - `inputSchema`:
+     - `required: [action]`
+     - `properties`: `action` (enum of all actions) + the **union** of all path/query/body params from every underlying op + `outputFormat`
+     - For path params, expose camelCase versions (`siteId`, not `site-id`) — the dispatcher restores hyphens for path substitution.
+   - Apply the broader-default-than-intent enrichment heuristic at the **action description level**, not the tool description level (the action bullet says "params: filter, scope=assigned_to_me — pass `scope` for *your* X").
+
+3. **Mirror into `imports/MCP Core.yml`** — same mcpTools array. MCP Core reads this at install time and serves it on `tools/list`.
+
+4. **Add `resolveToolAction(toolName, action)`** to `imports/Custom Code.yml`:
+   ```js
+   const ENTITY_OPS = {/* …big literal… */};
+   const ent = ENTITY_OPS[toolName];
+   if (!ent) return { error: 'Unknown entity: ' + toolName };
+   if (!action) return { error: 'Missing required argument `action` for ' + toolName + '. Available: ' + Object.keys(ent).sort().join(', ') };
+   const op = ent[action];
+   if (!op) return { error: 'Unknown action `' + action + '` for ' + toolName + '. Available: ' + Object.keys(ent).sort().join(', ') };
+   return { operationName: op };
+   ```
+
+5. **Update `routeToolCall.yml`** to:
+   - Try `resolveToolAction(toolName, action)` first → entity dispatch
+   - Fall back to direct `getOperation(toolName)` for backward-compat (so a direct call to `metadataQuery` still works)
+   - Read `opMeta.graphql` to choose `tool-graphqlOp` vs `tool-restOp`
+   - On unresolved entity AND unknown direct op, return the resolveToolAction error message — it lists valid actions, which is auto-recovery information for the LLM.
+
+6. **Generate `<op>.yml` public files** as before — 1 per op for App-mode ergonomics. Each forwards to `method-restOp` or `method-graphqlOp` with the op's name and the user's args. These are unchanged from the legacy pattern.
+
+7. **Do NOT generate `tool-<op>.yml` or `method-<op>.yml` per op.** Only the 4 generic dispatchers exist. They use `getOperation(operationName)` to look up method/path/params from the Custom Code registry built from the swagger.
+
+8. **Do NOT create `triggerSync.yml`.** Incompatible with the dispatcher pattern (see Common Traps + memory entry `feedback_mcp_core_dispatcher_incompatible.md`).
 
 **Generation tips**:
-- Use a Python script reading `index.yml` to scaffold all three files in one pass — look at any existing reference workspace for a concrete example. Do it programmatically; don't write 60 files by hand.
+- One Python script reads `swagger.yml`, builds `ENTITY_OPS`, generates `index.yml mcpTools` + `imports/MCP Core.yml` + `imports/Custom Code.yml` updates + N public automations. See `templates/_generate_entity_tools.py.tmpl` for the canonical shape.
 - Always run `Custom Code.run: pruneEmpty` on request bodies / GraphQL variables to strip nulls.
-- For operations with **no arguments** (e.g. `getTestStatuses`), omit the `arguments:` key entirely — do NOT write `arguments: {}` or `arguments:\n  # comment` (invalid schema).
+- For ops with **no arguments**, omit the `arguments:` key entirely (do NOT write `arguments: {}`).
+- Keep the `outputFormat` enum (`structured | verbose | both`) on every entity tool.
+- Auth-internal ops (`signIn`, `signOut`, refresh endpoints) **must NOT** appear in `ENTITY_OPS` — they're called by `buildAppAuth` and should never be exposed.
 
-**Tool description enrichment for list/search ops** — the swagger `summary` is usually too thin for a good LLM tool description. When the API's default behavior is BROADER than a common user intent, enrich the mcpTools description explicitly. Common case: a `list*` or `search*` endpoint that returns "all accessible" things by default, when the user usually means "mine":
-- **GitLab `listProjects`**: `/projects` returns all accessible including public → description must say "**When the user says 'my repos / mes repos', pass `membership: true` or `owned: true`**".
-- **GitLab `listIssues`**: `/issues` returns all → surface `scope=assigned_to_me` / `scope=created_by_me`.
-- **GitHub repos**: `/repositories` is a global feed → prefer `/user/repos` with `affiliation=owner,collaborator`.
-- **Jira `/search`**: unfiltered JQL returns everything the user can see → surface `jql=assignee=currentUser()` for "my issues".
-- **Slack `conversations.list`**: excludes private channels by default → surface `types=public_channel,private_channel`.
+**Sanity checks before push**:
+- `len(ENTITY_OPS)` ≤ 30 (aim for clarity)
+- Every op in `swagger.yml` (minus auth-internal) appears in exactly one entity bucket
+- No two entities share an action that resolves to the same operationName
+- The `outputFormat` enum is present on every entity tool's inputSchema
+- No `type: array` without `items:` in any entity tool's inputSchema
 
-Auto-detection heuristic during Phase 5: for any tool whose name matches `^(list|search)` and whose `inputSchema.properties` contains any of `membership`, `owned`, `starred`, `mine`, `affiliation`, `assigned_to_me`, `created_by_me`, `scope`, append one bolded sentence to the description: **"When the user asks for *their* X (my X, mes X), pass `<param>: true` / `scope=...`."** It costs nothing, and without it the LLM picks generic defaults and returns confusing results to the user.
+**Cache key versioning**: when you change `buildAppAuth`'s credential schema (e.g. PAT → JWT, or add a new scope), bump the `session.<service>` cache prefix to `session.<service>V2`. Otherwise tenants with a cached token (signed with the old credentials/scopes) keep using it until TTL expires (~3h), and your fix appears to "not work" until then.
 
 ### Phase 6 — Validate + push + smoke-check
 
@@ -279,8 +351,8 @@ Auto-detection heuristic during Phase 5: for any tool whose name matches `^(list
 5. **Post-push smoke check — do not skip**, it catches deploy-time failures that validation can't:
    - **Custom Code reload**: right after push, search events for `Custom Code.error` on `fetchAPI` / `onParentAppPublish` — if any, the CC runtime didn't reload and functions will be "not found" at runtime. Recovery: `update_app_instance_config` with the **complete** functions map (the tool replaces, doesn't merge — see memory). Then re-push.
    - **generateKey round-trip**: `execute_automation generateKey` with a dummy `{body: {workspaceId: "test", getConfigUrl: "https://x.y/z"}}` and confirm the response is a proper signed key `^[A-Za-z0-9_-]+\.[a-f0-9]{64}$` — not an error object. Catches `#`-in-code-block-style Custom Code issues.
-   - **tools/list**: simulate a JSON-RPC `tools/list` via `execute_automation mcp` with `{body: {jsonrpc: "2.0", id: 1, method: "tools/list", params: {}}}`. Confirm `result.tools` is an array and that each tool's `inputSchema.properties` contains the declared properties (not just `{}`). MCP Core's internal formatter has historically stripped `inputSchema` properties — verify end-to-end what the LLM will actually see.
-   - **triggerSync**: `execute_automation triggerSync {}` should return `{synced: true, toolCount: <N>}` matching `config.value.mcpTools.length`.
+   - **tools/list**: simulate a JSON-RPC `tools/list` via `execute_automation mcp` with `{body: {jsonrpc: "2.0", id: 1, method: "tools/list", params: {}}}`. Confirm `result.tools` is an array of **entity-grouped** tools (length should match `len(ENTITY_OPS)`, not the raw op count) and that each tool's `inputSchema.properties` contains an `action` enum with the declared actions (not just `{}`). MCP Core's internal formatter has historically stripped `inputSchema` properties — verify end-to-end what the LLM will actually see.
+   - **resolveToolAction round-trip**: pick one entity + one action and `execute_automation routeToolCall` with `{toolName: "<entity>", toolArgs: {arguments: {action: "<action>"}}}`. Confirm it dispatches to the right operationName and returns a non-error result. Catches a malformed `ENTITY_OPS` registry.
    - **Hallucinated action-verb sub-paths**: grep methods for suspect endpoint suffixes and flag each for manual verification against the official API docs:
      ```bash
      grep -nE "path: '[^']*/(close|reopen|approve|unapprove|merge|cancel|retry|revoke|publish|archive|lock)'" automations/method-*.yml
@@ -294,37 +366,19 @@ Auto-detection heuristic during Phase 5: for any tool whose name matches `^(list
 
 ---
 
-## MCP tool discovery — keep `MCP Core` in sync
+## MCP tool discovery — `imports/MCP Core.yml` is the source of truth
 
-The `/mcp` endpoint does **not** read `config.value.mcpTools` from `index.yml` directly. It reads from the **MCP Core app instance's config**, which is populated by `MCP Core.syncMcpTools`. That sync must be triggered whenever tools are added, renamed, or removed — otherwise `tools/list` will still return the old set and clients will call tools that no longer exist (or miss newly added ones).
+The `/mcp` endpoint does **not** read `config.value.mcpTools` from `index.yml` directly at runtime. It reads from the **MCP Core app instance's config**, which is populated **at install time** when Prisme.ai imports `imports/MCP Core.yml`. That's why we mirror the entity-grouped mcpTools array into both `index.yml` (for documentation/readability) and `imports/MCP Core.yml` (for runtime).
 
-**Solution — ship the `triggerSync` automation in every app+mcp workspace**. It runs on DSUL change events and can also be fired manually via its endpoint.
+**Do NOT use `MCP Core.syncMcpTools` / a `triggerSync` automation.** The sync routine scans `tool-*.yml` automations on disk; with the dispatcher pattern, only 2 such files exist (`tool-restOp`, `tool-graphqlOp`), so calling sync would **overwrite** the real entity-grouped mcpTools array with two dispatcher entries. This is a one-way data loss — you'd have to re-push the workspace to recover.
 
-```yaml
-slug: triggerSync
-name: 00_MCP/triggerSync
-description: Trigger MCP tool discovery via MCP Core on DSUL changes or manually
-when:
-  endpoint: true
-  events:
-    - workspaces.imported
-    - workspaces.automations.created
-    - workspaces.automations.updated
-    - workspaces.automations.deleted
-do:
-  - MCP Core.syncMcpTools:
-      output: syncResult
-output: "{{syncResult}}"
-```
+**When you change the mcpTools list** (add/rename/drop ops, change descriptions), the workflow is:
+1. Edit `index.yml` mcpTools (or regenerate via the entity-grouping script)
+2. Mirror into `imports/MCP Core.yml`
+3. `push_workspace` — Prisme.ai re-imports `imports/MCP Core.yml` and replaces the MCP Core app instance's config
+4. Smoke-test `tools/list` to confirm the new array
 
-**When you must force a sync manually** (e.g. you edited `config.value.mcpTools` in `index.yml` without touching any automation, so the DSUL events above didn't fire):
-1. Curl the `triggerSync` endpoint on the central workspace, **or**
-2. Execute it via `execute_automation` with an empty payload, **or**
-3. As a last resort, briefly edit any automation (no-op save) to emit `workspaces.automations.updated`.
-
-**Checkpoint in Phase 6**: after `push_workspace`, either rely on the import event (`workspaces.imported`) firing `triggerSync` automatically, or call `triggerSync` once manually and inspect its output for a non-empty `tools` array. Don't assume sync happened — verify.
-
-**Do not** use the older "create a temporary automation that calls `syncMcpTools`, then delete it" workaround. `triggerSync` is the canonical mechanism going forward; it's idempotent and already listens to every relevant event.
+There's no event-driven mechanism in the dispatcher pattern. Push = sync. That's the contract.
 
 ---
 
@@ -344,6 +398,9 @@ All of these were already hit on existing workspaces — don't rediscover them:
 - **`json("")` crashes on HTTP 204 No Content** — DELETE endpoints (and some action endpoints) on virtually all REST APIs respond HTTP 204 with an empty body. `executeApiCall` propagates `response.body` (empty string) into `apiResult.data`, `method-*` copies it to `structuredData`, and `formatToolOutput` calls `{% json({{structuredData}}) %}` which fails with `InvalidExpressionSyntax: Invalid JSON syntax (json: "")`. The resulting HTTP 500 masks a successful API call — every DELETE looks broken even though the backend accepted it. The fix in `templates/helpers/formatToolOutput.yml` guards the `json()` call on `{{structuredData}}` truthy and falls back to a minimal `{operation, itemType, identifier, empty: true}` payload. Same pattern needed for any downstream helper that calls `json()` on data that might be empty — never call `json("")`. Same concern for `json(<plainString>)` in `handleApiError` when an API returns `{message: "401 Unauthorized"}` as a plain string — use bare `'{{value}}'` substitution, not `'{% json({{value}}) %}'`.
 - **Swagger sub-agent hallucinates action-verb sub-resources** — when asked to generate a closeIssue/reopenIssue/approveX/mergeX/cancelX/retryX/revokeX/publishX operation, an LLM often invents paths like `/issues/{iid}/close` or `/merge_requests/{iid}/approve` because they "look natural." These sub-paths often don't exist — the real API typically uses a state-event pattern (`PUT /issues/{iid}` with `{state_event: close}` for GitLab) or a top-level action (`POST /resource/X/actions` for others). Symptom: the tool returns HTTP 404 on a happy-path call. Detection: grep methods for path segments that are action verbs (`/close`, `/reopen`, `/approve`, `/unapprove`, `/merge`, `/cancel`, `/retry`, `/revoke`, `/publish`, `/archive`, `/lock`) and validate each against the official API reference before Phase 6 ships. Always include this grep as a Phase 6 smoke-check step.
 - **Swagger path-param names must match the real API exactly** — LLM sub-agents often simplify distinct path params to shared short names (GitLab's `merge_request_iid` / `issue_iid` / `note_id` collapsing to `iid`/`note_id` inconsistently). This works internally (tool → method forward the same name), but downstream LLM consumers typing the real API name into tool calls get 404 because the arg doesn't bind. Keep the exact names from the official API reference — `merge_request_iid`, `issue_iid`, `note_id`, `pipeline_id`, `job_id`, `hook_id`, etc. — in both the swagger path and the generated tool arguments. Phase 5 script should preserve swagger-sourced names verbatim; don't re-map.
+- **OpenAI / Anthropic 128-tool hard cap** — `gpt-5-chat-latest` (and most production OpenAI models) reject `tools` arrays longer than 128 with `Invalid 'tools': array too long`. Anthropic Claude is more permissive but still loses precision past ~50 tools. Any API with >40 ops MUST use the entity-grouping pattern (Phase 5 default) — DO NOT generate 1 mcpTool per op. Symptom if missed: `tools/list` works in Prisme.ai but the downstream LLM call fails. Reference workspace: `tableau` (131 ops → 20 entity tools). Detection during Phase 5: count `len(swagger.paths)` — if >40, skip directly to entity grouping.
+- **`MCP Core.syncMcpTools` overwrites the entity-grouped mcpTools array** — the sync routine scans `tool-*.yml` files on disk and rebuilds mcpTools from them. With the dispatcher pattern, only `tool-restOp.yml` and `tool-graphqlOp.yml` exist, so a single sync call replaces your 20 entity tools with 2 dispatcher tools — silent data loss recoverable only by re-pushing. **Never create `triggerSync.yml`. Never call `MCP Core.syncMcpTools` from any automation.** Push = sync. The mcpTools array is set once at install time via `imports/MCP Core.yml` and updated by re-importing the same file. (See memory entry `feedback_mcp_core_dispatcher_incompatible.md`.)
+- **Cache key must be bumped when credentials/scopes change** — `buildAppAuth` caches the access token in `session.<service>[cacheKey]` for 1-3h. If you migrate credentials (PAT → JWT, OAuth2 → Connected App) or add a scope, sessions with a cached token signed under the OLD shape keep using it until TTL expires — your fix appears to "not work". Bump the cache prefix `session.<service>` → `session.<service>V2` when the credential schema or scopes change. Same applies inside Custom Code if you cache anything keyed on credentials.
 - **JS comments in `code: |` blocks of Custom Code must use `//`, never `#`** — the Custom Code sandbox loads all `config.functions[].code` as a single JS module. A single `#` (from copy-pasted Python-style comments or untransformed template docs) is a JS syntax error that breaks the ENTIRE module, including unrelated functions like `generateSignedKey`. Symptom: `onInstall` completes but writes an error object as `mcpApiKey` instead of a signed key. The OAuth template fragment (`templates/oauth/imports/Custom-Code-oauth-fragment.yml`) historically had `#` comments inside `buildAuthorizeUrl.code: |` — verify after merging. Defense: `generateKey` should check `signedKey.error` and return HTTP 500 when Custom Code fails, and `onInstall` should validate `keyResponse.body.mcpApiKey` against `^[A-Za-z0-9_-]+\.[a-f0-9]{64}$` before merging and for its "already set" guard.
 
 ### OAuth-specific traps (only relevant if Phase 4.5 was run)
@@ -377,6 +434,7 @@ When in doubt, list `prismeai-workspaces/workspaces/` and read the closest-match
 | OAuth2 with token refresh (service-to-service) | Session-cached refresh flow |
 | **OAuth2 authorization-code (user-delegated)** | **`gitlab-debug-oauth`** — the canonical reference for Phase 4.5. Read its `README.md` for the full flow + gotchas. |
 | Basic auth, rich REST | `Basic base64(email:token)` header |
+| **Large API (>40 ops), entity-grouped MCP tools, JWT Connected App** | **`tableau`** — the canonical reference for the entity-grouping pattern (Phase 5 default). 131 ops compressed to 20 entity tools via `ENTITY_OPS` + `resolveToolAction` + `routeToolCall` + 4 generic dispatchers. Custom Code header `X-Tableau-Auth`, JWT signed in Custom Code with HS256. |
 
 Run `Read` on the matching workspace before starting phase 4, especially on the helpers and `imports/Custom Code.yml`. The skill templates here are deliberately minimal — the existing workspaces contain all the nuanced cases.
 

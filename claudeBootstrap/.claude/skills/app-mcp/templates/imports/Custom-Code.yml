@@ -78,6 +78,48 @@ config:
         }
         return out;
 
+    # ===================== REQUIRED: Operation + entity registry =====================
+    # The dispatcher pattern (entity grouping) needs three things to route a
+    # tool call (toolName, action) to a real HTTP request:
+    #   1. ENTITY_OPS — map entity → action → operationName
+    #   2. OPERATIONS — map operationName → { method, path, parameters, body, graphql }
+    #   3. resolveToolAction — entry point used by routeToolCall.yml
+    #   4. getOperation — entry point used by routeToolCall.yml + tool-restOp.yml
+    # Both registries are generated from `swagger.yml` by the Phase 5 script.
+
+    resolveToolAction:
+      parameters:
+        toolName:
+          type: string
+        action:
+          type: string
+      code: |
+        // <<GENERATED>> by Phase 5 — keep ENTITY_OPS in sync with index.yml mcpTools
+        const ENTITY_OPS = {
+          // 'workbooks': { 'list': 'listWorkbooks', 'get': 'getWorkbook', ... },
+          // 'projects': { 'list': 'listProjects', 'create': 'createProject', ... },
+        };
+        const ent = ENTITY_OPS[toolName];
+        if (!ent) return { error: 'Unknown entity: ' + toolName + '. Available: ' + Object.keys(ENTITY_OPS).sort().join(', ') };
+        if (!action) return { error: 'Missing required argument `action` for ' + toolName + '. Available actions: ' + Object.keys(ent).sort().join(', ') };
+        const op = ent[action];
+        if (!op) return { error: 'Unknown action `' + action + '` for entity `' + toolName + '`. Available actions: ' + Object.keys(ent).sort().join(', ') };
+        return { operationName: op };
+
+    getOperation:
+      parameters:
+        operationName:
+          type: string
+      code: |
+        // <<GENERATED>> by Phase 5 — built from swagger.yml; keep in sync.
+        const OPERATIONS = {
+          // 'listWorkbooks': { method: 'GET', path: '/sites/{siteId}/workbooks', graphql: false, parameters: [...] },
+          // 'metadataQuery': { method: 'POST', path: '/api/metadata/graphql', graphql: true },
+        };
+        const op = OPERATIONS[operationName];
+        if (!op) return { error: 'Unknown operation: ' + operationName };
+        return op;
+
     # ===================== OPTIONAL: GraphQL registry =====================
     # If the service exposes a GraphQL API, keep this function and list all
     # operations + their queries here. Otherwise delete it.

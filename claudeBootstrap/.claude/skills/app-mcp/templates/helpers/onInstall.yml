@@ -5,6 +5,7 @@ description: >-
   signed MCP API key from the central <<SERVICE_NAME>> workspace. The key
   encodes the tenant workspace ID and the getConfig URL, and is stored in the
   tenant's config so the central endpoint can verify future calls.
+private: true
 when:
   events:
     - workspaces.apps.installed

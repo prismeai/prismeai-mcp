@@ -4,6 +4,7 @@ description: >-
   Webhook called by tenant app instances to generate a signed MCP API key.
   Only the central <<SERVICE_NAME>> workspace (<<WORKSPACE_ID>>) has the
   appSecret, so key generation must happen here.
+private: true
 when:
   endpoint: true
 do:

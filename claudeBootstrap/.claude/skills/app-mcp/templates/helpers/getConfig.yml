@@ -4,6 +4,7 @@ description: >-
   Webhook run in the tenant workspace's app instance context. Returns the
   tenant's <<SERVICE_NAME>> credentials (token + base URL) to the central MCP
   endpoint on each tools/call.
+private: true
 when:
   endpoint: true
 do:

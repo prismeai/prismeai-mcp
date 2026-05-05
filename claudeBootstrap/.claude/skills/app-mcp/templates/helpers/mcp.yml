@@ -4,6 +4,7 @@ description: >-
   Central MCP JSON-RPC 2.0 endpoint for <<SERVICE_NAME>>. For tools/call, the
   mcp-api-key header contains an HMAC-signed token that encodes the workspace
   ID and the getConfig URL. No separate workspace-id header needed.
+private: true
 when:
   endpoint: true
 do:
