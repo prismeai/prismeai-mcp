@@ -24,10 +24,14 @@ generateState:
 
 filterOAuthTools:
   parameters:
+    # IMPORTANT: never use `type: array` in Custom Code parameters. The CC loader
+    # rejects the whole module — every function in this file (including unrelated
+    # ones like generateSignedKey) starts returning "Function not found" at runtime.
+    # Use `type: object`; JS code can iterate it as an array via Array.isArray + .filter.
     tools:
-      type: array
+      type: object
     remove:
-      type: array
+      type: object
   code: |
     // Used by mcp.yml on tools/list to filter connect/disconnect based on
     // state. `remove` lists which tool names to hide:

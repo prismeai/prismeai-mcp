@@ -345,6 +345,16 @@ tools/call("workbooks", {action:        ┌─ mcp.yml (extracts toolName + argu
                if cur_indent <= base_indent and stripped: in_code = False; continue
                if line.lstrip().startswith('#'):
                    print(f"JS-invalid `#` comment at Custom Code.yml:{i}")
+   # 3. No `type: array` in any Custom Code function parameters (use `type: object`).
+   #    A single `type: array` rejects the whole CC module — every function in
+   #    imports/Custom Code.yml starts returning "Function not found" at runtime.
+   import re
+   with open('imports/Custom Code.yml') as f:
+       cc = yaml.safe_load(f)
+   for fname, fdef in (cc.get('config', {}).get('functions') or {}).items():
+       for pname, pspec in (fdef.get('parameters') or {}).items():
+           if isinstance(pspec, dict) and pspec.get('type') == 'array':
+               print(f"INVALID type:array in Custom Code function {fname}.{pname} — use type:object")
    ```
 3. Human review: list `method-*`, `tool-*`, `<op>` counts to the user. Confirm before pushing.
 4. `push_workspace` to `_<WORKSPACE_ID>` on `prod` with a short message (`initial`, `add-tools`, etc., max 15 chars, alphanumeric + `-_`).
