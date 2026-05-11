@@ -43,6 +43,12 @@ All tools are prefixed with `mcp__prisme-ai-builder__` when used in Claude.
 | `get_prisme_documentation` | Get Prisme.ai documentation by section |
 | `lint_doc` | Get automation linting rules |
 
+## Authentication
+
+| Tool | Description |
+|------|-------------|
+| `refresh_auth_token` | Open a browser to the studio and capture the access-token cookie. Updates the JWT in memory and in `~/.claude.json`. Requires `studioUrl` in env config and `npx playwright install chromium`. See [ENVIRONMENTS.md](./ENVIRONMENTS.md#refreshing-jwts-automatically). |
+
 ## AI Knowledge
 
 | Tool | Description |

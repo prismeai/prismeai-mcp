@@ -1671,4 +1671,24 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
       required: ["method"],
     },
   },
+  {
+    name: "refresh_auth_token",
+    description:
+      "Open a browser window pointing to the Prisme.ai studio for the given environment, wait for the user to authenticate (if not already), capture the access-token cookie, and update both the in-memory JWT and ~/.claude.json. Requires `studioUrl` to be set on the environment in PRISME_ENVIRONMENTS. Prerequisite: `npx playwright install chromium`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        environment: {
+          type: "string",
+          description:
+            "Name of the environment to refresh (must exist in PRISME_ENVIRONMENTS with a studioUrl).",
+        },
+        timeoutSeconds: {
+          type: "number",
+          description: "How long to wait for the cookie (default 300, min 30, max 900).",
+        },
+      },
+      required: ["environment"],
+    },
+  },
 ];

@@ -31,6 +31,8 @@ export interface EnvironmentConfig {
   apiKey?: string;
   workspaces?: WorkspaceMapping;
   default?: boolean;
+  // Required only when the `refresh_auth_token` tool is invoked.
+  studioUrl?: string;
 }
 
 export interface EnvironmentsConfig {
@@ -88,6 +90,15 @@ if (PRISME_ENVIRONMENTS) {
       if (config.apiKey !== undefined && typeof config.apiKey !== "string") {
         throw new Error(
           `Environment "${envName}" apiKey must be a string if provided`
+        );
+      }
+
+      if (
+        config.studioUrl !== undefined &&
+        typeof config.studioUrl !== "string"
+      ) {
+        throw new Error(
+          `Environment "${envName}" studioUrl must be a string if provided`
         );
       }
 

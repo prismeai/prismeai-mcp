@@ -6,6 +6,7 @@ export interface EnvironmentConfig {
     apiKey?: string;
     workspaces?: Record<string, string>;
     default?: boolean;
+    studioUrl?: string;
 }
 
 export interface EnvironmentsConfig {
@@ -210,6 +211,35 @@ export class PrismeApiClient {
             return this.environments[environment].apiKey!;
         }
         return this.apiKey;
+    }
+
+    /**
+     * Live-update the in-memory apiKey for one environment.
+     * Subsequent calls to getApiKeyForEnvironment() will pick up the new value.
+     * If the env matches the default baseUrl, also rebuild the default axios client
+     * so calls without an explicit `environment` param use the fresh token.
+     */
+    updateEnvironmentApiKey(environment: string, apiKey: string): void {
+        if (!this.environments[environment]) {
+            throw new Error(
+                `Cannot update apiKey for unknown environment "${environment}"`
+            );
+        }
+        this.environments[environment] = {
+            ...this.environments[environment],
+            apiKey,
+        };
+
+        if (this.environments[environment].apiUrl === this.baseUrl) {
+            this.apiKey = apiKey;
+            this.client = axios.create({
+                baseURL: this.baseUrl,
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+        }
     }
 
     // Helper to get client with potentially different base URL and environment

@@ -1752,6 +1752,79 @@ export async function handleToolCall(
       };
     }
 
+    case "refresh_auth_token": {
+      const { environment, timeoutSeconds } = args as {
+        environment: string;
+        timeoutSeconds?: number;
+      };
+
+      if (!environment) {
+        throw new Error("`environment` is required");
+      }
+      const envCfg = environmentsConfig[environment];
+      if (!envCfg) {
+        const available = Object.keys(environmentsConfig).join(", ") || "(none)";
+        throw new Error(
+          `Unknown environment "${environment}". Available: ${available}`
+        );
+      }
+      if (!envCfg.studioUrl) {
+        throw new Error(
+          `Environment "${environment}" has no \`studioUrl\` configured. ` +
+            `Add it to PRISME_ENVIRONMENTS, e.g.: ` +
+            `{"${environment}":{"apiUrl":"...","apiKey":"...","studioUrl":"https://studio.prisme.ai"}}`
+        );
+      }
+
+      const { captureAccessToken } = await import("../auth/browser.js");
+      const { persistApiKey } = await import("../auth/persist.js");
+
+      const timeoutMs = Math.min(
+        Math.max((timeoutSeconds ?? 300) * 1000, 30_000),
+        900_000
+      );
+      const { token, expiresAt } = await captureAccessToken({
+        studioUrl: envCfg.studioUrl,
+        env: environment,
+        timeoutMs,
+      });
+
+      apiClient.updateEnvironmentApiKey(environment, token);
+      environmentsConfig[environment].apiKey = token;
+
+      let persistedTo: string;
+      try {
+        const persistResult = await persistApiKey(
+          environment,
+          token,
+          process.cwd()
+        );
+        persistedTo =
+          persistResult.scope === "user"
+            ? `${persistResult.path} (user scope)`
+            : `${persistResult.path} (project ${persistResult.projectKey})`;
+      } catch (err) {
+        persistedTo = `NOT PERSISTED — ${err instanceof Error ? err.message : String(err)}`;
+      }
+
+      const summary = {
+        environment,
+        tokenPrefix: `${token.slice(0, 12)}…`,
+        tokenLength: token.length,
+        expiresAt: expiresAt?.toISOString(),
+        persistedTo,
+        inMemoryRefreshed: true,
+      };
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(summary, null, 2),
+          },
+        ],
+      };
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
