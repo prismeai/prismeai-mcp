@@ -74,6 +74,111 @@ get_claude_mcp_config() {
     return 1
 }
 
+guess_studio_url_from_api_url() {
+    local api_url="$1"
+    # Strip trailing /vN, swap api.* -> studio.*, api-* -> studio-*
+    echo "$api_url" \
+        | sed -E 's|/v[0-9]+/?$||' \
+        | sed -E 's|://api\.|://studio.|; s|://api-|://studio-|'
+}
+
+# Prompts the user to choose between pasting a JWT and a browser-based capture.
+# Args:
+#   $1 - environment name
+#   $2 - default studio URL (optional, used as suggestion for browser flow)
+# On success, sets:
+#   CAPTURED_TOKEN       - the JWT
+#   CAPTURED_STUDIO_URL  - the studio URL used for browser flow (empty if pasted)
+# Returns:
+#   0 on success, 1 on failure / user-cancel.
+prompt_jwt() {
+    local env_name="$1"
+    local default_studio_url="${2:-}"
+
+    CAPTURED_TOKEN=""
+    CAPTURED_STUDIO_URL=""
+
+    echo ""
+    echo "How do you want to provide the JWT token for '$env_name'?"
+    echo "  1) Paste a JWT manually"
+    echo "  2) Open a browser and sign in (auto-captures access-token cookie)"
+    echo ""
+    read -p "Select option [1/2]: " JWT_METHOD_CHOICE
+
+    if [[ "$JWT_METHOD_CHOICE" == "2" ]]; then
+        local prompt_label="Studio URL"
+        if [[ -n "$default_studio_url" ]]; then
+            prompt_label="Studio URL [$default_studio_url]"
+        fi
+        echo ""
+        echo "Enter the Prisme.ai studio URL to open in the browser."
+        echo "  Examples: https://studio.sandbox.prisme.ai, https://studio.prisme.ai"
+        read -p "$prompt_label: " STUDIO_URL_INPUT
+        if [[ -z "$STUDIO_URL_INPUT" ]]; then
+            STUDIO_URL_INPUT="$default_studio_url"
+        fi
+        if [[ -z "$STUDIO_URL_INPUT" ]]; then
+            echo "  Error: Studio URL is required for the browser flow"
+            return 1
+        fi
+
+        echo "  Ensuring Chromium is installed (first run may take a minute)..."
+        if ! (cd "$PROJECT_DIR" && npx --yes playwright install chromium >/dev/null 2>&1); then
+            echo "  Warning: 'npx playwright install chromium' failed."
+            echo "  If the browser does not open, run that command manually."
+        fi
+
+        local token_file
+        token_file=$(mktemp)
+        chmod 600 "$token_file"
+
+        echo "  Opening browser — sign in to Prisme.ai to capture the token..."
+        if ! node "$SCRIPT_DIR/capture-token.mjs" \
+                --env "$env_name" \
+                --studio-url "$STUDIO_URL_INPUT" \
+                --output-file "$token_file"; then
+            rm -f "$token_file"
+            echo "  Error: Browser-based capture failed"
+            return 1
+        fi
+
+        if [[ ! -s "$token_file" ]]; then
+            rm -f "$token_file"
+            echo "  Error: No token was captured"
+            return 1
+        fi
+
+        CAPTURED_TOKEN=$(cat "$token_file")
+        rm -f "$token_file"
+        CAPTURED_STUDIO_URL="$STUDIO_URL_INPUT"
+        echo "  Token captured (studioUrl will be stored for future refreshes)"
+        return 0
+    fi
+
+    echo ""
+    echo "Enter your JWT token for '$env_name'"
+    echo "  You can find it in your browser: Inspect > Application > Cookies > access-token"
+    echo "  The token starts with 'ey...'"
+    read -sp "JWT token: " CAPTURED_TOKEN
+    echo ""
+
+    if [[ -z "$CAPTURED_TOKEN" ]]; then
+        echo "  Error: JWT token is required"
+        return 1
+    fi
+
+    if [[ ! "$CAPTURED_TOKEN" =~ ^ey ]]; then
+        echo "  Warning: Token doesn't start with 'ey'. Are you sure this is correct?"
+        read -p "  Continue anyway? [y/n]: " CONTINUE_ANYWAY
+        if [[ "$CONTINUE_ANYWAY" != "y" && "$CONTINUE_ANYWAY" != "Y" ]]; then
+            CAPTURED_TOKEN=""
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
 copy_claude_install_to_codex() {
     local existing_config
     local tmp_config
@@ -344,27 +449,13 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
             continue
         fi
 
-        echo ""
-        # Ask for JWT token
-        echo "Enter your JWT token for this environment"
-        echo "  You can find it in your browser: Inspect > Application > Cookies > access-token"
-        echo "  The token starts with 'ey...'"
-        read -sp "JWT token: " ENV_API_KEY
-        echo ""
-
-        if [[ -z "$ENV_API_KEY" ]]; then
-            echo "  Error: JWT token is required"
+        # Ask for JWT token (manual paste or browser capture)
+        DEFAULT_STUDIO=$(guess_studio_url_from_api_url "$ENV_API_URL")
+        if ! prompt_jwt "$ENV_NAME" "$DEFAULT_STUDIO"; then
             continue
         fi
-
-        # Validate JWT token format
-        if [[ ! "$ENV_API_KEY" =~ ^ey ]]; then
-            echo "  Warning: Token doesn't start with 'ey'. Are you sure this is correct?"
-            read -p "  Continue anyway? [y/n]: " CONTINUE_ANYWAY
-            if [[ "$CONTINUE_ANYWAY" != "y" && "$CONTINUE_ANYWAY" != "Y" ]]; then
-                continue
-            fi
-        fi
+        ENV_API_KEY="$CAPTURED_TOKEN"
+        ENV_STUDIO_URL="$CAPTURED_STUDIO_URL"
 
         # Build environment JSON object (first environment gets default: true)
         if [[ $ENV_COUNT -eq 0 ]]; then
@@ -378,6 +469,12 @@ if [[ "$INSTALL_MODE" == "fresh" ]]; then
                 --arg apiUrl "$ENV_API_URL" \
                 --arg apiKey "$ENV_API_KEY" \
                 '{"apiUrl": $apiUrl, "apiKey": $apiKey}')
+        fi
+
+        # Attach studioUrl when captured via browser, so refresh_auth_token
+        # can be used later without re-running setup.
+        if [[ -n "$ENV_STUDIO_URL" ]]; then
+            ENV_OBJ=$(echo "$ENV_OBJ" | jq --arg studioUrl "$ENV_STUDIO_URL" '.studioUrl = $studioUrl')
         fi
 
         # Add to environments JSON
@@ -525,23 +622,23 @@ elif [[ "$INSTALL_MODE" == "update_key" ]]; then
             exit 1
         fi
 
-        echo ""
-        echo "Enter your JWT token for this environment"
-        echo "  You can find it in your browser: Inspect > Application > Cookies > access-token"
-        echo "  The token starts with 'ey...'"
-        read -sp "JWT token: " NEW_API_KEY
-        echo ""
-
-        if [[ -z "$NEW_API_KEY" ]]; then
+        # Ask for JWT token (manual paste or browser capture)
+        DEFAULT_STUDIO=$(guess_studio_url_from_api_url "$NEW_ENV_URL")
+        if ! prompt_jwt "$NEW_ENV_NAME" "$DEFAULT_STUDIO"; then
             echo "Error: JWT token is required"
             exit 1
         fi
+        NEW_API_KEY="$CAPTURED_TOKEN"
+        NEW_STUDIO_URL="$CAPTURED_STUDIO_URL"
 
         # Build and add new environment
         ENV_OBJ=$(jq -n \
             --arg apiUrl "$NEW_ENV_URL" \
             --arg apiKey "$NEW_API_KEY" \
             '{"apiUrl": $apiUrl, "apiKey": $apiKey}')
+        if [[ -n "$NEW_STUDIO_URL" ]]; then
+            ENV_OBJ=$(echo "$ENV_OBJ" | jq --arg studioUrl "$NEW_STUDIO_URL" '.studioUrl = $studioUrl')
+        fi
         ENVIRONMENTS_JSON=$(echo "$ENVIRONMENTS_JSON" | jq --arg name "$NEW_ENV_NAME" --argjson env "$ENV_OBJ" '.[$name] = $env')
 
         TARGET_ENV="$NEW_ENV_NAME"
@@ -567,20 +664,26 @@ elif [[ "$INSTALL_MODE" == "update_key" ]]; then
 
         TARGET_ENV="${ENV_NAMES[$((ENV_CHOICE-1))]}"
 
-        echo ""
-        echo "Enter your JWT token for '$TARGET_ENV'"
-        echo "  You can find it in your browser: Inspect > Application > Cookies > access-token"
-        echo "  The token starts with 'ey...'"
-        read -sp "JWT token: " NEW_API_KEY
-        echo ""
+        # Try to reuse an existing studioUrl as the default for the browser flow,
+        # otherwise derive it from the API URL.
+        EXISTING_STUDIO_URL=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg e "$TARGET_ENV" '.[$e].studioUrl // empty')
+        if [[ -z "$EXISTING_STUDIO_URL" ]]; then
+            EXISTING_API_URL=$(echo "$ENVIRONMENTS_JSON" | jq -r --arg e "$TARGET_ENV" '.[$e].apiUrl // empty')
+            EXISTING_STUDIO_URL=$(guess_studio_url_from_api_url "$EXISTING_API_URL")
+        fi
 
-        if [[ -z "$NEW_API_KEY" ]]; then
+        if ! prompt_jwt "$TARGET_ENV" "$EXISTING_STUDIO_URL"; then
             echo "Error: JWT token is required"
             exit 1
         fi
+        NEW_API_KEY="$CAPTURED_TOKEN"
+        NEW_STUDIO_URL="$CAPTURED_STUDIO_URL"
 
         # Update the environment's API key
         ENVIRONMENTS_JSON=$(echo "$ENVIRONMENTS_JSON" | jq --arg env "$TARGET_ENV" --arg key "$NEW_API_KEY" '.[$env].apiKey = $key')
+        if [[ -n "$NEW_STUDIO_URL" ]]; then
+            ENVIRONMENTS_JSON=$(echo "$ENVIRONMENTS_JSON" | jq --arg env "$TARGET_ENV" --arg studioUrl "$NEW_STUDIO_URL" '.[$env].studioUrl = $studioUrl')
+        fi
     fi
 
     # Remove existing server and re-add with updated config

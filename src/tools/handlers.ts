@@ -1809,8 +1809,6 @@ export async function handleToolCall(
 
       const summary = {
         environment,
-        tokenPrefix: `${token.slice(0, 12)}…`,
-        tokenLength: token.length,
         expiresAt: expiresAt?.toISOString(),
         persistedTo,
         inMemoryRefreshed: true,
