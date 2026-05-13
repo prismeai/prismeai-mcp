@@ -719,7 +719,7 @@ export const tools: Tool[] = [
         },
         page: {
           type: "number",
-          description: "Page number for pagination",
+          description: "Page number for pagination. Starts at 0.",
         },
         limit: {
           type: "number",
