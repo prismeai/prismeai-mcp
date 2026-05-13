@@ -76,10 +76,14 @@ get_claude_mcp_config() {
 
 guess_studio_url_from_api_url() {
     local api_url="$1"
-    # Strip trailing /vN, swap api.* -> studio.*, api-* -> studio-*
+    # Strip trailing /vN, then drop the leading "api." (or "api-") subdomain.
+    # Examples:
+    #   https://api.studio.prisme.ai/v2   -> https://studio.prisme.ai
+    #   https://api.sandbox.prisme.ai/v2  -> https://sandbox.prisme.ai
+    #   https://api-foo.prisme.ai/v2      -> https://foo.prisme.ai
     echo "$api_url" \
         | sed -E 's|/v[0-9]+/?$||' \
-        | sed -E 's|://api\.|://studio.|; s|://api-|://studio-|'
+        | sed -E 's|://api\.|://|; s|://api-|://|'
 }
 
 # Prompts the user to choose between pasting a JWT and a browser-based capture.
