@@ -1,0 +1,115 @@
+slug: show_card
+name: show_card
+description: Display a project status card via A2UI surface
+private: true
+arguments:
+  arguments:
+    type: object
+    description: Tool arguments from MCP call
+do:
+  - set:
+      name: _args
+      value: '{{arguments}}'
+  - set:
+      name: _title
+      value: '{{_args.title}}'
+  - set:
+      name: _status
+      value: '{{_args.status}}'
+  - set:
+      name: _progress
+      value: '{{_args.progress}}'
+  - set:
+      name: _description
+      value: '{{_args.description}}'
+  - conditions:
+      '!{{_title}}':
+        - set:
+            name: _title
+            value: Project Alpha
+  - conditions:
+      '!{{_status}}':
+        - set:
+            name: _status
+            value: Active
+  - conditions:
+      '!{{_progress}}':
+        - set:
+            name: _progress
+            value: 73
+  - conditions:
+      '!{{_description}}':
+        - set:
+            name: _description
+            value: AI-powered document processing pipeline with real-time analytics.
+output:
+  content:
+    - type: text
+      text: 'Displayed project card: {{_title}} ({{_status}}, {{_progress}}% complete)'
+  isError: false
+  __surface:
+    surface_id: project-card
+    catalog_id: prisme://blocks/v1
+    wait_for_action: false
+    text: 'Displayed project card: {{_title}} ({{_status}}, {{_progress}}% complete)'
+    components:
+      - id: card
+        component: Card
+        className: p-4
+        children:
+          - card-content
+      - id: card-content
+        component: Column
+        gap: '2'
+        children:
+          - header
+          - desc
+          - sep
+          - progress-section
+      - id: header
+        component: Row
+        justify: between
+        align: center
+        children:
+          - card-title
+          - badge
+      - id: card-title
+        component: Text
+        content:
+          path: /project/name
+        variant: heading
+      - id: badge
+        component: Badge
+        label:
+          path: /project/status
+        variant: default
+      - id: desc
+        component: Text
+        content:
+          path: /project/description
+        variant: body
+      - id: sep
+        component: Divider
+      - id: progress-section
+        component: Column
+        gap: '1'
+        children:
+          - progress-label
+          - progress-bar
+      - id: progress-label
+        component: Text
+        content:
+          path: /project/progress_label
+        variant: caption
+      - id: progress-bar
+        component: Progress
+        value:
+          path: /project/progress
+        max: 100
+    data_model:
+      project:
+        name: '{{_title}}'
+        status: '{{_status}}'
+        description: '{{_description}}'
+        progress: '{{_progress}}'
+        progress_label: 'Completion: {{_progress}}%'

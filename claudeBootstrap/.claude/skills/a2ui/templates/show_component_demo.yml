@@ -1,0 +1,904 @@
+slug: show_component_demo
+name: show_component_demo
+description: 'Display a demo surface showcasing specific A2UI components. Use to test individual components or groups. Available: button, textfield, textarea, select, checkbox, switch, slider, card, tabs, modal, text, divider, badge, alert, progress, avatar, row, column, datatable, list, image, or "all" for the full showcase.'
+private: true
+arguments:
+  arguments:
+    type: object
+    description: Tool arguments from MCP call
+do:
+  - set:
+      name: _component
+      value: '{{arguments.component}}'
+  - conditions:
+      '!{{_component}}':
+        - set:
+            name: _component
+            value: all
+  - set:
+      name: _components
+      value: []
+  - set:
+      name: _data_model
+      value: {}
+  - comment: |
+      ═══════════════════════════════════════════════════════════════
+      COMPONENT BUILDERS — each block appends to _components[]
+      ═══════════════════════════════════════════════════════════════
+  - conditions:
+      '{{_component}} == "text" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-text
+              component: Text
+              content: Text Variants
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: text-heading
+              component: Text
+              content: This is a heading
+              variant: heading
+              weight: semibold
+        - set:
+            name: _components[]
+            value:
+              id: text-body
+              component: Text
+              content: This is body text with default styling.
+              variant: body
+        - set:
+            name: _components[]
+            value:
+              id: text-caption
+              component: Text
+              content: This is a caption — smaller, muted text for secondary information.
+              variant: caption
+        - set:
+            name: _components[]
+            value:
+              id: text-code
+              component: Text
+              content: const x = await fetch("/api/data")
+              variant: code
+        - set:
+            name: _components[]
+            value:
+              id: sep-text
+              component: Divider
+  - conditions:
+      '{{_component}} == "button" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-button
+              component: Text
+              content: Button Variants
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: btn-row
+              component: Row
+              gap: '2'
+              align: center
+              children:
+                - btn-primary
+                - btn-outline
+                - btn-ghost
+                - btn-destructive
+                - btn-disabled
+        - set:
+            name: _components[]
+            value:
+              id: btn-primary
+              component: Button
+              label: Primary
+              variant: primary
+              action:
+                name: click
+                context:
+                  button: primary
+        - set:
+            name: _components[]
+            value:
+              id: btn-outline
+              component: Button
+              label: Outline
+              variant: outline
+              action:
+                name: click
+                context:
+                  button: outline
+        - set:
+            name: _components[]
+            value:
+              id: btn-ghost
+              component: Button
+              label: Ghost
+              variant: ghost
+              action:
+                name: click
+                context:
+                  button: ghost
+        - set:
+            name: _components[]
+            value:
+              id: btn-destructive
+              component: Button
+              label: Delete
+              variant: destructive
+              action:
+                name: click
+                context:
+                  button: destructive
+        - set:
+            name: _components[]
+            value:
+              id: btn-disabled
+              component: Button
+              label: Disabled
+              variant: outline
+              disabled: true
+        - set:
+            name: _components[]
+            value:
+              id: sep-button
+              component: Divider
+  - conditions:
+      '{{_component}} == "badge" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-badge
+              component: Text
+              content: Badge Variants
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: badge-row
+              component: Row
+              gap: '2'
+              align: center
+              children:
+                - badge-default
+                - badge-secondary
+                - badge-outline
+                - badge-destructive
+        - set:
+            name: _components[]
+            value:
+              id: badge-default
+              component: Badge
+              label: Default
+              variant: default
+        - set:
+            name: _components[]
+            value:
+              id: badge-secondary
+              component: Badge
+              label: Secondary
+              variant: secondary
+        - set:
+            name: _components[]
+            value:
+              id: badge-outline
+              component: Badge
+              label: Outline
+              variant: outline
+        - set:
+            name: _components[]
+            value:
+              id: badge-destructive
+              component: Badge
+              label: Error
+              variant: destructive
+        - set:
+            name: _components[]
+            value:
+              id: sep-badge
+              component: Divider
+  - conditions:
+      '{{_component}} == "alert" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-alert
+              component: Text
+              content: Alert
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: alert-info
+              component: Alert
+              title: Information
+              description: This is an informational alert with default styling.
+              variant: default
+        - set:
+            name: _components[]
+            value:
+              id: alert-destructive
+              component: Alert
+              title: Error
+              description: Something went wrong. Please check your input and try again.
+              variant: destructive
+        - set:
+            name: _components[]
+            value:
+              id: sep-alert
+              component: Divider
+  - conditions:
+      '{{_component}} == "progress" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-progress
+              component: Text
+              content: Progress
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: progress-25
+              component: Column
+              gap: '1'
+              children:
+                - progress-25-label
+                - progress-25-bar
+        - set:
+            name: _components[]
+            value:
+              id: progress-25-label
+              component: Text
+              content: 'Upload: 25%'
+              variant: caption
+        - set:
+            name: _components[]
+            value:
+              id: progress-25-bar
+              component: Progress
+              value: 25
+              max: 100
+        - set:
+            name: _components[]
+            value:
+              id: progress-75
+              component: Column
+              gap: '1'
+              children:
+                - progress-75-label
+                - progress-75-bar
+        - set:
+            name: _components[]
+            value:
+              id: progress-75-label
+              component: Text
+              content: 'Processing: 75%'
+              variant: caption
+        - set:
+            name: _components[]
+            value:
+              id: progress-75-bar
+              component: Progress
+              value: 75
+              max: 100
+        - set:
+            name: _components[]
+            value:
+              id: sep-progress
+              component: Divider
+  - conditions:
+      '{{_component}} == "avatar" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-avatar
+              component: Text
+              content: Avatar
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: avatar-row
+              component: Row
+              gap: '3'
+              align: center
+              children:
+                - avatar-img
+                - avatar-fallback
+                - avatar-name
+        - set:
+            name: _components[]
+            value:
+              id: avatar-img
+              component: Avatar
+              src: https://github.com/shadcn.png
+              alt: User avatar
+        - set:
+            name: _components[]
+            value:
+              id: avatar-fallback
+              component: Avatar
+              alt: Jane Doe
+              fallback: JD
+        - set:
+            name: _components[]
+            value:
+              id: avatar-name
+              component: Text
+              content: shadcn / Jane Doe
+              variant: body
+        - set:
+            name: _components[]
+            value:
+              id: sep-avatar
+              component: Divider
+  - conditions:
+      '{{_component}} == "image" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-image
+              component: Text
+              content: Image
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: image-demo
+              component: Image
+              src: https://picsum.photos/400/200
+              alt: Random placeholder image
+              width: 400
+              height: 200
+        - set:
+            name: _components[]
+            value:
+              id: sep-image
+              component: Divider
+  - conditions:
+      '{{_component}} == "textfield" or {{_component}} == "textarea" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-inputs
+              component: Text
+              content: Input Fields
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: input-text
+              component: TextField
+              placeholder: Text input
+              type: text
+        - set:
+            name: _components[]
+            value:
+              id: input-email
+              component: TextField
+              placeholder: Email input
+              type: email
+        - set:
+            name: _components[]
+            value:
+              id: input-password
+              component: TextField
+              placeholder: Password input
+              type: password
+        - set:
+            name: _components[]
+            value:
+              id: input-textarea
+              component: TextArea
+              placeholder: Multi-line text area...
+              rows: 3
+        - set:
+            name: _components[]
+            value:
+              id: sep-inputs
+              component: Divider
+  - conditions:
+      '{{_component}} == "select" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-select
+              component: Text
+              content: Select
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: select-demo
+              component: Select
+              placeholder: Choose a framework...
+              options:
+                - value: react
+                  label: React
+                - value: vue
+                  label: Vue
+                - value: svelte
+                  label: Svelte
+                - value: angular
+                  label: Angular
+        - set:
+            name: _components[]
+            value:
+              id: sep-select
+              component: Divider
+  - conditions:
+      '{{_component}} == "checkbox" or {{_component}} == "switch" or {{_component}} == "slider" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-toggles
+              component: Text
+              content: CheckBox / Switch / Slider
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: toggle-col
+              component: Column
+              gap: '3'
+              children:
+                - cb-notifications
+                - cb-marketing
+                - switch-darkmode
+                - switch-analytics
+                - slider-section
+        - set:
+            name: _components[]
+            value:
+              id: cb-notifications
+              component: CheckBox
+              label: Enable email notifications
+        - set:
+            name: _components[]
+            value:
+              id: cb-marketing
+              component: CheckBox
+              label: Subscribe to marketing emails
+        - set:
+            name: _components[]
+            value:
+              id: switch-darkmode
+              component: Switch
+              label: Dark mode
+        - set:
+            name: _components[]
+            value:
+              id: switch-analytics
+              component: Switch
+              label: Share analytics data
+        - set:
+            name: _components[]
+            value:
+              id: slider-section
+              component: Column
+              gap: '1'
+              children:
+                - slider-label
+                - slider-demo
+        - set:
+            name: _components[]
+            value:
+              id: slider-label
+              component: Text
+              content: 'Volume: 60%'
+              variant: caption
+        - set:
+            name: _components[]
+            value:
+              id: slider-demo
+              component: Slider
+              min: 0
+              max: 100
+              step: 1
+              value: 60
+        - set:
+            name: _components[]
+            value:
+              id: sep-toggles
+              component: Divider
+  - conditions:
+      '{{_component}} == "card" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-card
+              component: Text
+              content: Card
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: card-row
+              component: Row
+              gap: '3'
+              children:
+                - card-1
+                - card-2
+        - set:
+            name: _components[]
+            value:
+              id: card-1
+              component: Card
+              title: Analytics
+              className: flex-1
+              children:
+                - card-1-content
+        - set:
+            name: _components[]
+            value:
+              id: card-1-content
+              component: Column
+              gap: '2'
+              children:
+                - card-1-metric
+                - card-1-progress
+        - set:
+            name: _components[]
+            value:
+              id: card-1-metric
+              component: Text
+              content:
+                path: /cards/analytics/metric
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: card-1-progress
+              component: Progress
+              value:
+                path: /cards/analytics/progress
+              max: 100
+        - set:
+            name: _components[]
+            value:
+              id: card-2
+              component: Card
+              title: Users
+              className: flex-1
+              children:
+                - card-2-content
+        - set:
+            name: _components[]
+            value:
+              id: card-2-content
+              component: Column
+              gap: '2'
+              children:
+                - card-2-row
+                - card-2-badge
+        - set:
+            name: _components[]
+            value:
+              id: card-2-row
+              component: Row
+              gap: '2'
+              align: center
+              children:
+                - card-2-avatar
+                - card-2-metric
+        - set:
+            name: _components[]
+            value:
+              id: card-2-avatar
+              component: Avatar
+              fallback: '42'
+        - set:
+            name: _components[]
+            value:
+              id: card-2-metric
+              component: Text
+              content:
+                path: /cards/users/label
+              variant: body
+        - set:
+            name: _components[]
+            value:
+              id: card-2-badge
+              component: Badge
+              label:
+                path: /cards/users/trend
+              variant: default
+        - set:
+            name: _data_model.cards
+            value:
+              analytics:
+                metric: 12,847 visits
+                progress: 64
+              users:
+                label: 42 active users
+                trend: +12% this week
+        - set:
+            name: _components[]
+            value:
+              id: sep-card
+              component: Divider
+  - conditions:
+      '{{_component}} == "tabs" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-tabs
+              component: Text
+              content: Tabs
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: tabs-demo
+              component: Tabs
+              tabs:
+                - id: tab-overview
+                  label: Overview
+                  children:
+                    - tab-overview-content
+                - id: tab-settings
+                  label: Settings
+                  children:
+                    - tab-settings-content
+                - id: tab-logs
+                  label: Logs
+                  children:
+                    - tab-logs-content
+        - set:
+            name: _components[]
+            value:
+              id: tab-overview-content
+              component: Text
+              content: This is the overview tab content with project summary and key metrics.
+              variant: body
+        - set:
+            name: _components[]
+            value:
+              id: tab-settings-content
+              component: Column
+              gap: '2'
+              children:
+                - tab-settings-switch
+                - tab-settings-select
+        - set:
+            name: _components[]
+            value:
+              id: tab-settings-switch
+              component: Switch
+              label: Auto-save
+        - set:
+            name: _components[]
+            value:
+              id: tab-settings-select
+              component: Select
+              placeholder: Theme
+              options:
+                - value: light
+                  label: Light
+                - value: dark
+                  label: Dark
+                - value: system
+                  label: System
+        - set:
+            name: _components[]
+            value:
+              id: tab-logs-content
+              component: Text
+              content: '[2026-05-03 18:00:01] INFO  Server started on port 3000'
+              variant: code
+        - set:
+            name: _components[]
+            value:
+              id: sep-tabs
+              component: Divider
+  - conditions:
+      '{{_component}} == "datatable" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-datatable
+              component: Text
+              content: DataTable
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: datatable-demo
+              component: DataTable
+              columns:
+                - key: name
+                  header: Name
+                - key: email
+                  header: Email
+                - key: role
+                  header: Role
+                - key: status
+                  header: Status
+              data:
+                path: /table_rows
+        - set:
+            name: _data_model.table_rows
+            value:
+              - name: Alice Martin
+                email: alice@example.com
+                role: Admin
+                status: Active
+              - name: Bob Chen
+                email: bob@example.com
+                role: Editor
+                status: Active
+              - name: Claire Dubois
+                email: claire@example.com
+                role: Viewer
+                status: Inactive
+              - name: David Kim
+                email: david@example.com
+                role: Editor
+                status: Pending
+        - set:
+            name: _components[]
+            value:
+              id: sep-datatable
+              component: Divider
+  - conditions:
+      '{{_component}} == "list" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-list
+              component: Text
+              content: List
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: list-row
+              component: Row
+              gap: '4'
+              children:
+                - list-bullet
+                - list-number
+                - list-plain
+        - set:
+            name: _components[]
+            value:
+              id: list-bullet
+              component: List
+              variant: bullet
+              items:
+                - First bullet item
+                - Second bullet item
+                - Third bullet item
+        - set:
+            name: _components[]
+            value:
+              id: list-number
+              component: List
+              variant: number
+              items:
+                - Step one
+                - Step two
+                - Step three
+        - set:
+            name: _components[]
+            value:
+              id: list-plain
+              component: List
+              variant: plain
+              items:
+                - Plain item A
+                - Plain item B
+                - Plain item C
+        - set:
+            name: _components[]
+            value:
+              id: sep-list
+              component: Divider
+  - conditions:
+      '{{_component}} == "modal" or {{_component}} == "all"':
+        - set:
+            name: _components[]
+            value:
+              id: section-modal
+              component: Text
+              content: Modal (trigger)
+              variant: heading
+        - set:
+            name: _components[]
+            value:
+              id: modal-trigger
+              component: Button
+              label: Open Modal
+              variant: outline
+              action:
+                name: open_modal
+                context:
+                  modal_id: demo-modal
+        - set:
+            name: _components[]
+            value:
+              id: demo-modal
+              component: Modal
+              title: Confirmation
+              children:
+                - modal-body
+                - modal-actions
+        - set:
+            name: _components[]
+            value:
+              id: modal-body
+              component: Text
+              content: Are you sure you want to proceed with this action?
+              variant: body
+        - set:
+            name: _components[]
+            value:
+              id: modal-actions
+              component: Row
+              gap: '2'
+              justify: end
+              children:
+                - modal-cancel
+                - modal-confirm
+        - set:
+            name: _components[]
+            value:
+              id: modal-cancel
+              component: Button
+              label: Cancel
+              variant: outline
+              action:
+                name: modal_cancel
+        - set:
+            name: _components[]
+            value:
+              id: modal-confirm
+              component: Button
+              label: Confirm
+              variant: primary
+              action:
+                name: modal_confirm
+  - comment: |
+      ═══════════════════════════════════════════════════════════════
+      BUILD ROOT COMPONENT
+      ═══════════════════════════════════════════════════════════════
+  - set:
+      name: _child_ids
+      value: []
+  - repeat:
+      'on': '{{_components}}'
+      do:
+        - set:
+            name: _child_ids[]
+            value: '{{item.id}}'
+  - set:
+      name: _root
+      value:
+        - id: root
+          component: Column
+          gap: '4'
+          children: '{{_child_ids}}'
+  - repeat:
+      'on': '{{_components}}'
+      do:
+        - set:
+            name: _root[]
+            value: '{{item}}'
+output:
+  content:
+    - type: text
+      text: 'Component demo displayed: {{_component}}'
+  isError: false
+  __surface:
+    surface_id: component-demo-{{_component}}
+    catalog_id: prisme://blocks/v1
+    send_data_model: true
+    wait_for_action: true
+    text: Component demo "{{_component}}" displayed. Interact with the components above.
+    components: '{{_root}}'
+    data_model: '{{_data_model}}'

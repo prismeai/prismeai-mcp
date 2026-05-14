@@ -1,0 +1,84 @@
+slug: show_table
+name: show_table
+description: Display a data table via A2UI surface
+private: true
+arguments:
+  arguments:
+    type: object
+    description: Tool arguments from MCP call
+do:
+  - set:
+      name: _args
+      value: '{{arguments}}'
+  - set:
+      name: _title
+      value: '{{_args.title}}'
+  - set:
+      name: _columns
+      value: '{{_args.columns}}'
+  - set:
+      name: _data
+      value: '{{_args.data}}'
+  - conditions:
+      '!{{_title}}':
+        - set:
+            name: _title
+            value: Results
+  - conditions:
+      '!{{_columns}}':
+        - set:
+            name: _columns
+            value:
+              - key: name
+                header: Name
+              - key: status
+                header: Status
+              - key: date
+                header: Date
+              - key: size
+                header: Size
+  - conditions:
+      '!{{_data}}':
+        - set:
+            name: _data
+            value:
+              - name: report-q1.pdf
+                status: Ready
+                date: '2026-04-15'
+                size: 2.4 MB
+              - name: budget.xlsx
+                status: Processing
+                date: '2026-04-20'
+                size: 1.1 MB
+              - name: presentation.pptx
+                status: Ready
+                date: '2026-05-01'
+                size: 8.7 MB
+output:
+  content:
+    - type: text
+      text: Displayed table "{{_title}}" with {{_data.length}} rows.
+  isError: false
+  __surface:
+    surface_id: data-table
+    catalog_id: prisme://blocks/v1
+    wait_for_action: false
+    text: Displayed table "{{_title}}" with {{_data.length}} rows.
+    components:
+      - id: table-col
+        component: Column
+        gap: '2'
+        children:
+          - heading
+          - data-table
+      - id: heading
+        component: Text
+        content: '{{_title}}'
+        variant: heading
+      - id: data-table
+        component: DataTable
+        columns: '{{_columns}}'
+        data:
+          path: /rows
+    data_model:
+      rows: '{{_data}}'

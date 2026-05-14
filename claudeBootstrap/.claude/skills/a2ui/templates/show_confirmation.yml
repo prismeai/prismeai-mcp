@@ -1,0 +1,94 @@
+slug: show_confirmation
+name: show_confirmation
+description: Display a minimal confirmation dialog (Yes/No). Tests the simplest possible interactive surface — no form fields, just action buttons.
+private: true
+arguments:
+  arguments:
+    type: object
+    description: Tool arguments from MCP call
+do:
+  - set:
+      name: _args
+      value: '{{arguments}}'
+  - set:
+      name: _question
+      value: '{{_args.question}}'
+  - set:
+      name: _detail
+      value: '{{_args.detail}}'
+  - conditions:
+      '!{{_question}}':
+        - set:
+            name: _question
+            value: Are you sure you want to proceed?
+  - conditions:
+      '!{{_detail}}':
+        - set:
+            name: _detail
+            value: This action cannot be undone.
+output:
+  content:
+    - type: text
+      text: 'Confirmation dialog displayed: "{{_question}}" Waiting for user response.'
+  isError: false
+  __surface:
+    surface_id: confirm-dialog-1
+    catalog_id: prisme://blocks/v1
+    send_data_model: false
+    wait_for_action: true
+    text: 'Confirmation dialog displayed: "{{_question}}" Waiting for user response.'
+    components:
+      - id: card
+        component: Card
+        className: p-4
+        children:
+          - layout
+      - id: layout
+        component: Column
+        gap: '3'
+        children:
+          - icon-row
+          - question
+          - detail
+          - actions
+      - id: icon-row
+        component: Row
+        justify: center
+        children:
+          - warning-badge
+      - id: warning-badge
+        component: Badge
+        label: Confirmation Required
+        variant: warning
+      - id: question
+        component: Text
+        content:
+          path: /question
+        variant: heading
+      - id: detail
+        component: Text
+        content:
+          path: /detail
+        variant: body
+      - id: actions
+        component: Row
+        gap: '2'
+        justify: end
+        children:
+          - btn-no
+          - btn-yes
+      - id: btn-no
+        component: Button
+        label: 'No'
+        variant: outline
+        action:
+          name: cancel
+      - id: btn-yes
+        component: Button
+        label: Yes, proceed
+        variant: primary
+        action:
+          name: confirm
+    data_model:
+      question: '{{_question}}'
+      detail: '{{_detail}}'

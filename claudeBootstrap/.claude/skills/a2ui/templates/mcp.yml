@@ -1,0 +1,92 @@
+slug: mcp
+name: MCP/endpoint
+description: MCP JSON-RPC 2.0 endpoint for A2UI tool discovery and execution
+when:
+  endpoint: a2ui-test/mcp
+do:
+  - conditions:
+      '{{body.method}} == "initialize"':
+        - set:
+            name: output
+            value:
+              jsonrpc: '2.0'
+              id: '{{body.id}}'
+              result:
+                protocolVersion: '2025-06-18'
+                capabilities:
+                  tools: {}
+                serverInfo:
+                  name: a2ui-test-mcp
+                  version: 1.0.0
+      '{{body.method}} == "notifications/initialized"':
+        - set:
+            name: $http
+            value:
+              status: 200
+        - set:
+            name: output
+            value: ''
+      '{{body.method}} == "tools/list"':
+        - set:
+            name: output
+            value:
+              jsonrpc: '2.0'
+              id: '{{body.id}}'
+              result:
+                tools: '{{config.mcpTools}}'
+      '{{body.method}} == "tools/call"':
+        - conditions:
+            '{{body.params.name}} == "show_card"':
+              - show_card:
+                  arguments: '{{body.params.arguments}}'
+                  output: toolResult
+            '{{body.params.name}} == "show_form"':
+              - show_form:
+                  arguments: '{{body.params.arguments}}'
+                  output: toolResult
+            '{{body.params.name}} == "show_table"':
+              - show_table:
+                  arguments: '{{body.params.arguments}}'
+                  output: toolResult
+            '{{body.params.name}} == "show_action_card"':
+              - show_action_card:
+                  arguments: '{{body.params.arguments}}'
+                  output: toolResult
+            '{{body.params.name}} == "show_feedback"':
+              - show_feedback:
+                  arguments: '{{body.params.arguments}}'
+                  output: toolResult
+            '{{body.params.name}} == "show_confirmation"':
+              - show_confirmation:
+                  arguments: '{{body.params.arguments}}'
+                  output: toolResult
+            '{{body.params.name}} == "show_component_demo"':
+              - show_component_demo:
+                  arguments: '{{body.params.arguments}}'
+                  output: toolResult
+            default:
+              - set:
+                  name: output
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    error:
+                      code: -32601
+                      message: 'Tool not found: {{body.params.name}}'
+              - break: {}
+        - set:
+            name: output
+            value:
+              jsonrpc: '2.0'
+              id: '{{body.id}}'
+              result: '{{toolResult}}'
+      default:
+        - set:
+            name: output
+            value:
+              jsonrpc: '2.0'
+              id: '{{body.id}}'
+              error:
+                code: -32601
+                message: 'Method not found: {{body.method}}'
+output: '{{output}}'
