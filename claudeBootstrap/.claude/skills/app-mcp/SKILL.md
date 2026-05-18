@@ -105,15 +105,17 @@ Run phases sequentially. Pause after each for confirmation when a decision affec
 
 ### Phase 3 — Fetch the service logo
 
-**Goal**: find a square, high-quality logo URL to set as `photo` on the workspace.
+**Goal**: get a square, high-quality logo and **download it locally** — do NOT hotlink an external URL into `photo:`. The logo is uploaded to the workspace's own file store in Phase 6 so the workspace owns a stable `uploads.prisme.ai` URL. Every existing connector (`gitlab`, `data-galaxy`, …) uses a workspace-hosted photo, not a third-party link — hotlinked logos break (404, CSP, rate-limits, the provider rotates the asset) and leak a request to an external host on every render.
 
-1. Try in order:
+1. Find a candidate logo URL, try in order:
    - `WebFetch` the service homepage; look for a `<link rel="icon">` or `<meta property="og:image">`
    - Search `<service> logo svg OR png site:official-domain`
    - Check the favicon at `https://<domain>/favicon.ico` or `https://<domain>/favicon.svg`
-   - Last resort: use `https://logo.clearbit.com/<domain>` (free, returns a square PNG)
+   - Last resort: `https://logo.clearbit.com/<domain>` (free, returns a square PNG)
 2. Prefer **SVG** > **PNG square** > other. Avoid wide banner logos.
-3. Confirm the URL with the user before locking it into `index.yml`.
+3. Confirm the chosen source URL with the user.
+4. **Download** it into the workspace folder as `prismeai-workspaces/workspaces/<slug>/logo.<ext>` — keep the real extension (`.svg`, `.png`). Example: `curl -sSL "<url>" -o prismeai-workspaces/workspaces/<slug>/logo.svg`. This file is a build artifact: it is uploaded then deleted in Phase 6, and is never part of the pushed DSUL.
+5. Leave `index.yml` `photo:` **empty** (`photo: ''`) for now. It is set to the real `uploads.prisme.ai` URL in Phase 6, once the workspace exists and the logo has been uploaded to it — never store the external source URL in `photo:`.
 
 ### Phase 4 — Scaffold the workspace files
 
@@ -124,7 +126,7 @@ Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
 - `<<SERVICE_SLUG>>` → camelCase slug used in event names (e.g. `acmeCorp`, `mySaas`)
 - `<<WORKSPACE_ID>>` → Prisme.ai workspace ID (e.g. `_gwEr1h`) — only known after the workspace is created on the platform, use a placeholder then update
 - `<<BASE_URL>>` → API base URL
-- `<<LOGO_URL>>` → URL chosen in phase 3
+- `<<LOGO_URL>>` → leave empty: substitute with `''` so `index.yml` ships `photo: ''`. The real `uploads.prisme.ai` URL is set in Phase 6 after the logo file is uploaded to the workspace — never substitute a hotlinked external URL here.
 - `<<PROVIDER_APP_URL>>` → OAuth-app management page URL (Phase 4.5 only — captured in Phase 1)
 
 **Steps**:
@@ -358,7 +360,18 @@ tools/call("workbooks", {action:        ┌─ mcp.yml (extracts toolName + argu
    ```
 3. Human review: list `method-*`, `tool-*`, `<op>` counts to the user. Confirm before pushing.
 4. `push_workspace` to `_<WORKSPACE_ID>` on `prod` with a short message (`initial`, `add-tools`, etc., max 15 chars, alphanumeric + `-_`).
-5. **Post-push smoke check — do not skip**, it catches deploy-time failures that validation can't:
+5. **Upload the workspace logo, then set `photo`** — the workspace now exists, so host the logo on it instead of hotlinking an external URL:
+   - Upload the local `logo.<ext>` (downloaded in Phase 3) to the workspace's own file store via the platform files API:
+     ```bash
+     curl -sS -X POST "<apiUrl>/v2/workspaces/<WORKSPACE_ID>/files" \
+       -H "Authorization: Bearer <token>" \
+       -F "file=@prismeai-workspaces/workspaces/<slug>/logo.<ext>"
+     ```
+     `<apiUrl>` is the platform API base for the target environment (e.g. `https://api.studio.prisme.ai`); get a bearer `<token>` from the `refresh_auth_token` MCP tool. The response is a JSON array — take `[0].url`, a stable `https://uploads.prisme.ai/<WORKSPACE_ID>/…` URL.
+   - Set `index.yml` `photo:` to that `uploads.prisme.ai` URL, then `push_workspace` again so the photo is persisted.
+   - Delete the local `logo.<ext>` — it is a build artifact, never part of the DSUL.
+   - If the upload fails (auth/endpoint), tell the user and ask them to set the workspace photo manually in the Studio — do NOT fall back to a hotlinked external URL.
+6. **Post-push smoke check — do not skip**, it catches deploy-time failures that validation can't:
    - **Custom Code reload**: right after push, search events for `Custom Code.error` on `fetchAPI` / `onParentAppPublish` — if any, the CC runtime didn't reload and functions will be "not found" at runtime. Recovery: `update_app_instance_config` with the **complete** functions map (the tool replaces, doesn't merge — see memory). Then re-push.
    - **generateKey round-trip**: `execute_automation generateKey` with a dummy `{body: {workspaceId: "test", getConfigUrl: "https://x.y/z"}}` and confirm the response is a proper signed key `^[A-Za-z0-9_-]+\.[a-f0-9]{64}$` — not an error object. Catches `#`-in-code-block-style Custom Code issues.
    - **tools/list**: simulate a JSON-RPC `tools/list` via `execute_automation mcp` with `{body: {jsonrpc: "2.0", id: 1, method: "tools/list", params: {}}}`. Confirm `result.tools` is an array of **entity-grouped** tools (length should match `len(ENTITY_OPS)`, not the raw op count) and that each tool's `inputSchema.properties` contains an `action` enum with the declared actions (not just `{}`). MCP Core's internal formatter has historically stripped `inputSchema` properties — verify end-to-end what the LLM will actually see.
@@ -368,11 +381,11 @@ tools/call("workbooks", {action:        ┌─ mcp.yml (extracts toolName + argu
      grep -nE "path: '[^']*/(close|reopen|approve|unapprove|merge|cancel|retry|revoke|publish|archive|lock)'" automations/method-*.yml
      ```
      Common truth: most APIs use state-event-in-body (e.g. `PUT /issues/{iid}` + `{state_event: close}`) instead of a dedicated sub-resource. Fix any hit before smoke-testing.
-6. Instruct the user how to **activate**:
+7. Instruct the user how to **activate**:
    - Configure secrets (`<slug>Token` or `<slug>ClientId`/`<slug>ClientSecret` + `appSecret`) on the central workspace.
    - Install the app in a tenant workspace; configure credentials. `mcpEndpoint` + `mcpApiKey` populate automatically via `onInstall`.
    - Call `<ServiceName>.<op>:` from a tenant automation, or point an MCP client at `mcpEndpoint` using `mcp-api-key`.
-6. Optionally create `pages/_doc.yml` — look at an existing workspace's `pages/_doc.yml` as reference (TabsView with "Usage as App" / "Usage as MCP").
+8. Optionally create `pages/_doc.yml` — look at an existing workspace's `pages/_doc.yml` as reference (TabsView with "Usage as App" / "Usage as MCP").
 
 ---
 

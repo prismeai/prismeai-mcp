@@ -6,7 +6,10 @@ description: >-
   read/write access to the <<SERVICE_NAME>> API.
   <<ADAPT>>: customize with a 1-2 sentence summary of what the service does
   and the resources it exposes.
-photo: <<LOGO_URL>>
+# photo is left empty here on purpose — Phase 6 uploads the logo to the
+# workspace file store and sets this to the resulting uploads.prisme.ai URL.
+# Never hardcode a hotlinked external logo URL.
+photo: ''
 labels:
   - app-builder
   - <<SERVICE_NAME>>
