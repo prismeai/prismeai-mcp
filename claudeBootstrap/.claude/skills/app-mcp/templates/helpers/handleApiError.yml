@@ -48,9 +48,13 @@ do:
             name: bodyDetail
             value: '{{response.body.message}}'
       default:
+        - comment: >-
+            No recognized error field — do NOT dump the raw response body.
+            It may carry credential echoes (request headers, tokens) or
+            sensitive provider metadata. Return a bounded placeholder instead.
         - set:
             name: bodyDetail
-            value: '{% json({{response.body}}) %}'
+            value: (no further detail)
   - conditions:
       '{{response.status}} == 400':
         - set:

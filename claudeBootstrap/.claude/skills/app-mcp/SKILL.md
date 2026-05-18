@@ -392,6 +392,36 @@ There's no event-driven mechanism in the dispatcher pattern. Push = sync. That's
 
 ---
 
+## MCP endpoint security checklist
+
+Apply this to every connector before pushing — it is part of the deliverable,
+not optional polish:
+
+- **Mark every credential-bearing input `secret: true`.** In `config.schema`:
+  tokens, API keys, passwords, client secrets, OAuth client IDs/secrets,
+  refresh tokens, and tenant identifiers used as credentials. In any
+  `configure*` MCP tool's `inputSchema.properties` (mirrored in BOTH
+  `index.yml` and `imports/MCP Core.yml`): the same. `secret: true`
+  auto-redacts the value from `runtime.automations.executed` events.
+- **Classify non-secret identifiers intentionally.** Resource IDs (project,
+  board, site, drive, mailbox, structure IDs…), `baseUrl` and `mcpEndpoint`
+  stay unredacted — state in the field `description:` that this is deliberate.
+- **Never echo a credential in an error message.** No token, secret, password
+  or `Authorization` header value in any `error:` / `message:` / `text:`
+  string — including `decoded.error` from `verifyAndDecodeKey`: return a
+  generic `Invalid or expired MCP API key` instead.
+- **Never return a raw provider response body.** `handleApiError.yml` extracts
+  bounded fields (`error`, `error_description`, `message`,
+  `errors[0].message`) only; the `default:` branch returns a placeholder,
+  never `{% json(response.body) %}` — the body may carry credential echoes or
+  sensitive provider metadata.
+- **Auth docs must match the implementation.** `pages/_doc.yml` and App-mode
+  instructions describe only auth paths/priorities actually wired in the code —
+  no stale `buildMcpAuth` / header-auth / "priority order" text for flows that
+  do not exist.
+
+---
+
 ## Common traps
 
 All of these were already hit on existing workspaces — don't rediscover them:

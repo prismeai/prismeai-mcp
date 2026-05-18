@@ -1474,6 +1474,10 @@ When invoked with `/mcp-workspace` pointing to an **existing** workspace (not an
 | 8 | Naming conventions | Do slugs follow camelCase? Do names use `/NN_Category/` folder convention? Are helpers marked `private: true`? List violations. |
 | 9 | `mcpTools` vs `routeToolCall` sync | Are all tools in `index.yml` `mcpTools` also present in `routeToolCall`? List any mismatches. |
 | 10 | Test coverage | Does a test suite exist? Does it cover all tools? List untested tools. |
+| 11 | Credential inputs redacted | Does every credential field in `config.schema` and every `configure*` tool `inputSchema` property (token, apiKey, password, clientSecret, oauthClientId/Secret, refresh token, credential-grade tenant ID) carry `secret: true`? List unmarked fields. |
+| 12 | Non-secret IDs classified | Are resource IDs / `baseUrl` / `mcpEndpoint` intentionally left unredacted and noted as such in their `description:`? |
+| 13 | No credential leakage in errors | Do any `error:`/`message:`/`text:` strings echo a token, secret, password, `Authorization` header, or `decoded.error`? Does `handleApiError.yml`'s `default:` branch dump the raw response body (`json(response.body)`)? List offenders. |
+| 14 | Auth docs match code | Do `pages/_doc.yml` and App-mode instructions describe only auth paths/priorities actually implemented? List stale auth-priority text. |
 
 ### Report Output Format
 
@@ -1483,7 +1487,7 @@ The audit produces a file at `./tickets/{workspace}-disparities.md` with this st
 # {Workspace} — Compliance Report
 
 ## Summary
-- **Compliance**: X/10 checks passing
+- **Compliance**: X/14 checks passing
 - **Migration effort**: Small / Medium / Large
 - **Top disparities**: (1-3 most impactful gaps)
 
