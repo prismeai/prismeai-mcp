@@ -1,6 +1,6 @@
 ---
 name: app-mcp-test
-description: End-to-end smoke-test the tools exposed by a Prisme.ai App+MCP workspace. Asks for the workspace and environment, collects the non-OAuth credentials required by the app's config schema, lists every MCP tool, then executes them one by one, diagnosing and fixing errors in the workspace until the full suite passes. Use when the user says "test this app+mcp", "tester les tools du MCP X", "/app-mcp-test", or similar. Does NOT handle OAuth 2.0 authorization-code flows — those require an interactive browser login and are out of scope.
+description: End-to-end smoke-test the tools exposed by a Prisme.ai App+MCP workspace, then hand off to app-mcp-consumer to consolidate the successful coverage into a consumer test workspace. Asks for the workspace and environment, collects the non-OAuth credentials required by the app's config schema, lists every MCP tool, then executes them one by one, diagnosing and fixing errors in the workspace until the full suite passes. Use when the user says "test this app+mcp", "tester les tools du MCP X", "/app-mcp-test", or similar. Does NOT handle OAuth 2.0 authorization-code flows — those require an interactive browser login and are out of scope.
 argument-hint: "[workspace-slug] [?sandbox|prod]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__execute_automation, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__search_workspaces
 ---
@@ -19,7 +19,7 @@ The workspace layout you are testing follows the scaffold produced by the `/app-
 
 ---
 
-## Workflow — 6 phases
+## Workflow — 7 phases
 
 Run phases sequentially. Do not skip. Pause after phase 1 and phase 3 to confirm.
 
@@ -154,6 +154,14 @@ After the loop ends, print a single Markdown block:
 ```
 
 If any workspace files were modified, remind the user that changes were pushed to `<env>` and that a `push_workspace` to the other env may be needed if it should propagate.
+
+### Phase 7 — Build the consolidated consumer workspace
+
+**Goal**: turn the proven smoke-test coverage into a durable consumer workspace.
+
+After the tool test loop is complete, call `/app-mcp-consumer <workspace-slug>` to create or update the corresponding `*-consumer` workspace. Pass along the tested workspace slug, environment, tool list, operation classifications, known safe fixture values, skipped/destructive tools, and any fixes made during this run.
+
+The consumer workspace should consolidate the tested App operations and MCP-through-Agent Factory paths into repeatable DSUL test suites. Do not rebuild this logic inside `/app-mcp-test`; hand off to `/app-mcp-consumer`.
 
 ---
 

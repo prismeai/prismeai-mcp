@@ -1,9 +1,9 @@
 ---
-name: consumer-workspace
-description: Build or audit Prisme.ai *-consumer DSUL workspaces that test a target App surface and its MCP server through Agent Factory agents. Use when implementing, recreating, or assessing connector consumer workspaces.
+name: app-mcp-consumer
+description: Build or audit Prisme.ai App+MCP consumer DSUL workspaces that consolidate tests for a target App surface and its MCP server through Agent Factory agents. Use when implementing, recreating, or assessing connector consumer workspaces.
 ---
 
-# Consumer Workspace
+# App MCP Consumer
 
 Use this skill to implement or assess a Prisme.ai `*-consumer` workspace. Consumer workspaces are thin integration-test workspaces: they configure credentials, call imported App surfaces, create temporary Agent Factory agents for MCP tool calls, and assert contracts. They must not duplicate product logic from the target App or MCP workspace.
 

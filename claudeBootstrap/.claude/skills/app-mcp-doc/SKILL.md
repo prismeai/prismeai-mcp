@@ -201,6 +201,7 @@ Print to the user:
 - A deep-link preview URL (`https://docs.prisme.ai/apps-store/marketplace/connectors/<slug>` if the repo publishes to that domain — otherwise just the file path)
 - Any sections flagged for human review (`<!-- REVIEW: ... -->` comments in the generated MDX)
 - A reminder that `docs.json` validation passed (`json.load` succeeded)
+- The next recommended step: run `/app-mcp-test <workspace-slug> <environment>` to test the App+MCP workspace with real credentials before publishing or announcing the connector.
 
 ### Phase 7 — Guide the user to run the local preview
 
