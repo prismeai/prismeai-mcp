@@ -32,7 +32,7 @@ Use this skill to implement or assess a Prisme.ai `*-consumer` workspace. Consum
 
 - Generate tests only for the current target App import and current target MCP server.
 - Do not create tests for unrelated chat, page, document, historical, or cross-product surfaces unless the user explicitly includes them.
-- Do not create direct MCP JSON-RPC tests. MCP coverage must go through an Agent Factory agent that has the target MCP server attached.
+- Do not create direct MCP JSON-RPC tests for tool behavior. MCP tool coverage must go through an Agent Factory agent that has the target MCP server attached. A narrow DSUL `fetch` transport-contract test is allowed and expected for `initialize`, `notifications/initialized`, and `tools/list` HTTP status/body compliance.
 - Do not create UI/pages unless the user asks for UI/pages.
 - Prefer comprehensive tool coverage over a small smoke-test subset.
 
@@ -187,6 +187,18 @@ Required cleanup shape:
 ```
 
 Adapt the import alias to the local Agent Factory import, but keep the workflow and assertions.
+
+## MCP Transport Contract Tests
+
+Consumer workspaces should include a direct webhook transport test for the target MCP endpoint, using DSUL `fetch`, in addition to Agent Factory tool-call coverage.
+
+The transport test must call the deployed MCP webhook and assert the actual HTTP status/body contract:
+
+- `initialize` with a JSON-RPC `id` returns HTTP 200 and a JSON-RPC result.
+- `notifications/initialized` without an `id` returns HTTP 202 and an empty body.
+- `tools/list` with a JSON-RPC `id` returns HTTP 200 and `result.tools`.
+
+Do not use direct MCP JSON-RPC tests as the only MCP coverage. Agent Factory tests remain required for tool-call behavior. The direct fetch test exists only to catch HTTP transport regressions that `execute_automation` and Agent Factory tool assertions can hide, especially webhook serialization bugs like empty notification responses being coerced to `{}`.
 
 ## Fixtures
 
