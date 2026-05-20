@@ -146,6 +146,18 @@ Common event types:
 - Reference specific automation slugs and line numbers when helpful
 - If blocked, explain what information would help resolve the issue
 
+## Isolate workspace dev in a worktree
+
+When the user starts a development task on a workspace (any request to implement,
+edit, or build a feature/fix on a workspace — i.e. before writing or changing any
+DSUL/automation/page), **spontaneously propose, as the first thing, to do the
+implementation in a dedicated git worktree on a new branch.**
+
+- Make this a short one-line offer, e.g. *"Je crée un worktree + branche `workspace/<slug>-<short-desc>` pour isoler ce dev ?"* — derive the branch name from the workspace slug and a short kebab-case description of the task.
+- If the user accepts, create the worktree (use the worktree isolation mechanism), branch from `sandbox`, and do all edits there.
+- If the user declines or says to proceed in place, work in the current directory without asking again for that task.
+- Skip the offer for pure read-only work (diagnostics, event tracing, questions) — it only applies when actual file changes are coming.
+
 ## Development steps to edit workspace
 
 - Check if there is a local version of the workspace in ./
