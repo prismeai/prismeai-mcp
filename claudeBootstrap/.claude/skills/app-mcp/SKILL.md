@@ -80,7 +80,9 @@ Run phases sequentially. Pause after each for confirmation when a decision affec
    - **OAuth2 / client-credentials**: exchange `client_id + client_secret` for a short-lived JWT via a dedicated endpoint — requires caching in session
    - **OAuth2 / authorization-code + PKCE** (user-delegated): user logs in with their own provider account and we store a refresh token per (user × tenant). **See Phase 4.5** — requires the full OAuth scaffolding block. Detect this when the docs mention: "OAuth 2.0 Authorization Code flow", endpoints like `/oauth/authorize` + `/oauth/token`, scopes granted by the end user, or when the user explicitly wants "each user signs in with their own account".
    - **Basic auth**: `Basic base64(email:token)`
-5. Pick the **existing workspace ID** if the user already created one on the platform. Otherwise we'll use `<placeholder>` and let `push_workspace` create it.
+5. **Workspace ID** — `push_workspace` does NOT auto-create a workspace; it requires an existing target. Two paths:
+   - **User already created one**: ask for the ID, fill `<<WORKSPACE_ID>>` immediately in `.import.yml` + `index.yml`.
+   - **Brand-new workspace**: use the **`create_workspace`** MCP tool **early** (Phase 1 or Phase 6, just before the first `push_workspace`) with `{name, slug, description, labels}` to mint a real ID, then substitute it into `<<WORKSPACE_ID>>` placeholders. Do NOT push first and hope it creates the workspace — that's not how `push_workspace` works (it returns `Unknown workspace name` and aborts).
 
 **Do NOT** proceed to phase 2 without these 4 facts confirmed.
 
@@ -359,19 +361,19 @@ tools/call("workbooks", {action:        ┌─ mcp.yml (extracts toolName + argu
                print(f"INVALID type:array in Custom Code function {fname}.{pname} — use type:object")
    ```
 3. Human review: list `method-*`, `tool-*`, `<op>` counts to the user. Confirm before pushing.
-4. `push_workspace` to `_<WORKSPACE_ID>` on `prod` with a short message (`initial`, `add-tools`, etc., max 15 chars, alphanumeric + `-_`).
-5. **Upload the workspace logo, then set `photo`** — the workspace now exists, so host the logo on it instead of hotlinking an external URL:
-   - Upload the local `logo.<ext>` (downloaded in Phase 3) to the workspace's own file store via the platform files API:
-     ```bash
-     curl -sS -X POST "<apiUrl>/v2/workspaces/<WORKSPACE_ID>/files" \
-       -H "Authorization: Bearer <token>" \
-       -F "file=@prismeai-workspaces/workspaces/<slug>/logo.<ext>"
-     ```
-     `<apiUrl>` is the platform API base for the target environment (e.g. `https://api.studio.prisme.ai`); get a bearer `<token>` from the `refresh_auth_token` MCP tool. The response is a JSON array — take `[0].url`, a stable `https://uploads.prisme.ai/<WORKSPACE_ID>/…` URL.
-   - Set `index.yml` `photo:` to that `uploads.prisme.ai` URL, then `push_workspace` again so the photo is persisted.
-   - Delete the local `logo.<ext>` — it is a build artifact, never part of the DSUL.
-   - If the upload fails (auth/endpoint), tell the user and ask them to set the workspace photo manually in the Studio — do NOT fall back to a hotlinked external URL.
-6. **Post-push smoke check — do not skip**, it catches deploy-time failures that validation can't:
+4. **Make sure the target workspace exists.** Brand-new workspace? Call `create_workspace` FIRST with `{name, slug, description, labels}` to get a real ID, then sed the ID into `<<WORKSPACE_ID>>` in `.import.yml` + `index.yml`. **`push_workspace` will not create a workspace from a slug — it requires the workspace to already exist.** Default environment: **`sandbox`** unless the user explicitly asks for `prod` (CLAUDE.md default, and a fresh prod connector should be sandbox-validated first anyway).
+5. `push_workspace` with `workspaceId: <ID>` (NOT `workspaceName`, since a fresh workspace isn't in the env mapping yet) on `sandbox` with a short message (`initial`, `add-tools`, etc., max 15 chars, alphanumeric + `-_`). Expect ONE error in the response: `"Could not publish app — Missing photo"`. That's normal — the workspace + all files were imported; only the App-publish step needs the photo, which we set in step 6.
+6. **Upload the workspace logo, then set `photo`** — the workspace now exists, so host the logo on it instead of hotlinking an external URL.
+
+   **The bearer-token-via-curl path is unreliable under auto-mode.** `refresh_auth_token` writes a fresh JWT into `~/.claude.json`, but the auto-mode classifier blocks Bash from reading `~/.claude.json` (it sees credential exfiltration, regardless of the legitimate purpose). The classifier reliably refuses, so:
+
+   **Always ask the user to do the upload themselves**, by default — don't burn a turn trying to read the credential store. Offer them three concrete options in a single `AskUserQuestion`:
+   - **Studio UI**: upload `logo.<ext>` (printed absolute path) via the workspace's Files page, then paste back the `https://uploads.prisme.ai/<ID>/…` URL.
+   - **Inline shell prefix**: paste the `! curl -sS -X POST "<apiUrl>/v2/workspaces/<ID>/files" -H "Authorization: Bearer $(jq -r '.PRISME_ENVIRONMENTS.<env>.token' ~/.claude.json)" -F "file=@<abs-path-to-logo>"` command in the chat prompt — the `!` runs it in their shell with their own credentials, output lands in the conversation.
+   - **They run curl externally** and paste the JSON response back.
+
+   In all three cases, take the resulting URL (`uploads.prisme.ai/<ID>/...`), inject it into `index.yml` `photo:`, re-`push_workspace` (this time the App-publish step succeeds), then delete the local `logo.<ext>` build artifact. **Never** fall back to hotlinking the original external source URL into `photo:`.
+7. **Post-push smoke check — do not skip**, it catches deploy-time failures that validation can't:
    - **Custom Code reload**: right after push, search events for `Custom Code.error` on `fetchAPI` / `onParentAppPublish` — if any, the CC runtime didn't reload and functions will be "not found" at runtime. Recovery: `update_app_instance_config` with the **complete** functions map (the tool replaces, doesn't merge — see memory). Then re-push.
    - **generateKey round-trip**: `execute_automation generateKey` with a dummy `{body: {workspaceId: "test", getConfigUrl: "https://x.y/z"}}` and confirm the response is a proper signed key `^[A-Za-z0-9_-]+\.[a-f0-9]{64}$` — not an error object. Catches `#`-in-code-block-style Custom Code issues.
    - **tools/list**: simulate a JSON-RPC `tools/list` via `execute_automation mcp` with `{body: {jsonrpc: "2.0", id: 1, method: "tools/list", params: {}}}`. Confirm `result.tools` is an array of **entity-grouped** tools (length should match `len(ENTITY_OPS)`, not the raw op count) and that each tool's `inputSchema.properties` contains an `action` enum with the declared actions (not just `{}`). MCP Core's internal formatter has historically stripped `inputSchema` properties — verify end-to-end what the LLM will actually see.

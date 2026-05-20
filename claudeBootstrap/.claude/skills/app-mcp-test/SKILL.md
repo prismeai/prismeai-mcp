@@ -1,6 +1,6 @@
 ---
 name: app-mcp-test
-description: End-to-end smoke-test the tools exposed by a Prisme.ai App+MCP workspace, then hand off to app-mcp-consumer to consolidate the successful coverage into a consumer test workspace. Asks for the workspace and environment, collects the non-OAuth credentials required by the app's config schema, lists every MCP tool, then executes them one by one, diagnosing and fixing errors in the workspace until the full suite passes. Use when the user says "test this app+mcp", "tester les tools du MCP X", "/app-mcp-test", or similar. Does NOT handle OAuth 2.0 authorization-code flows — those require an interactive browser login and are out of scope.
+description: End-to-end smoke-test the tools exposed by a Prisme.ai App+MCP workspace, then hand off to app-mcp-consumer to consolidate the successful coverage into a consumer test workspace. Asks for the workspace and environment, collects the credentials required by the app's config schema, lists every MCP tool, then executes them one by one, diagnosing and fixing errors in the workspace until the full suite passes. Supports static tokens, Basic, OAuth2 client-credentials, AND OAuth2 authorization-code (PKCE) when the user supplies a pre-configured tenant workspace whose user already completed the browser auth — in that mode we call `ensureAuthentication` first to mint a `$secret:` accessToken ref and inject it into `routeToolCall`/`tool-*` directly. Use when the user says "test this app+mcp", "tester les tools du MCP X", "/app-mcp-test", or similar.
 argument-hint: "[workspace-slug] [?sandbox|prod]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__execute_automation, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__search_workspaces
 ---
@@ -13,9 +13,22 @@ The goal is: for a given workspace + environment, invoke each `tool-<op>` automa
 The workspace layout you are testing follows the scaffold produced by the `/app-mcp` skill. Re-read `.claude/skills/app-mcp/SKILL.md` if you need a refresher on the conventions (especially `tool-*` and `method-*`).
 
 **Scope guardrails**:
-- Only **non-OAuth** credentials are supported: static tokens (PAT / Bearer), Basic (email + token), and OAuth2 `client_credentials` (client_id + client_secret exchanged server-side). OAuth2 authorization-code / PKCE is explicitly out of scope — if the app requires it, stop and tell the user to test it manually via the browser.
+- Supported credential models: static tokens (PAT / Bearer), Basic (email + token), OAuth2 `client_credentials`, AND OAuth2 authorization-code / PKCE **via the tenant-injection pattern** — see Phase 2 + Phase 5 below. The only thing still out of scope is OAuth-AC when no pre-configured tenant exists (i.e. you'd need to drive a real browser flow yourself).
 - You **must never** invent credentials. Always ask the user.
 - You **must never** push structural changes without the user's approval; bug fixes to the workspace during the test loop should be proposed, confirmed, then applied with `push_workspace` on the matching environment.
+
+### OAuth-AC via tenant-injection (the Salesforce pattern)
+
+If the app uses OAuth-AC (a `pages/connector-callback.yml` exists, plus an `ensureAuthentication.yml` reading `user.<app>.oauth.*`), DO NOT exit. Ask the user for a **tenant workspace ID** where they have already installed the app and completed OAuth via the browser. Then:
+
+1. `list_app_instances(tenantWorkspaceId)` → find the app instance slug.
+2. `get_app_instance_config(tenantWorkspaceId, instanceSlug)` → grab `oauthClientId`, `oauthClientSecret`, `mcpApiKey`, `mcpEndpoint`.
+3. Call `execute_automation(centralWorkspaceId, "ensureAuthentication", { tenantId: <tenantWorkspaceId>, tenantConfig: { oauth: { clientId, clientSecret }, apiVersion, loginHost } })`.
+   - On success returns `{ authenticated: true, accessToken: "$secret:<ref>", instanceUrl, baseUrl, authMethod: "delegated" }`.
+   - The `$secret:` is a **short-lived (~few minutes)** runtime-resolved ref — re-call `ensureAuthentication` between batches when you get a `Secret ref expired` 500 error.
+4. For each tool call: route via the workspace's dispatcher automation (`routeToolCall` in dispatcher-pattern workspaces, or `tool-<op>` directly in per-op workspaces) with payload `{ toolName, toolArgs: { arguments, accessToken: "$secret:<ref>", baseUrl, apiVersion } }`. The `tool-*` automation passes accessToken+baseUrl to `executeApiCall` which short-circuits the per-user auth resolution (it only kicks in when these are empty).
+
+This pattern is the cleanest way to exercise the data plane (registry + path/method mapping + REST plumbing) without the browser. The OAuth flow itself (`connect`/`disconnect`/`oauthCallback`/`initiateOAuth`) cannot be tested this way — classify those tools as ⚪ SKIPPED.
 
 ---
 
@@ -46,17 +59,18 @@ Run phases sequentially. Do not skip. Pause after phase 1 and phase 3 to confirm
 
 **Do NOT** proceed to phase 2 without these four facts printed and confirmed.
 
-### Phase 2 — Detect the auth model and refuse OAuth-AC
+### Phase 2 — Detect the auth model
 
-**Goal**: know exactly which credentials to collect — and bail out if the app needs browser-based OAuth.
+**Goal**: know exactly which credentials to collect — and pick the right invocation pattern (App-mode args vs tenant-injection).
 
 1. Inspect `config.schema` keys. Map to one of:
    - **Static token / PAT**: a single secret field (e.g. `token`, `apiKey`, `pat`) + optional `baseUrl`.
    - **Basic auth**: `email` + `token` (or `password`), both non-readOnly.
    - **OAuth2 client-credentials**: `clientId` + `clientSecret` (sometimes `tenantId`, `scope`). Server-to-server, no user interaction — **in scope**.
-   - **OAuth2 authorization-code / PKCE**: look for a `refreshToken`/`userRefreshToken` field that's `readOnly: true` and populated by an `/oauth/callback` endpoint, OR a page in `pages/` referencing `/oauth/authorize`. **Out of scope** — stop here and tell the user to test manually, then exit the skill.
+   - **OAuth2 authorization-code / PKCE**: detect via `pages/connector-callback.yml`, `automations/initiateOAuth.yml`, `automations/oauthCallback.yml`, `automations/ensureAuthentication.yml` reading `user.<app>.oauth.*`, OR a `refreshToken`/`userRefreshToken` field that's `readOnly: true`. **In scope via tenant-injection** — ask the user for a tenant workspace ID where they've completed OAuth in the browser, then drive `ensureAuthentication` to mint a short-lived `$secret:` accessToken ref (see the "OAuth-AC via tenant-injection" section at the top).
 2. Also inspect `automations/buildAppAuth.yml` to cross-check which fields are actually consumed — the schema can be wider than what auth needs. The real required set = intersection of `config.schema` (non-readOnly) ∪ what `buildAppAuth` reads.
 3. Identify `readOnly: true` fields — skip them (they're auto-generated, e.g. `mcpEndpoint`, `mcpApiKey`, `appSecret`).
+4. Detect dispatcher vs per-op pattern: if `automations/` contains only `tool-restOp.yml` / `tool-graphqlOp.yml` (one tool file for N ops, plus a `routeToolCall.yml`), it's a **dispatcher** workspace — every MCP tool from `config.value.mcpTools` routes through `routeToolCall(toolName, toolArgs)`. If instead each MCP tool has its own `tool-<name>.yml`, it's **per-op** — call `tool-<name>` directly.
 
 Output a short summary of the credential fields you will ask for.
 
@@ -93,12 +107,16 @@ Output a short summary of the credential fields you will ask for.
 
 For each tool in order (reads first, then writes):
 
-1. Build the call:
-   - `workspaceId` = from phase 1
-   - `slug` = `"tool-<op>"`
-   - `payload` = `{ body: { arguments: <generated-args>, <flattened creds> } }`
-     The `<flattened creds>` are the fields that `tool-*` accepts directly (typically `accessToken` and `baseUrl` — check the tool's `arguments.body.properties` to confirm). Map user-provided creds by name, not by position.
+1. Build the call. Two variants depending on the pattern detected in phase 2:
+   - **Per-op pattern** (one `tool-<name>.yml` per MCP tool):
+     - `slug` = `"tool-<op>"`, `payload` = `{ body: { arguments: <generated-args>, <flattened creds> } }`.
+     - `<flattened creds>` are the fields that `tool-*` accepts directly (typically `accessToken` and `baseUrl` — check the tool's `arguments.body.properties` to confirm).
+   - **Dispatcher pattern** (single `tool-restOp.yml` + `routeToolCall.yml`):
+     - `slug` = `"routeToolCall"`, `payload` = `{ toolName: <mcpToolName>, toolArgs: { arguments: <generated-args>, accessToken, baseUrl, apiVersion } }`.
+     - In this mode the MCP tool name from `config.value.mcpTools[].name` (e.g. `versions`, `sobjects`, `query`) is passed as `toolName`, and the `arguments` object contains the entity-level `action` enum plus any path/query/body params declared in the tool's `inputSchema`.
+   - For **OAuth-AC tenant-injection**: pass `accessToken: "$secret:<ref>"` and `baseUrl: "<instanceUrl>/<api-prefix>"` straight from the `ensureAuthentication` output. The runtime resolves `$secret:` at interpolation time.
 2. Call `execute_automation(workspaceId, slug, payload)` on the target environment.
+   - **Watch for `Secret ref expired`** (500 error, only in OAuth-AC mode): the `$secret:` ref lives only a few minutes. When you see it, call `ensureAuthentication` again to mint a fresh ref and replace it in subsequent payloads. Don't try to refresh in advance — just react to the error and retry once.
 3. Capture the response. A successful MCP tool response has shape:
    ```json
    { "content": [ { "type": "text", "text": "..." } ] }
