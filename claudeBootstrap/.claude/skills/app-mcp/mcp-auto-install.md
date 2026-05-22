@@ -77,17 +77,54 @@ The workspace ID is in cleartext (base64) — it's not a secret. The HMAC signat
 
 This is the **only place** where `appSecret` is used for signing. App instances never have access to the secret.
 
+**Auto-generated `appSecret` (self-healing).** If `appSecret` is not a real resolved value (fresh connector, nobody pasted a value into the Secrets section), `generateKey` generates a 256-bit random secret via the `generateRandomSecret` Custom Code function, persists it to the central workspace's `/security/secrets` (the `PATCH` is NOT terminal — unlike `set: config type: merge` — so the run still returns its response), and signs the current call with the in-memory value. Subsequent calls read the now-persisted `{{config.appSecret}}`. A human-set value is always respected (the check skips generation). See "Known limitation: concurrent first-install race" below.
+
+**Why the "is it set?" check goes through Custom Code (not `!{{config.appSecret}}`).** On the central workspace an UNSET secret does NOT make `{{config.appSecret}}` empty — it resolves to the literal binding string `{{secret.appSecret}}`, which is **truthy**. A plain `!{{config.appSecret}}` guard is therefore always false, so the self-heal never runs and `generateKey` silently signs every key with the literal string as the HMAC key (a stable but bogus secret — keys verify against each other but the appSecret is never really provisioned). And a `matches "{{"` condition can't be used either: it crashes with `InvalidVariableNameError` on a literal-binding value. The robust detector is the `isUsableSecret` Custom Code function (`usable = non-empty && no "{{"`).
+
 ```yaml
 slug: generateKey
 when:
   endpoint: true
 do:
+  - set:
+      name: effectiveSecret
+      value: '{{config.appSecret}}'
+  - Custom Code.run:
+      function: isUsableSecret
+      parameters:
+        value: '{{config.appSecret}}'
+      output: secretCheck
+  - conditions:
+      '!{{secretCheck.usable}}':
+        - Custom Code.run:
+            function: generateRandomSecret
+            output: generatedSecret
+        # ... guard generatedSecret.error -> 500 ...
+        - auth:
+            workspace: true
+            output: wsJwt
+        - fetch:
+            url: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/security/secrets'
+            method: PATCH
+            headers:
+              Authorization: Bearer {{wsJwt.jwt}}
+            body:
+              appSecret:
+                value: '{{generatedSecret}}'
+                description: HMAC secret, auto-generated on first key request.
+            output: persistResp
+            outputMode: detailed_response
+            emitErrors: false
+        # ... guard persistResp.status non-2xx -> 500 ...
+        - set:
+            name: effectiveSecret
+            value: '{{generatedSecret}}'
   - Custom Code.run:
       function: generateSignedKey
       parameters:
         workspaceId: '{{body.workspaceId}}'
         getConfigUrl: '{{body.getConfigUrl}}'
-        secret: '{{config.appSecret}}'
+        secret: '{{effectiveSecret}}'
       output: signedKey
   - set:
       name: response
@@ -160,6 +197,18 @@ const parsed = JSON.parse(data);
 return { workspaceId: parsed.wid, getConfigUrl: parsed.url };
 ```
 
+**`generateRandomSecret()`** — parameterless; used by `generateKey` to self-heal an empty `appSecret`:
+```js
+const crypto = require('crypto');
+return crypto.randomBytes(32).toString('hex');
+```
+
+**`isUsableSecret(value)`** — used by `generateKey` to decide whether `appSecret` is a real resolved secret vs an unresolved binding literal (`{{secret.appSecret}}`):
+```js
+const v = (value === null || value === undefined) ? '' : String(value);
+return { usable: v.length > 0 && v.indexOf('{{') === -1 };
+```
+
 ## index.yml Config Schema
 
 ### Config schema (visible to app instances)
@@ -212,6 +261,8 @@ Include `importFrom:<workspaceId>` to make the workspace installable as an app.
 
 **Consequence:** Key generation MUST happen on the central workspace via the `generateKey` webhook. The `onInstall` automation on the instance calls the central workspace — it cannot sign locally.
 
+**This is also why auto-generation of `appSecret` lives in `generateKey`, not in an install event:** there is no clean "central workspace created" lifecycle event, and on a tenant `{{config.appSecret}}` is *also* empty (it resolves the tenant's own empty secret) — so an event-triggered provisioner could not tell central from tenant apart. `generateKey` only ever runs on the central workspace, so it is the natural (and only safe) place to self-heal the secret.
+
 ### 2. Don't put auto-generated config in `config.value`
 
 If `config.value.mcpApiKey: '{{secret.mcpApiKey}}'` is set, new instances inherit this template string. Even when the secret is empty, `{{config.mcpApiKey}}` evaluates as truthy (it's a non-empty string), causing `onInstall` to skip key generation.
@@ -252,11 +303,17 @@ The MCP endpoint URL is simply:
 
 Where `mcp` is the **automation slug**, not the app name.
 
+### 8. Known limitation: concurrent first-install race
+
+Auto-generation of `appSecret` is idempotent but not atomic. If two tenant installs hit `generateKey` near-simultaneously on a brand-new connector (before the first `PATCH /security/secrets` lands), both generate different secrets and the last `PATCH` wins. The tenant whose key was signed with the losing secret will fail `verifyAndDecodeKey` ("Invalid signature") at `tools/call` time.
+
+This is **low probability** (the window is a few hundred ms, only on the very first provisioning) and **self-recovers**: reconfiguring that app instance re-fires `onInstall`, which re-issues a key against the now-persisted secret. To avoid the race entirely on a high-traffic launch, set `appSecret` manually before the first install. A re-GET after the `PATCH` does not close the window, so we don't add one.
+
 ## Integration Checklist (for applying to any app+mcp workspace)
 
-1. [ ] Add `appSecret` to central workspace secrets
-2. [ ] Add `generateKey.yml` webhook automation
-3. [ ] Add `generateSignedKey` and `verifyAndDecodeKey` to Custom Code functions
+1. [ ] Add `appSecret` to the central workspace secrets schema (leave the value empty — it auto-generates on the first key request, or set it manually for a known value)
+2. [ ] Add `generateKey.yml` webhook automation (with the empty-`appSecret` self-heal block)
+3. [ ] Add `generateSignedKey`, `verifyAndDecodeKey`, `generateRandomSecret`, and `isUsableSecret` to Custom Code functions
 4. [ ] Update `onInstall.yml` to call `generateKey` instead of generating locally
 5. [ ] Add `mcpEndpoint` and `mcpApiKey` (readOnly) to config schema
 6. [ ] Remove `mcpApiKey` from `config.value`

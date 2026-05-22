@@ -50,6 +50,29 @@ config:
           return { error: 'Invalid payload' };
         }
 
+    # Generates a 256-bit random hex secret. Used by generateKey.yml to
+    # self-heal an empty appSecret on the first key request. Parameterless on
+    # purpose (avoids any `type: array` param that would break the whole module).
+    generateRandomSecret:
+      code: >
+        const crypto = require('crypto');
+
+        return crypto.randomBytes(32).toString('hex');
+
+    # Returns { usable: true } only when the value is a real, resolved secret.
+    # On the central workspace an UNSET secret makes {{config.appSecret}} resolve
+    # to the literal "{{secret.appSecret}}" (a truthy string), so a plain
+    # !{{config.x}} check is not enough. We detect the unresolved-binding literal
+    # here because a `matches` DSUL condition on the brace-prefix crashes on a
+    # literal binding value (InvalidVariableNameError).
+    isUsableSecret:
+      parameters:
+        value:
+          type: string
+      code: |
+        const v = (value === null || value === undefined) ? '' : String(value);
+        return { usable: v.length > 0 && v.indexOf('{{') === -1 };
+
     # ===================== GENERAL HELPERS =====================
     buildQueryString:
       parameters:

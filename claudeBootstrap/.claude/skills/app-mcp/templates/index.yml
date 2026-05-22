@@ -75,7 +75,10 @@ secrets:
       title: App HMAC Secret
       description: >-
         HMAC secret used by the central <<SERVICE_NAME>> workspace to sign
-        MCP API keys. Only set on the central workspace.
+        MCP API keys. Leave empty to auto-generate a strong random secret on
+        the first key request; set manually only to use a known value or to
+        pre-empt the concurrent-first-install race. Only relevant on the
+        central workspace.
       ui:widget: password
 
 registerWorkspace: true

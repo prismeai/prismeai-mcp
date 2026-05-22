@@ -144,7 +144,7 @@ Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
    - `config.schema` — one field per credential + the standard `mcpEndpoint` / `mcpApiKey` (readOnly)
    - `config.value` — NEVER add `mcpApiKey` (see mcp-auto-install.md §"Don't put auto-generated config in config.value")
    - `config.value.mcpTools` — one entry per operation, with `inputSchema` pulled from swagger + always adding an `outputFormat` enum property
-   - `secrets.schema` — one field per credential + `appSecret` (HMAC secret)
+   - `secrets.schema` — one field per credential + `appSecret` (HMAC secret; leave its **value empty** — `generateKey.yml` auto-generates and persists it on the first key request)
 5. Copy `templates/helpers/*.yml` into `automations/` and substitute placeholders. **Do NOT copy `triggerSync.yml`** even if it exists in the templates folder — it's incompatible with the dispatcher pattern (see "MCP tool discovery" + Common Traps).
 6. **Adapt `buildAppAuth`** for the auth model (see the `<<ADAPT>>` comment inside):
    - Static token: keep simple, just read `config.token`
@@ -437,7 +437,7 @@ tools/call("workbooks", {action:        ┌─ mcp.yml (extracts toolName + argu
      ```
      Common truth: most APIs use state-event-in-body (e.g. `PUT /issues/{iid}` + `{state_event: close}`) instead of a dedicated sub-resource. Fix any hit before smoke-testing.
 8. Instruct the user how to **activate**:
-   - Configure secrets (`<slug>Token` or `<slug>ClientId`/`<slug>ClientSecret` + `appSecret`) on the central workspace.
+   - Configure secrets (`<slug>Token` or `<slug>ClientId`/`<slug>ClientSecret`) on the central workspace. `appSecret` is **optional** — it auto-generates on the first key request; set it manually only to use a known value or to pre-empt the concurrent-first-install race.
    - Install the app in a tenant workspace; configure credentials. `mcpEndpoint` + `mcpApiKey` populate automatically via `onInstall`.
    - Call `<ServiceName>.<op>:` from a tenant automation, or point an MCP client at `mcpEndpoint` using `mcp-api-key`.
 9. Optionally create `pages/_doc.yml` — look at an existing workspace's `pages/_doc.yml` as reference (TabsView with "Usage as App" / "Usage as MCP").

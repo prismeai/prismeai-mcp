@@ -38,26 +38,22 @@ do:
         refreshTokenTtl: 7200
 
   - comment: >-
-      Guard unresolved template strings on oauth client id/secret.
-      When `config.oauthClientSecret` has `secret: true` in the schema
-      and the tenant hasn't set it, it can stay as a literal "{{secret.xxx}}"
-      string that is truthy.
-  - set:
-      name: cleanOauthClientId
-      value: '{{config.oauthClientId}}'
-  - conditions:
-      '{{cleanOauthClientId}} matches "{{"':
-        - set:
-            name: cleanOauthClientId
-            value: ''
-  - set:
-      name: cleanOauthClientSecret
-      value: '{{config.oauthClientSecret}}'
-  - conditions:
-      '{{cleanOauthClientSecret}} matches "{{"':
-        - set:
-            name: cleanOauthClientSecret
-            value: ''
+      Guard unresolved binding literals on oauth client id/secret. When the
+      field has `secret: true` and the tenant hasn't set it, it stays as a
+      truthy template literal. Detection MUST be done in Custom Code
+      (cleanCredential): a literal double-brace inside a DSUL condition is
+      itself parsed as a variable ref and crashes InvalidVariableNameError
+      (the `..` runtime error) on the unconfigured path.
+  - Custom Code.run:
+      function: cleanCredential
+      parameters:
+        value: '{{config.oauthClientId}}'
+      output: cleanOauthClientId
+  - Custom Code.run:
+      function: cleanCredential
+      parameters:
+        value: '{{config.oauthClientSecret}}'
+      output: cleanOauthClientSecret
 
   - comment: >-
       Populate oauth block only when BOTH clientId AND clientSecret are
@@ -80,17 +76,14 @@ do:
                     refreshTokenTtl: '{% {{config.refreshTokenTtl}} || 7200 %}'
 
   - comment: >-
-      Guard: unresolved "{{secret.xxx}}" template stays as a literal truthy
-      string when the secret is not set. Wipe it if detected, otherwise the
-      PAT priority in ensureAuthentication would incorrectly short-circuit.
-  - set:
-      name: cleanAccessToken
-      value: '{{config.token}}'
-  - conditions:
-      '{{cleanAccessToken}} matches "{{"':
-        - set:
-            name: cleanAccessToken
-            value: ''
+      Guard: an unresolved secret binding stays as a truthy literal when the
+      tenant hasn't set the PAT. cleanCredential wipes it (brace detection in
+      Custom Code — never a literal double-brace in a DSUL expression).
+  - Custom Code.run:
+      function: cleanCredential
+      parameters:
+        value: '{{config.token}}'
+      output: cleanAccessToken
 
   - comment: Fail fast if neither a PAT nor a populated OAuth block is present
   - conditions:

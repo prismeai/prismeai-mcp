@@ -3,7 +3,8 @@ name: 00_MCP/generateKey
 description: >-
   Webhook called by tenant app instances to generate a signed MCP API key.
   Only the central <<SERVICE_NAME>> workspace (<<WORKSPACE_ID>>) has the
-  appSecret, so key generation must happen here.
+  appSecret, so key generation must happen here. If appSecret is empty, it is
+  auto-generated and persisted to this workspace's secrets on the first call.
 private: true
 when:
   endpoint: true
@@ -19,23 +20,99 @@ do:
             value:
               error: 'Missing required fields: workspaceId, getConfigUrl'
         - break: {}
+  - comment: >-
+      Default the signing secret to the persisted config.appSecret. If it is
+      empty (fresh connector, nobody pasted a value into the Secrets section),
+      self-heal: generate a strong random secret, persist it to THIS central
+      workspace's /security/secrets, and sign the current call with the
+      in-memory value. Subsequent calls read config.appSecret (now populated).
+  - set:
+      name: effectiveSecret
+      value: '{{config.appSecret}}'
+  - comment: >-
+      Detect whether config.appSecret holds a REAL secret. On the central
+      workspace an UNSET secret resolves config.appSecret to the literal binding
+      string (truthy!), so a plain negation check wrongly skips generation and
+      signs with that literal. Detect in Custom Code — a regex DSUL condition on
+      the brace-prefix crashes on a literal binding value.
+  - Custom Code.run:
+      function: isUsableSecret
+      parameters:
+        value: '{{config.appSecret}}'
+      output: secretCheck
   - conditions:
-      '!{{config.appSecret}}':
+      '!{{secretCheck.usable}}':
+        - comment: >-
+            Generate a 256-bit random hex secret. No parameters needed. On CC
+            module-load failure this returns an error object (not a string),
+            guarded immediately after.
+        - Custom Code.run:
+            function: generateRandomSecret
+            output: generatedSecret
+        - conditions:
+            '{{generatedSecret.error}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 500
+              - set:
+                  name: response
+                  value:
+                    error: 'appSecret generation failed: {{generatedSecret.error.message}}'
+              - break: {}
+        - comment: >-
+            Persist the generated secret to this workspace's secrets via a
+            self-scoped workspace JWT. PATCH /security/secrets is NOT terminal
+            (unlike `set: config type: merge`), so the run continues and can
+            still return a response. Body is a flat map { name: { value, description } }.
+        - auth:
+            workspace: true
+            output: wsJwt
         - set:
-            name: $http
-            value:
-              status: 500
+            name: secretsUrl
+            value: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/security/secrets'
+        - fetch:
+            url: '{{secretsUrl}}'
+            method: PATCH
+            headers:
+              Authorization: Bearer {{wsJwt.jwt}}
+              Content-Type: application/json
+            body:
+              appSecret:
+                value: '{{generatedSecret}}'
+                description: >-
+                  HMAC secret used by the central <<SERVICE_NAME>> workspace to
+                  sign MCP API keys. Auto-generated on first key request.
+            output: persistResp
+            outputMode: detailed_response
+            emitErrors: false
+        - comment: >-
+            If persistence failed, do NOT sign with a secret that was never
+            stored — the key could never be verified by mcp.yml. Return 500.
+        - conditions:
+            '{{persistResp.status}} < 200 || {{persistResp.status}} > 299':
+              - set:
+                  name: $http
+                  value:
+                    status: 500
+              - set:
+                  name: response
+                  value:
+                    error: 'appSecret persistence failed (HTTP {{persistResp.status}})'
+              - break: {}
         - set:
-            name: response
-            value:
-              error: appSecret not configured on central workspace
-        - break: {}
+            name: effectiveSecret
+            value: '{{generatedSecret}}'
+        - emit:
+            event: <<SERVICE_SLUG>>.generateKey.appSecretProvisioned
+            payload:
+              status: '{{persistResp.status}}'
   - Custom Code.run:
       function: generateSignedKey
       parameters:
         workspaceId: '{{body.workspaceId}}'
         getConfigUrl: '{{body.getConfigUrl}}'
-        secret: '{{config.appSecret}}'
+        secret: '{{effectiveSecret}}'
       output: signedKey
   - comment: >-
       Defense in depth: if the Custom Code module failed to load (e.g. a

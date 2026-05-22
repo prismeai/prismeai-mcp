@@ -43,6 +43,19 @@ makeSecretRef:
   code: |
     return '{' + '{secret.' + key + '}' + '}';
 
+# getConfig uses this to wipe an unresolved binding literal ("{{secret.x}}" /
+# "{{config.x}}") that surfaces when the tenant hasn't filled the secret yet.
+# Detecting the double-brace in JS is mandatory: a literal "{{" inside a DSUL
+# condition is parsed as a variable ref and crashes InvalidVariableNameError
+# (the `..` runtime error) on the unconfigured path.
+cleanCredential:
+  parameters:
+    value:
+      type: string
+  code: |
+    var v = (value === null || value === undefined) ? '' : String(value);
+    return v.indexOf('{' + '{') >= 0 ? '' : v;
+
 filterOAuthTools:
   parameters:
     # IMPORTANT: never use `type: array` in Custom Code parameters. The CC loader
