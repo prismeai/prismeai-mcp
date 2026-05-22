@@ -1,6 +1,10 @@
 # Fragment to MERGE into index.yml under config.value
 # These are provider-level defaults that tenants can override per instance.
-# DO NOT set oauthClientId/oauthClientSecret here — they're per-tenant.
+# DO NOT set oauthClientId/oauthClientSecret here — they're per-tenant, and a
+# central-workspace config.value `{{secret.x}}` would resolve against the
+# CENTRAL workspace's secrets, not the tenant's. (App config.value defaults do
+# not propagate as resolvable secret refs to tenant app instances anyway — see
+# the "Per-tenant credentials from the Secrets section" note in SKILL.md.)
 
 authorizationUrl: <<PROVIDER_AUTHORIZE_URL>>
 tokenUrl: <<PROVIDER_TOKEN_URL>>

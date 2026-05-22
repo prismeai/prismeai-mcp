@@ -22,6 +22,27 @@ generateState:
     const crypto = require('crypto');
     return { state: crypto.randomBytes(16).toString('base64url') };
 
+# Build literal binding strings in plain JS so DSUL never parses them as tokens.
+# onInstall uses these to auto-wire the per-tenant OAuth credential bindings:
+#   - makeConfigRef('xOauthClientId') -> '{{config.xOauthClientId}}'  (binding A, app instance config)
+#   - makeSecretRef('xOauthClientId') -> '{{secret.xOauthClientId}}'  (binding B, workspace config.value)
+# A direct {{config.x}} / {{secret.x}} written from an automation resolves to
+# empty at set-time; substituting the CC-returned string is single-pass, so the
+# literal is STORED and resolves later at read time. Validated on google-docs.
+makeConfigRef:
+  parameters:
+    key:
+      type: string
+  code: |
+    return '{' + '{config.' + key + '}' + '}';
+
+makeSecretRef:
+  parameters:
+    key:
+      type: string
+  code: |
+    return '{' + '{secret.' + key + '}' + '}';
+
 filterOAuthTools:
   parameters:
     # IMPORTANT: never use `type: array` in Custom Code parameters. The CC loader

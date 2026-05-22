@@ -192,7 +192,9 @@ Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
 
 5. **Merge `templates/oauth/fragments/index-config-schema.yml`** into `index.yml` under `config.schema` (adds `oauthClientId`, `oauthClientSecret`, `oauthCallbackUrl` (readOnly, populated by onInstall), `authorizationUrl`, `tokenUrl`, `revocationUrl`, `scopes`, `refreshTokenTtl`). The `oauthClientId` / `oauthClientSecret` descriptions are enriched at scaffold time with `<<PROVIDER_APP_URL>>` so the tenant admin sees where to create the OAuth app.
 
-6. **Merge `templates/oauth/fragments/index-config-value.yml`** into `index.yml` under `config.value` (provider URL defaults, `scopes: api`, `refreshTokenTtl: 7200`). **Never** set `oauthClientId` / `oauthClientSecret` at `config.value` — they're per-tenant.
+6. **Merge `templates/oauth/fragments/index-config-value.yml`** into `index.yml` under `config.value` (provider URL defaults, `scopes: api`, `refreshTokenTtl: 7200`). **Never** set `oauthClientId` / `oauthClientSecret` at the CENTRAL workspace `config.value` — they're per-tenant and get auto-wired into each TENANT by step 6b, not by the published app's config.value (which doesn't propagate to instances).
+
+6b. **Insert `templates/oauth/fragments/onInstall-provision.yml`** into `automations/onInstall.yml` at the `<<OAUTH_PROVISION_HOOK>>` marker (before the `completed` emit + terminal config merge), AND merge the `makeConfigRef`/`makeSecretRef` Custom Code helpers (Phase 4.5 step 4 fragment). This **fully auto-wires per-tenant OAuth on install** — the tenant admin only fills the secret VALUES in the Builder "Secrets" section. On install onInstall: (1) provisions empty placeholder secrets with descriptions, (2) writes **binding B** into the tenant workspace `config.value.<<SERVICE_SLUG>>OauthClientId: '{{secret.<<SERVICE_SLUG>>OauthClientId}}'` via PATCH `/config`, (3) writes **binding A** into the app-instance config `oauthClientId: '{{config.<<SERVICE_SLUG>>OauthClientId}}'` (added to the terminal `set: config` merge). Resolution chain: instance `{{config.x}}` → workspace config.value `{{secret.x}}` → secret. **The enabling trick**: an automation can't write a literal `{{config.x}}`/`{{secret.x}}` via a plain set/fetch body (DSUL resolves it to empty) — so the literals are built in Custom Code (`makeConfigRef`/`makeSecretRef`) and substituted single-pass (stored intact, resolved at read time). Constraint: everything runs before the terminal `set: config` merge (that merge re-triggers `apps.configured` and ends the run).
 
 7. **Prepend `templates/oauth/fragments/index-mcptools.yml`** to `config.value.mcpTools`: the `disconnect` and `connect` tools MUST be listed first so `tools/list` surfaces them to the LLM. Regenerate `imports/MCP Core.yml` afterwards so it mirrors the new mcpTools array (see Phase 4 step 10).
 
@@ -212,7 +214,7 @@ Templates use `<<PLACEHOLDER>>` syntax. Replace these globally:
 
     Example for a service with slug `monday`: `https://api.studio.prisme.ai/v2/workspaces/slug:monday/webhooks/oauthCallback`.
 
-    The central workspace admin sets `oauthClientId` + `oauthClientSecret` on the app instance config (not as workspace secrets — per-tenant).
+    The central workspace admin sets `oauthClientId` + `oauthClientSecret` on the app instance config (not as workspace secrets — per-tenant). See the note below on why the Builder "Secrets" section can't be auto-wired by onInstall.
 
 ### Tenant onboarding UX — auto-populate OAuth setup fields
 
@@ -222,7 +224,24 @@ Tenant admins installing an OAuth-enabled app need to know two things the skill 
 
 Both of these live in `templates/oauth/fragments/index-config-schema.yml` + `templates/helpers/onInstall.yml` — if you adapt either, mirror the change in the workspace's files to keep them in sync. **Do NOT** point tenants to a static documentation page for the callback URL: the URL depends on `global.apiUrl` (sandbox vs prod), so only the runtime computation is reliable.
 
-**Deliverables of this phase:** 12 new `automations/*.yml`, 1 new `pages/*.yml`, `mcp.yml` + `getConfig.yml` replaced, `Custom Code.yml` + `index.yml` + `MCP Core.yml` extended, `onInstall.yml` adapted (base template already populates `oauthCallbackUrl`).
+**Deliverables of this phase:** 12 new `automations/*.yml`, 1 new `pages/*.yml`, `mcp.yml` + `getConfig.yml` replaced, `Custom Code.yml` + `index.yml` + `MCP Core.yml` extended, `onInstall.yml` adapted (base template populates `oauthCallbackUrl` + hosts the step-6b provisioning block).
+
+### Per-tenant credentials from the Secrets section — fully auto-wired
+
+Goal: let a tenant admin fill the OAuth client id/secret in their workspace's **Secrets** section, and have the connector use them per-tenant. **This works and is fully automated by `onInstall`** (validated end-to-end on google-docs 2026-05-22 — `getConfig` returned the real resolved `clientId`). The tenant admin only fills the secret VALUES; everything else is wired on install. Two config bindings + the secret value:
+
+```
+app instance config.oauthClientId : '{{config.<service>OauthClientId}}'              # binding A (written by onInstall, terminal merge)
+workspace  config.value.<service>OauthClientId : '{{secret.<service>OauthClientId}}'  # binding B (written by onInstall, PATCH /config)
+Secrets section: <service>OauthClientId = <real value>                                # filled by the admin
+→ resolution chain: instance {{config.x}} → workspace config.value {{secret.x}} → secret store ✓
+```
+
+How onInstall writes the bindings (step 6b): an automation **cannot** write a literal `{{config.x}}`/`{{secret.x}}` via a plain `set`/fetch body — DSUL resolves it to empty at set-time (and a `{% "{{" + … %}` concat is rejected by the parser). **The enabling trick: build the literal in Custom Code** (`makeConfigRef`/`makeSecretRef` return the string in plain JS) — substituting the CC-returned value is single-pass, so the literal is stored intact and resolves at read time. `auth: workspace: true` mints a JWT that can PATCH the tenant's own `/security/secrets` (provision placeholders) and `/config` (binding B). Binding A goes into the terminal `set: config` merge.
+
+Platform facts behind the design: `{{secret.x}}` resolves ONLY inside a workspace's `config.value` (never directly in an automation, never in an app-instance config) — hence the two-hop chain. An app's published `config.value` defaults do NOT propagate to tenant app instances, which is why onInstall writes the bindings per-tenant at install time rather than relying on defaults.
+
+The hand-authored equivalent is the `*-consumer` pattern (`index.yml config.value` for B + `imports/<Service>.yml` override for A) — still valid for workspaces you author in DSUL. A tenant can also just type the credentials directly into the app-instance config form (skips the Secrets section entirely).
 
 ### Phase 5 — Generate entity-grouped MCP tools + per-op public automations
 
@@ -363,16 +382,20 @@ tools/call("workbooks", {action:        ┌─ mcp.yml (extracts toolName + argu
 3. Human review: list `method-*`, `tool-*`, `<op>` counts to the user. Confirm before pushing.
 4. **Make sure the target workspace exists.** Brand-new workspace? Call `create_workspace` FIRST with `{name, slug, description, labels}` to get a real ID, then sed the ID into `<<WORKSPACE_ID>>` in `.import.yml` + `index.yml`. **`push_workspace` will not create a workspace from a slug — it requires the workspace to already exist.** Default environment: **`sandbox`** unless the user explicitly asks for `prod` (CLAUDE.md default, and a fresh prod connector should be sandbox-validated first anyway).
 5. `push_workspace` with `workspaceId: <ID>` (NOT `workspaceName`, since a fresh workspace isn't in the env mapping yet) on `sandbox` with a short message (`initial`, `add-tools`, etc., max 15 chars, alphanumeric + `-_`). Expect ONE error in the response: `"Could not publish app — Missing photo"`. That's normal — the workspace + all files were imported; only the App-publish step needs the photo, which we set in step 6.
-6. **Upload the workspace logo, then set `photo`** — the workspace now exists, so host the logo on it instead of hotlinking an external URL.
+6. **Upload the workspace logo via the Prisme MCP, then set `photo`** — the workspace now exists, so host the logo on it instead of hotlinking an external URL.
 
-   **The bearer-token-via-curl path is unreliable under auto-mode.** `refresh_auth_token` writes a fresh JWT into `~/.claude.json`, but the auto-mode classifier blocks Bash from reading `~/.claude.json` (it sees credential exfiltration, regardless of the legitimate purpose). The classifier reliably refuses, so:
+   **Always use `mcp__prisme-ai-builder__upload_file` directly.** Do NOT propose curl + bearer token, do NOT ask the user to upload via Studio UI, do NOT use `! curl` inline-shell prefixes. The MCP tool handles auth, multipart and ACL itself — one call is enough:
 
-   **Always ask the user to do the upload themselves**, by default — don't burn a turn trying to read the credential store. Offer them three concrete options in a single `AskUserQuestion`:
-   - **Studio UI**: upload `logo.<ext>` (printed absolute path) via the workspace's Files page, then paste back the `https://uploads.prisme.ai/<ID>/…` URL.
-   - **Inline shell prefix**: paste the `! curl -sS -X POST "<apiUrl>/v2/workspaces/<ID>/files" -H "Authorization: Bearer $(jq -r '.PRISME_ENVIRONMENTS.<env>.token' ~/.claude.json)" -F "file=@<abs-path-to-logo>"` command in the chat prompt — the `!` runs it in their shell with their own credentials, output lands in the conversation.
-   - **They run curl externally** and paste the JSON response back.
+   ```
+   mcp__prisme-ai-builder__upload_file {
+     workspaceId: <ID>,
+     environment: <env>,         # sandbox | prod
+     path: "<absolute path to logo.<ext>>",
+     public: true
+   }
+   ```
 
-   In all three cases, take the resulting URL (`uploads.prisme.ai/<ID>/...`), inject it into `index.yml` `photo:`, re-`push_workspace` (this time the App-publish step succeeds), then delete the local `logo.<ext>` build artifact. **Never** fall back to hotlinking the original external source URL into `photo:`.
+   The response is an array of file objects — read `result[0].url` (looks like `https://api.<env>.prisme.ai/v2/files/<ID>/<fileId>.<name>`), inject it into `index.yml` `photo:`, re-`push_workspace` (this time the App-publish step succeeds), then delete the local `logo.<ext>` build artifact. **Never** fall back to hotlinking the original external source URL into `photo:`. (See memory entry `feedback_app_mcp_logo_upload_via_mcp.md` — older revisions of this skill recommended an `AskUserQuestion` curl/UI fallback, which is wrong.)
 7. **Post-push smoke check — do not skip**, it catches deploy-time failures that validation can't:
    - **Custom Code reload**: right after push, search events for `Custom Code.error` on `fetchAPI` / `onParentAppPublish` — if any, the CC runtime didn't reload and functions will be "not found" at runtime. Recovery: `update_app_instance_config` with the **complete** functions map (the tool replaces, doesn't merge — see memory). Then re-push.
    - **generateKey round-trip**: `execute_automation generateKey` with a dummy `{body: {workspaceId: "test", getConfigUrl: "https://x.y/z"}}` and confirm the response is a proper signed key `^[A-Za-z0-9_-]+\.[a-f0-9]{64}$` — not an error object. Catches `#`-in-code-block-style Custom Code issues.
@@ -444,10 +467,15 @@ All of these were already hit on existing workspaces — don't rediscover them:
 
 - **`config.value.mcpApiKey`** — if set, it defeats `onInstall`'s "key already generated" guard (the template string is truthy even when secret is empty). Solution: do NOT add `mcpApiKey` to `config.value`.
 - **Trailing `/v2` on `global.apiUrl`** — `{{global.apiUrl}}` already includes `/v2`. Do not append it in `onInstall`.
+- **`set: config type: merge` is TERMINAL in `onInstall`** — persisting config re-triggers `workspaces.apps.configured`, which ends the current run. Every instruction placed AFTER the config merge (emits, fetches, more sets) is silently skipped — no error, just nothing. Keep the config merge as the very LAST instruction; emit `completed` and run all side-effects (e.g. the OAuth secret-provisioning block) BEFORE it. Symptom if violated: `onInstall.completed` (and anything after the merge) never fires even though `mcpApiKey` got set. Validated on google-docs.
+- **`{{secret.X}}` resolves ONLY through a workspace's `config.value`, never directly in an automation, AND never in an app-instance config** — reading `{{secret.foo}}` inside an automation `set`/`condition`/`output` yields empty/falsy; the same literal in an installed app-instance config also stays unresolved (and `getConfig`'s `matches "{{"` guard wipes it). It resolves only as `config.value.foo: '{{secret.foo}}'`, read back via `{{config.foo}}`. An app instance chains to it: instance `config.x: '{{config.foo}}'` → workspace `config.value.foo: '{{secret.foo}}'` → secret store (the two-hop binding). An app's published `config.value` defaults do NOT propagate to tenant instances.
+- **Writing a literal `{{config.x}}`/`{{secret.x}}` from an automation needs the Custom Code trick** — a plain `set`/fetch body resolves the template to empty at set-time, and `{% "{{" + … %}` concat is rejected by the parser. BUT a Custom Code function that returns the string in plain JS (`return '{' + '{secret.' + key + '}' + '}'`) works: substituting the CC-returned value is single-pass, so the literal is stored intact and resolves at read time. This is what lets `onInstall` auto-wire per-tenant OAuth bindings (`makeConfigRef`/`makeSecretRef`). Validated on google-docs.
+- **`auth: workspace: true` JWT can PATCH the workspace's own `/security/secrets` and `/config`** — no extra `security.yml` grant; the workspace JWT carries the permission for its own workspace. Pattern: `- auth: {workspace: true, output: wsJwt}` then `fetch … Authorization: Bearer {{wsJwt.jwt}}`. Combined with the CC-literal trick, this lets onInstall provision secret placeholders + write both config bindings on install. Events emitted by an installed app are namespaced `AppName.<<SERVICE_SLUG>>.event` — search with a `*onInstall*` wildcard, not the bare event name, when debugging in a tenant.
 - **`break: { scope: all }` in `try/catch`** — propagates as `$error = {"break":{}}`. Use nested `conditions` with `default:` instead.
 - **MCP Core's internal break on invalid API key** — we bypass MCP Core for `tools/call`. MCP Core is kept only for `tools/list` / `initialize`.
 - **MCP notifications must be empty at the HTTP wire boundary** — `notifications/initialized` and any JSON-RPC message without an `id` must produce `202 Accepted` with no body. Do not return `{}`, `null`, `""`, or a JSON-RPC success object. Validate this in the consumer workspace with a narrow DSUL `fetch` transport-contract test, not only `execute_automation`. If the DSUL output is intentionally empty but the HTTP response body is `{}`, fix the platform runtime serializer instead of changing the connector contract.
 - **`integer` type** — DSUL only accepts `number`. Convert every `type: integer` in the swagger to `number` in DSUL.
+- **NEVER use a ternary (`cond ? a : b`) inside a DSUL `{% %}` or `{{ }}` expression** — it raises `InvalidExpressionSyntax: invalid syntax` at runtime (NOT caught by `validate_automation`). To compute a value conditionally, pre-`set` the variable then flip it with a `conditions:` block (`- set: {name: ok, value: false}` then `- conditions: '{{x}}': [- set: {name: ok, value: true}]`). Ternaries ARE valid inside Custom Code `code: |` blocks and inline page `<script>` (real JS) — the ban applies only to DSUL expressions. Common offenders: helper `output:` booleans like `'{% {{x}} ? true : false %}'`.
 - **`arguments: {}` or empty comment body** — YAML-parse-invalid schema. If the automation has no arguments, omit the key.
 - **Hyphenated keys in expressions** — use `{{obj["key-name"]}}`, never `{{obj.key-name}}` (parsed as subtraction).
 - **Dispatcher default branch** — only needed when you have a generic fallback (GraphQL dispatcher). Without it, set `result: null` and `!{{result}}` becomes an "Unknown tool" error — that's fine.

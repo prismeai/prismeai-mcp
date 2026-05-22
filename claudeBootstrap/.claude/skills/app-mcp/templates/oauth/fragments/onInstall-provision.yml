@@ -1,0 +1,145 @@
+# Phase 4.5 — INSERT this block into automations/onInstall.yml at the
+# `<<OAUTH_PROVISION_HOOK>>` marker (immediately BEFORE the `completed` emit +
+# the TERMINAL config merge).
+#
+# Fully auto-wires per-tenant OAuth credentials so the tenant admin only fills
+# the secret VALUES in the Builder "Secrets" section — everything else is set
+# on install. Three parts (all validated end-to-end on google-docs 2026-05-22):
+#   1. PROVISION  — create empty placeholder secrets (<<SERVICE_SLUG>>OauthClientId/Secret)
+#                   with descriptions, so they surface in the Secrets section.
+#   2. BINDING B  — write the tenant workspace config.value mapping:
+#                   config.value.<<SERVICE_SLUG>>OauthClientId: '{{secret.<<SERVICE_SLUG>>OauthClientId}}'
+#                   ({{secret.x}} only resolves inside a workspace config.value).
+#   3. BINDING A  — set the app-instance config to point at that workspace config:
+#                   config.oauthClientId: '{{config.<<SERVICE_SLUG>>OauthClientId}}'
+#                   (done in the TERMINAL config merge below — see note).
+# Resolution chain: instance {{config.x}} -> workspace config.value {{secret.x}} -> secret store.
+#
+# KEY TRICK: an automation cannot write a literal {{config.x}}/{{secret.x}} via a
+# plain set/fetch body (DSUL resolves it to empty at set-time). Build the literal
+# in Custom Code (makeConfigRef / makeSecretRef) — substituting the CC-returned
+# string is single-pass, so the literal is stored intact and resolves at read time.
+#
+# `auth: workspace: true` JWT can PATCH the tenant's own /security/secrets AND
+# /config (no extra security.yml grant). Provisioning is idempotent (only creates
+# absent secrets). The whole block MUST run before the terminal `set: config`
+# merge (that merge re-triggers apps.configured and ends the run).
+
+- auth:
+    workspace: true
+    output: wsJwt
+# ---- 1. PROVISION placeholder secrets ----
+- set:
+    name: secretsUrl
+    value: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/security/secrets'
+- fetch:
+    url: '{{secretsUrl}}'
+    method: GET
+    headers:
+      Authorization: Bearer {{wsJwt.jwt}}
+    output: existingSecretsResp
+    outputMode: detailed_response
+    emitErrors: false
+- set:
+    name: existingSecrets
+    value: '{{existingSecretsResp.body}}'
+- set:
+    name: toProvision
+    value: {}
+- set:
+    name: provisionCount
+    value: 0
+- conditions:
+    '!{{existingSecrets.<<SERVICE_SLUG>>OauthClientId}}':
+      - set:
+          name: toProvision.<<SERVICE_SLUG>>OauthClientId
+          value:
+            value: ''
+            description: '<<SERVICE_NAME>> OAuth2 Client ID. Create an OAuth application at <<PROVIDER_APP_URL>>, set its redirect URI to the app instance "OAuth Callback URL", then paste the Client ID here.'
+      - set:
+          name: provisionCount
+          value: '{% {{provisionCount}} + 1 %}'
+- conditions:
+    '!{{existingSecrets.<<SERVICE_SLUG>>OauthClientSecret}}':
+      - set:
+          name: toProvision.<<SERVICE_SLUG>>OauthClientSecret
+          value:
+            value: ''
+            description: '<<SERVICE_NAME>> OAuth2 Client Secret (shown once on the OAuth application page at <<PROVIDER_APP_URL>>).'
+      - set:
+          name: provisionCount
+          value: '{% {{provisionCount}} + 1 %}'
+- conditions:
+    '{{provisionCount}} > 0':
+      - fetch:
+          url: '{{secretsUrl}}'
+          method: PATCH
+          headers:
+            Authorization: Bearer {{wsJwt.jwt}}
+            Content-Type: application/json
+          body: '{{toProvision}}'
+          output: provisionResp
+          outputMode: detailed_response
+          emitErrors: false
+# ---- 2. BINDING B: workspace config.value -> secret ----
+- Custom Code.run:
+    function: makeSecretRef
+    parameters:
+      key: <<SERVICE_SLUG>>OauthClientId
+    output: secretRefClientId
+- Custom Code.run:
+    function: makeSecretRef
+    parameters:
+      key: <<SERVICE_SLUG>>OauthClientSecret
+    output: secretRefClientSecret
+- set:
+    name: configUrl
+    value: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/config'
+- fetch:
+    url: '{{configUrl}}'
+    method: GET
+    headers:
+      Authorization: Bearer {{wsJwt.jwt}}
+    output: curWsConfig
+    outputMode: body
+    emitErrors: false
+- set:
+    name: newWsValue
+    value: '{{curWsConfig.value}}'
+- set:
+    name: newWsValue.<<SERVICE_SLUG>>OauthClientId
+    value: '{{secretRefClientId}}'
+- set:
+    name: newWsValue.<<SERVICE_SLUG>>OauthClientSecret
+    value: '{{secretRefClientSecret}}'
+- fetch:
+    url: '{{configUrl}}'
+    method: PATCH
+    headers:
+      Authorization: Bearer {{wsJwt.jwt}}
+      Content-Type: application/json
+    body:
+      value: '{{newWsValue}}'
+    output: wsConfigResp
+    outputMode: detailed_response
+    emitErrors: false
+# ---- 3. BINDING A literals (consumed by the terminal config merge below) ----
+- Custom Code.run:
+    function: makeConfigRef
+    parameters:
+      key: <<SERVICE_SLUG>>OauthClientId
+    output: bindingClientId
+- Custom Code.run:
+    function: makeConfigRef
+    parameters:
+      key: <<SERVICE_SLUG>>OauthClientSecret
+    output: bindingClientSecret
+- emit:
+    event: <<SERVICE_SLUG>>.onInstall.secretsProvisioned
+    payload:
+      provisioned: '{{provisionCount}}'
+      bindingBStatus: '{{wsConfigResp.status}}'
+#
+# Then add to the TERMINAL `set: config type: merge` value (binding A):
+#   oauthClientId: '{{bindingClientId}}'
+#   oauthClientSecret: '{{bindingClientSecret}}'

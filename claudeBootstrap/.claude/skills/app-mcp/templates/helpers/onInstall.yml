@@ -94,6 +94,21 @@ do:
   - set:
       name: oauthCallbackUrl
       value: '{{global.apiUrl}}/workspaces/slug:<<SERVICE_SLUG>>/webhooks/oauthCallback'
+  # <<OAUTH_PROVISION_HOOK>> — Phase 4.5 (OAuth connectors only) inserts the
+  # secret-provisioning block (templates/oauth/fragments/onInstall-provision.yml)
+  # HERE, before the completed emit + the terminal config merge. Non-OAuth
+  # connectors leave this marker out.
+  - comment: >-
+      The `set: config` merge below is TERMINAL — persisting config re-triggers
+      `workspaces.apps.configured`, which ends this run. Any instruction placed
+      AFTER it (emits, fetches, more sets) is silently skipped. So emit
+      `completed` and run any side-effects BEFORE this point, and keep the
+      config merge as the very last instruction.
+  - emit:
+      event: <<SERVICE_SLUG>>.onInstall.completed
+      payload:
+        mcpEndpoint: '{{mcpEndpoint}}'
+        hasKey: true
   - set:
       name: config
       type: merge
@@ -101,9 +116,8 @@ do:
         mcpApiKey: '{{keyResponse.body.mcpApiKey}}'
         mcpEndpoint: '{{mcpEndpoint}}'
         oauthCallbackUrl: '{{oauthCallbackUrl}}'
-  - emit:
-      event: <<SERVICE_SLUG>>.onInstall.completed
-      payload:
-        mcpEndpoint: '{{mcpEndpoint}}'
-        hasKey: true
+        # <<OAUTH_BINDING_A>> — OAuth connectors (Phase 4.5) ALSO add binding A here,
+        # consuming the makeConfigRef literals built in the provisioning block above:
+        #   oauthClientId: '{{bindingClientId}}'
+        #   oauthClientSecret: '{{bindingClientSecret}}'
 output: '{{keyResponse.body.mcpApiKey}}'
