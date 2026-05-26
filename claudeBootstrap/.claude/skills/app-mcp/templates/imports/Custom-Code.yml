@@ -73,6 +73,21 @@ config:
         const v = (value === null || value === undefined) ? '' : String(value);
         return { usable: v.length > 0 && v.indexOf('{{') === -1 };
 
+    # Short non-reversible fingerprint of a credential, used to KEY the session
+    # token cache in buildAppAuth (exchange/cached-auth connectors only). When the
+    # configured credential changes, the fingerprint changes and the cached access
+    # token is invalidated — prevents serving a token exchanged from an old PAT.
+    # See the "session-cached auth token" trap in SKILL.md. Drop it for pure
+    # static-token connectors that never exchange/cache.
+    tokenFingerprint:
+      parameters:
+        value:
+          type: string
+      code: |
+        const crypto = require('crypto');
+        const v = (value === null || value === undefined) ? '' : String(value);
+        return crypto.createHash('sha256').update(v).digest('hex').slice(0, 16);
+
     # ===================== GENERAL HELPERS =====================
     buildQueryString:
       parameters:

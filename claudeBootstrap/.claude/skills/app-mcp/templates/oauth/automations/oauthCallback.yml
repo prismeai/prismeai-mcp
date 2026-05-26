@@ -5,6 +5,7 @@ description: >-
   tenant's OAuth config (stored in pending from initiateOAuth), exchanges the
   code for tokens using the tenant's OAuth client, then stores the result as
   tenant-prefixed user-scoped secrets.
+private: true
 when:
   endpoint: true
 do:

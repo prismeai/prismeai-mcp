@@ -256,6 +256,15 @@ def rule_audit(conn_dir, subs, is_oauth):
                 if re.search(r"\{[%{].*\?.*:.*[%}]\}", ln):
                     H("R8-ternary", f"Possible ternary in DSUL expr at {fn}:{i} — "
                                     "InvalidExpressionSyntax at runtime. Verify.")
+                # R14 — literal "{{" inside a DSUL expression (the `matches "{{"`
+                # binding-literal guard). Crashes InvalidVariableNameError (`..`)
+                # when the tested value is itself an unresolved {{...}} literal
+                # (unconfigured tenant). Detect the brace in Custom Code instead
+                # (cleanCredential helper). See feedback-dsul-literal-braces-in-expr.
+                if 'matches "{{' in ln or "matches '{{" in ln:
+                    A("R14-literal-braces", f"Literal `{{{{` in a DSUL expression at {fn}:{i} "
+                      "(`matches \"{{\"` guard) — crashes `..` on the unconfigured path. "
+                      "Detect the binding literal in Custom Code (cleanCredential) instead.")
             # R9 — raw provider body echoed in handleApiError
             if fn == "handleApiError.yml" and re.search(r"json\(\s*\{\{\s*response\.body", txt):
                 H("R9-raw-body", "handleApiError may return raw `json(response.body)` — "
@@ -315,6 +324,27 @@ def rule_audit(conn_dir, subs, is_oauth):
               "Consider the auto-wiring UX (canonical: google-docs) — applies to PAT/token/"
               "apiKey/password, not just OAuth.")
 
+    # R15 — public pages must be labeled `public`, NOT `accessControl: public`.
+    # `accessControl` is not a recognized Page field and is silently ignored; the
+    # security.yml rule grants anonymous read via conditions.labels.$in:[public].
+    # A page with only `accessControl: public` stays members-only → non-owner
+    # users (e.g. a colleague completing OAuth on connector-callback) hit the
+    # pages-service 401. See memory feedback_prisme_public_page_label.
+    pages_dir = os.path.join(conn_dir, "pages")
+    if os.path.isdir(pages_dir):
+        for fn in sorted(os.listdir(pages_dir)):
+            if not fn.endswith(".yml"):
+                continue
+            with open(os.path.join(pages_dir, fn)) as f:
+                pdata, _ = load_yaml(f.read())
+            if not isinstance(pdata, dict):
+                continue
+            plabels = pdata.get("labels") or []
+            if str(pdata.get("accessControl", "")).lower() == "public" and "public" not in plabels:
+                A("R15-public-page", f"pages/{fn} uses `accessControl: public` (a silently-ignored "
+                  "field) without `labels:\n  - public` — the page stays members-only and non-owner "
+                  "users hit the pages-service 401. Replace with `labels: [public]`.")
+
     # OAuth-specific
     if is_oauth:
         gc_path = os.path.join(conn_dir, "automations", "getConfig.yml")
@@ -332,6 +362,68 @@ def rule_audit(conn_dir, subs, is_oauth):
             if "oauthCallbackUrl" not in oi:
                 H("R12-oauth-callback", "OAuth onInstall.yml does not populate `oauthCallbackUrl` "
                                         "readOnly config — tenant can't find the redirect URI.")
+
+    # R15 — every App-mode op argument must carry a `description:`. The Builder
+    # renders the instruction form from `arguments`, so an undescribed arg shows
+    # a blank-hint field (the classic bare `id` complaint). Fix is connector-
+    # specific content (API-sourced; id/iid by specific resource) → NEED_HUMAN.
+    _HELP = {"mcp", "onInstall", "generateKey", "getConfig", "buildAppAuth", "executeApiCall",
+             "handleApiError", "formatToolOutput", "routeToolCall", "ensureAuthentication",
+             "connect", "disconnect", "initiateOAuth", "oauthCallback", "checkAuthStatus",
+             "refreshOAuthToken", "disconnectOAuth"}
+    autos_dir = os.path.join(conn_dir, "automations")
+    undoc = []
+    if os.path.isdir(autos_dir):
+        for fn in sorted(os.listdir(autos_dir)):
+            if not fn.endswith(".yml"):
+                continue
+            op = fn[:-4]
+            if op in _HELP or op.startswith("method-") or op.startswith("tool-"):
+                continue
+            with open(os.path.join(autos_dir, fn)) as f:
+                doc, _ = load_yaml(f.read())
+            args = (doc or {}).get("arguments") or {}
+            if not isinstance(args, dict):
+                continue
+            missing = [a for a, v in args.items()
+                       if not (isinstance(v, dict) and str(v.get("description") or "").strip())]
+            if missing:
+                undoc.append((op, len(missing)))
+    if undoc:
+        n_args = sum(c for _, c in undoc)
+        sample = ", ".join(f"{op}({c})" for op, c in undoc[:5])
+        H("R16-arg-descriptions", f"{n_args} App-mode op argument(s) across {len(undoc)} op file(s) "
+                                  f"lack a `description:` — the Builder instruction form renders "
+                                  f"blank-hint fields (e.g. a bare `id`). Add API-sourced descriptions; "
+                                  f"for id/iid use the specific resource (project/user/group). "
+                                  f"e.g. {sample}.")
+
+    # R17 — internal automations (helpers, dispatchers, 00_MCP webhooks) must be
+    # `private: true`, else they surface in the App's instructions list (a bare
+    # `<App>.generateKey`/`.mcp`/`.getConfig`). private:true does NOT block the
+    # endpoint webhook nor event triggers — it only hides from instructions.
+    PRIV = {"mcp", "generateKey", "getConfig", "onInstall", "buildAppAuth", "executeApiCall",
+            "handleApiError", "formatToolOutput", "routeToolCall", "ensureAuthentication",
+            "refreshOAuthToken", "oauthCallback", "initiateOAuth", "checkAuthStatus",
+            "disconnectOAuth", "method-connect", "method-disconnect"}
+    notpriv = []
+    if os.path.isdir(autos_dir):
+        for fn in sorted(os.listdir(autos_dir)):
+            if not fn.endswith(".yml"):
+                continue
+            op = fn[:-4]
+            if not (op in PRIV or op.startswith("method-") or op.startswith("tool-")):
+                continue
+            with open(os.path.join(autos_dir, fn)) as f:
+                txt = f.read()
+            if not re.search(r"^private:\s*true", txt, re.M):
+                notpriv.append(op)
+    if notpriv:
+        more = "..." if len(notpriv) > 8 else ""
+        A("R17-private-endpoints", f"{len(notpriv)} internal automation(s) missing `private: true` — "
+                                   f"they leak into the App's instructions list (e.g. a bare "
+                                   f"`<App>.generateKey`): {', '.join(notpriv[:8])}{more}. "
+                                   f"Add `private: true` (does not block endpoint webhooks).")
     return out
 
 

@@ -100,6 +100,62 @@ do:
                   output: response
                   outputMode: detailed_response
                   emitErrors: false
+  - comment: >-
+      Self-heal on 401 — exchange/cached-auth connectors may hold a stale
+      session-cached token (e.g. exchanged from a credential that has since
+      changed; the cache survives the change until TTL). Force buildAppAuth to
+      re-exchange and retry the request once. The `refreshed` guard makes this a
+      no-op for pure static-token connectors (buildAppAuth never re-exchanges)
+      and for MCP-mode central calls (no central credential → no refresh), so it
+      is safe to keep regardless of auth model.
+  - conditions:
+      '{{response.status}} == 401':
+        - buildAppAuth:
+            forceRefresh: true
+            output: freshAuth
+        - conditions:
+            '{{freshAuth.refreshed}}':
+              - set:
+                  name: fetchHeaders.Authorization
+                  value: Bearer {{freshAuth.accessToken}}
+              - conditions:
+                  '{{effectiveMethod}} == "GET" || {{effectiveMethod}} == "DELETE"':
+                    - fetch:
+                        url: '{{effectiveBaseUrl}}/{{path}}{{qs}}'
+                        method: '{{effectiveMethod}}'
+                        headers: '{{fetchHeaders}}'
+                        output: response
+                        outputMode: detailed_response
+                        emitErrors: false
+                  default:
+                    - conditions:
+                        '{{rawBody}}':
+                          - fetch:
+                              url: '{{effectiveBaseUrl}}/{{path}}{{qs}}'
+                              method: '{{effectiveMethod}}'
+                              headers: '{{fetchHeaders}}'
+                              body: '{{rawBody}}'
+                              output: response
+                              outputMode: detailed_response
+                              emitErrors: false
+                        '{{body}}':
+                          - fetch:
+                              url: '{{effectiveBaseUrl}}/{{path}}{{qs}}'
+                              method: '{{effectiveMethod}}'
+                              headers: '{{fetchHeaders}}'
+                              body: '{{body}}'
+                              output: response
+                              outputMode: detailed_response
+                              emitErrors: false
+                        default:
+                          - fetch:
+                              url: '{{effectiveBaseUrl}}/{{path}}{{qs}}'
+                              method: '{{effectiveMethod}}'
+                              headers: '{{fetchHeaders}}'
+                              body: {}
+                              output: response
+                              outputMode: detailed_response
+                              emitErrors: false
   - handleApiError:
       response: '{{response}}'
       operation: '{{operation}}'

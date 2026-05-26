@@ -7,6 +7,7 @@ description: >-
       button — identifies tenant via ?mcpApiKey= or session.mcpApiKey).
     - An internal automation (called by method-disconnect with tenantId +
       tenantConfig args).
+private: true
 when:
   endpoint: true
 arguments:

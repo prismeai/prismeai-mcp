@@ -11,6 +11,7 @@ description: >-
       that webhook.
     - `redirectTo` (optional): the callback page URL the popup will be sent
       back to after OAuth completes. Validated against the platform host.
+private: true
 when:
   endpoint: true
 do:

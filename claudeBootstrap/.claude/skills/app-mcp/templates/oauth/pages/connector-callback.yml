@@ -2,7 +2,8 @@ slug: connector-callback
 name:
   en: Connector callback
   fr: Connector callback
-accessControl: public
+labels:
+  - public
 blocks:
   - slug: RichText
     content: |

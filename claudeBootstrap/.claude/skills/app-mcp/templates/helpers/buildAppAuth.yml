@@ -5,10 +5,17 @@ description: >-
   credentials as arguments (MCP mode) or falls back to `config.*` (App mode —
   direct `<<SERVICE_NAME>>.xxx` automation calls).
   Returns { accessToken, baseUrl } or { error }.
-  # <<ADAPT>>: if the service requires a JWT exchange step (e.g. POST
-  # /authenticate with client_id/client_secret → short-lived JWT), do it here
-  # and cache the JWT in `session.<service>Jwt[cacheKey]`. For APIs with a
-  # direct static API token, skip the exchange and return the token as-is.
+  # <<ADAPT>>: if the service requires a token-exchange step (e.g. POST
+  # /authenticate or GET /credentials with the PAT → short-lived access token),
+  # do it here and CACHE the exchanged token in session. When you cache:
+  #   1. Key the cache on tokenFingerprint(credential) — NOT on the session
+  #      alone — so a credential change invalidates a stale cached token. (The
+  #      "session-cached auth token" trap: changing the PAT otherwise keeps
+  #      serving the token exchanged from the OLD PAT until TTL → silent 401s.)
+  #   2. Accept `forceRefresh` (below): skip the cache + re-exchange when true.
+  #   3. On a fresh exchange, return `refreshed: true` so executeApiCall knows it
+  #      may retry a 401 with the new token.
+  # For APIs with a direct static API token, skip all of this and return it as-is.
 private: true
 arguments:
   # <<ADAPT>>: shape of credentials depends on the service.
@@ -19,6 +26,13 @@ arguments:
     type: string
   baseUrl:
     type: string
+  forceRefresh:
+    type: boolean
+    description: >-
+      Exchange/cached-auth connectors only. When true, skip the session token
+      cache and force a fresh exchange. executeApiCall sets it after a 401 to
+      recover from a stale cached token (e.g. the credential changed). Ignored
+      by pure static-token connectors.
 do:
   - comment: Resolve credentials — arguments take precedence over config
   - set:
