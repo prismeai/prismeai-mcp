@@ -1,6 +1,6 @@
 ---
 name: app-mcp-test
-description: End-to-end smoke-test the tools exposed by a Prisme.ai App+MCP workspace, then hand off to app-mcp-consumer to consolidate the successful coverage into a consumer test workspace. Asks for the workspace and environment, collects the credentials required by the app's config schema, lists every MCP tool, then executes them one by one, diagnosing and fixing errors in the workspace until the full suite passes. Supports static tokens, Basic, OAuth2 client-credentials, AND OAuth2 authorization-code (PKCE) when the user supplies a pre-configured tenant workspace whose user already completed the browser auth — in that mode we call `ensureAuthentication` first to mint a `$secret:` accessToken ref and inject it into `routeToolCall`/`tool-*` directly. Use when the user says "test this app+mcp", "tester les tools du MCP X", "/app-mcp-test", or similar.
+description: End-to-end smoke-test the tools exposed by a Prisme.ai App+MCP workspace, then hand off to app-mcp-build-consumer to consolidate the successful coverage into a consumer test workspace. Asks for the workspace and environment, collects the credentials required by the app's config schema, lists every MCP tool, then executes them one by one, diagnosing and fixing errors in the workspace until the full suite passes. Supports static tokens, Basic, OAuth2 client-credentials, AND OAuth2 authorization-code (PKCE) when the user supplies a pre-configured tenant workspace whose user already completed the browser auth — in that mode we call `ensureAuthentication` first to mint a `$secret:` accessToken ref and inject it into `routeToolCall`/`tool-*` directly. Use when the user says "test this app+mcp", "tester les tools du MCP X", "/app-mcp-test", or similar.
 argument-hint: "[workspace-slug] [?sandbox|prod]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__execute_automation, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__search_workspaces
 ---
@@ -10,7 +10,7 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent, mcp_
 You are running a **smoke test** of every tool exposed by a Prisme.ai App + MCP workspace.
 The goal is: for a given workspace + environment, invoke each `tool-<op>` automation with realistic arguments and the user's real credentials, and keep fixing until every tool returns a non-error result.
 
-The workspace layout you are testing follows the scaffold produced by the `/app-mcp` skill. Re-read `.claude/skills/app-mcp/SKILL.md` if you need a refresher on the conventions (especially `tool-*` and `method-*`).
+The workspace layout you are testing follows the scaffold produced by the `/app-mcp-implement` skill. Re-read `.claude/skills/app-mcp-implement/SKILL.md` if you need a refresher on the conventions (especially `tool-*` and `method-*`).
 
 **Scope guardrails**:
 - Supported credential models: static tokens (PAT / Bearer), Basic (email + token), OAuth2 `client_credentials`, AND OAuth2 authorization-code / PKCE **via the tenant-injection pattern** — see Phase 2 + Phase 5 below. The only thing still out of scope is OAuth-AC when no pre-configured tenant exists (i.e. you'd need to drive a real browser flow yourself).
@@ -177,9 +177,9 @@ If any workspace files were modified, remind the user that changes were pushed t
 
 **Goal**: turn the proven smoke-test coverage into a durable consumer workspace.
 
-After the tool test loop is complete, call `/app-mcp-consumer <workspace-slug>` to create or update the corresponding `*-consumer` workspace. Pass along the tested workspace slug, environment, tool list, operation classifications, known safe fixture values, skipped/destructive tools, and any fixes made during this run.
+After the tool test loop is complete, call `/app-mcp-build-consumer <workspace-slug>` to create or update the corresponding `*-consumer` workspace. Pass along the tested workspace slug, environment, tool list, operation classifications, known safe fixture values, skipped/destructive tools, and any fixes made during this run.
 
-The consumer workspace should consolidate the tested App operations and MCP-through-Agent Factory paths into repeatable DSUL test suites. Do not rebuild this logic inside `/app-mcp-test`; hand off to `/app-mcp-consumer`.
+The consumer workspace should consolidate the tested App operations and MCP-through-Agent Factory paths into repeatable DSUL test suites. Do not rebuild this logic inside `/app-mcp-test`; hand off to `/app-mcp-build-consumer`.
 
 ---
 

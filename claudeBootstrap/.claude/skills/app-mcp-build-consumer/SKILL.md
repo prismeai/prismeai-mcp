@@ -1,5 +1,5 @@
 ---
-name: app-mcp-consumer
+name: app-mcp-build-consumer
 description: Build or audit Prisme.ai App+MCP consumer DSUL workspaces that consolidate tests for a target App surface and its MCP server through Agent Factory agents. Use when implementing, recreating, or assessing connector consumer workspaces.
 ---
 

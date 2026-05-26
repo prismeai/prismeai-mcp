@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Audit ONE app-mcp connector workspace against the current app-mcp templates.
+"""Audit ONE app-mcp connector workspace against the current app-mcp-implement templates.
 
 Two outputs, both on stdout as a compact markdown report:
 
-  1. RULE AUDIT   — grep/parse checks derived from the app-mcp skill's
+  1. RULE AUDIT   — grep/parse checks derived from the app-mcp-implement skill's
                     "Common traps" + "MCP endpoint security checklist".
                     Each finding is tagged MAJOR (mechanical, safe to fix) or
                     NEED_HUMAN (judgment call).
@@ -20,7 +20,7 @@ classifies each diff hunk as template-ahead (apply) vs workspace-ahead
 (preserve), and decides what to push.
 
 Usage:
-  audit_connector.py --connector <path/to/workspace> --templates <path/to/app-mcp/templates>
+  audit_connector.py --connector <path/to/workspace> --templates <path/to/app-mcp-implement/templates>
 """
 import argparse
 import difflib

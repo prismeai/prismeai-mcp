@@ -1,15 +1,15 @@
 ---
-name: app-mcp-update-all
-description: Find every Prisme.ai App+MCP connector workspace (by the `app-mcp` label) and check each one against the current `app-mcp` skill templates + best-practice rules, reporting drift and applying approved fixes. The connectors are the workspaces scaffolded by `/app-mcp`; this skill keeps the whole fleet in sync when a template or trap-fix lands. Use when the user says "update all app-mcp connectors", "vérifie que les connecteurs sont à jour", "propage le fix de template à tous les connecteurs", "/app-mcp-update-all", or similar.
+name: app-mcp-fleet-sync
+description: Find every Prisme.ai App+MCP connector workspace (by the `app-mcp` label) and check each one against the current `/app-mcp-implement` skill templates + best-practice rules, reporting drift and applying approved fixes. The connectors are the workspaces scaffolded by `/app-mcp-implement`; this skill keeps the whole fleet in sync when a template or trap-fix lands. Use when the user says "update all app-mcp connectors", "vérifie que les connecteurs sont à jour", "propage le fix de template à tous les connecteurs", "/app-mcp-fleet-sync", or similar.
 argument-hint: "[?connector-slug] [?sandbox|prod]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent, mcp__prisme-ai-builder__search_workspaces, mcp__prisme-ai-builder__pull_workspace, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__update_app_instance_config, mcp__prisme-ai-builder__get_prisme_documentation
 ---
 
 # App + MCP fleet updater
 
-You maintain the **fleet of App+MCP connector workspaces** scaffolded by the `/app-mcp` skill. When a template gets a new trap-fix or security hardening, the deployed connectors drift out of date one by one. This skill finds them all, diffs each against the current templates **and** a rule checklist, and applies the approved fixes.
+You maintain the **fleet of App+MCP connector workspaces** scaffolded by the `/app-mcp-implement` skill. When a template gets a new trap-fix or security hardening, the deployed connectors drift out of date one by one. This skill finds them all, diffs each against the current templates **and** a rule checklist, and applies the approved fixes.
 
-The **source of truth** is `.claude/skills/app-mcp/templates/` plus that skill's *Common traps* + *MCP endpoint security checklist*. Read `app-mcp/SKILL.md` if you are unsure why a given fix exists — every rule in the audit script traces back to a trap documented there.
+The **source of truth** is `.claude/skills/app-mcp-implement/templates/` plus that skill's *Common traps* + *MCP endpoint security checklist*. Read `app-mcp-implement/SKILL.md` if you are unsure why a given fix exists — every rule in the audit script traces back to a trap documented there.
 
 Default operating mode (confirmed conventions):
 - **Discovery** is by the `app-mcp` label, with a structural-fingerprint fallback for bootstrap (see Phase 1).
@@ -22,7 +22,7 @@ This skill never blind-overwrites a connector file. A "verbatim" template can st
 
 ## The 18+ connectors (current fleet)
 
-These carry the app-mcp fingerprint (`automations/generateKey.yml` + `imports/MCP Core.yml`): data-galaxy, figma, gitlab, gitlab-oauth, google-docs, google-drive, google-mail, gryzzly, hubspot, monday, sage-x3, salesforce, service-now, sonarqube, storage-client, tableau, webdav (+ any new one since). **None carry the `app-mcp` label yet** — Phase 6 retro-tags them, and the `app-mcp` skill now stamps the label on creation.
+These carry the app-mcp fingerprint (`automations/generateKey.yml` + `imports/MCP Core.yml`): data-galaxy, figma, gitlab, gitlab-oauth, google-docs, google-drive, google-mail, gryzzly, hubspot, monday, sage-x3, salesforce, service-now, sonarqube, storage-client, tableau, webdav (+ any new one since). **None carry the `app-mcp` label yet** — Phase 6 retro-tags them, and the `/app-mcp-implement` skill now stamps the label on creation.
 
 ---
 
@@ -46,12 +46,12 @@ These carry the app-mcp fingerprint (`automations/generateKey.yml` + `imports/MC
 `scripts/audit_connector.py` runs on **one** connector and prints a compact markdown report (two sections: rule audit + template diff). It is read-only.
 
 ```bash
-python3 .claude/skills/app-mcp-update-all/scripts/audit_connector.py \
+python3 .claude/skills/app-mcp-fleet-sync/scripts/audit_connector.py \
   --connector prismeai-workspaces/workspaces/<slug> \
-  --templates .claude/skills/app-mcp/templates
+  --templates .claude/skills/app-mcp-implement/templates
 ```
 
-The rule audit codes (all trace to `app-mcp/SKILL.md`):
+The rule audit codes (all trace to `app-mcp-implement/SKILL.md`):
 
 | Code | Severity | Checks |
 |------|----------|--------|
@@ -74,7 +74,7 @@ The rule audit codes (all trace to `app-mcp/SKILL.md`):
 
 🔴 MAJOR = mechanical, safe to fix and push. 🟠 NEED_HUMAN = surface to the user before touching.
 
-If the rule checklist grows (a new trap lands in `app-mcp`), add the rule to the script — keep it the single executable definition of "up to date".
+If the rule checklist grows (a new trap lands in `/app-mcp-implement`), add the rule to the script — keep it the single executable definition of "up to date".
 
 ---
 
@@ -117,7 +117,7 @@ Only after the user approves the report:
 
 1. Apply the 🔴 mechanical fixes per connector (label add, `mcpApiKey` removal, `items:` addition, `type:object` swap, `#`→`//`, MCP Core re-mirror, template-ahead hunk transplant). Edit in the canonical workspace folder.
 2. For Class A *full* replacements (truly identical, no workspace-ahead hunk), copy the template content with the 4 placeholders substituted (`<<SERVICE_NAME>>`, `<<SERVICE_SLUG>>`, `<<WORKSPACE_ID>>`, `<<BASE_URL>>`).
-3. If you touched `index.yml` mcpTools, re-mirror `imports/MCP Core.yml` (Phase 4 step 10 of `app-mcp`).
+3. If you touched `index.yml` mcpTools, re-mirror `imports/MCP Core.yml` (Phase 4 step 10 of `/app-mcp-implement`).
 4. `validate_automation` on the changed automations. Must be clean (webhook "no arguments" warnings are fine).
 5. **Per-connector review sub-task** (CLAUDE.md convention): launch a code-review agent on the diff, get MAJOR / NEED_HUMAN issues. 🔴 fix them, 🟠 ask.
 6. `push_workspace` per connector to its env (the one discovered in Phase 1). Use a short message (`tmpl-sync`, `add-204-guard`, …, ≤15 chars). Re-run the script on that connector to confirm the drift is gone.
@@ -128,7 +128,7 @@ Only after the user approves the report:
 
 The discovery convention only works once the label exists. As part of the first run:
 1. For each discovered connector missing the label (rule `R1-label`), add `app-mcp` to `index.yml` `labels:` (keep the existing labels — `MCP`, `production:app`, the service name, etc.), then `push_workspace`. This is itself one of the 🔴 fixes from Phase 5, so fold it into that push rather than a separate one.
-2. The `app-mcp` skill has been patched to stamp `app-mcp` into the `labels` of every `create_workspace` call, so new connectors are tagged automatically — no future bootstrap needed.
+2. The `/app-mcp-implement` skill has been patched to stamp `app-mcp` into the `labels` of every `create_workspace` call, so new connectors are tagged automatically — no future bootstrap needed.
 
 After this run, Phase 1's label-first discovery returns the full fleet on its own.
 

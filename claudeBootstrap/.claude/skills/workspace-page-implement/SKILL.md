@@ -1,11 +1,11 @@
 ---
-name: app-dev
-description: Edit a React app embedded in a Prisme.ai workspace (starter-spa pattern). Bootstraps from github.com/prismeai/starter-spa if the workspace has no app yet, then modifies src/ (React) and/or automations/ (DSUL), builds the CJS bundle if needed, and pushes to the workspace via the prisme-ai-builder MCP (automations) + direct fetch (bundle/files/config). Use when the user says "edit the X app", "modifier l'app de <workspace>", "/app-dev <workspace> <change>", or when src/App.tsx + scripts/deploy.mjs are detected in a workspace folder.
+name: workspace-page-implement
+description: Edit a React app embedded in a Prisme.ai workspace (starter-spa pattern). Bootstraps from github.com/prismeai/starter-spa if the workspace has no app yet, then modifies src/ (React) and/or automations/ (DSUL), builds the CJS bundle if needed, and pushes to the workspace via the prisme-ai-builder MCP (automations) + direct fetch (bundle/files/config). Use when the user says "edit the X app", "modifier l'app de <workspace>", "/workspace-page-implement <workspace> <change>", or when src/App.tsx + scripts/deploy.mjs are detected in a workspace folder.
 argument-hint: "[workspace-folder] <description of the change>"
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash, AskUserQuestion, Task, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__lint_doc, mcp__prisme-ai-builder__create_automation, mcp__prisme-ai-builder__update_automation, mcp__prisme-ai-builder__delete_automation, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__pull_workspace, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__search_workspaces
 ---
 
-# Skill `/app-dev` — Prisme.ai workspace-embedded React app editor
+# Skill `/workspace-page-implement` — Prisme.ai workspace-embedded React app editor
 
 This skill edits the React app embedded in a Prisme.ai workspace (the starter-spa
 pattern : `dist/bundle.js` CJS hosted as a public file of the workspace, referenced
@@ -493,7 +493,7 @@ curl -fsS -X PATCH "$API_URL/workspaces/$WORKSPACE_ID" \
 curl -fsS -X POST "$API_URL/workspaces/$WORKSPACE_ID/versions" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"description":"app-dev v<version>"}'
+  -d '{"description":"workspace-page-implement v<version>"}'
 ```
 
 ### Confirmation before push

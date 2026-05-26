@@ -1,6 +1,6 @@
 ---
-name: app-mcp-doc
-description: Generate public documentation (MDX) for a Prisme.ai App+MCP connector, mirroring the structure of existing pages (gryzzly.mdx, data-galaxy.mdx, …) in the prismeai/docs repo. Produces one `apps-store/marketplace/connectors/<slug>.mdx` page and inserts a matching `<Card>` into `overview.mdx`. Use when the user says "document the X app+mcp", "écris la doc de X", "/app-mcp-doc X", or similar. Assumes the source workspace already exists locally (scaffolded by `/app-mcp`).
+name: app-mcp-document
+description: Generate public documentation (MDX) for a Prisme.ai App+MCP connector, mirroring the structure of existing pages (gryzzly.mdx, data-galaxy.mdx, …) in the prismeai/docs repo. Produces one `apps-store/marketplace/connectors/<slug>.mdx` page and inserts a matching `<Card>` into `overview.mdx`. Use when the user says "document the X app+mcp", "écris la doc de X", "/app-mcp-document X", or similar. Assumes the source workspace already exists locally (scaffolded by `/app-mcp-implement`).
 argument-hint: "[workspace-slug]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent
 ---
@@ -147,7 +147,7 @@ The user can override by saying "merge X and Y" or "split X into A + B".
    - **Instructions tables** (`<<INSTRUCTIONS_TABLES>>`) — one `### CategoryName` + table per category (columns: Instruction, Arguments). Arguments list comes from `inputSchema.properties` minus `outputFormat`. Required args get a `*` suffix.
    - **MCP tools tables** (`<<MCP_TOOLS_TABLES>>`) — same grouping, columns (Tool, Description). Description is the mcpTool's own description, truncated if >100 chars.
 4. **Assisted-generate** the remaining sections — present a draft to the user, let them refine:
-   - **Prerequisites** (`<<PREREQUISITES>>`) — bullet list with account type, credentials source (UI path at the provider), base URL. Infer from `config.schema` descriptions + `oauthClientId` description (which already contains the provider app URL, captured at scaffold time in `/app-mcp` Phase 1).
+   - **Prerequisites** (`<<PREREQUISITES>>`) — bullet list with account type, credentials source (UI path at the provider), base URL. Infer from `config.schema` descriptions + `oauthClientId` description (which already contains the provider app URL, captured at scaffold time in `/app-mcp-implement` Phase 1).
    - **DSUL examples** (`<<DSUL_EXAMPLES>>`) — 3-4 realistic snippets covering a read, a create, a compound flow, and a flagship action. Use real tool names and plausible argument values (`'{{var}}'` placeholders allowed).
    - **Tool Details** (`<<TOOL_DETAILS>>`) — deep-dive on 4-6 flagship MCP tools (usually the creates + a signature search/list). For each: JSON call example + a parameters table (Required / Description). Pull required/description from `inputSchema`.
    - **Error Handling table** (`<<ERROR_HANDLING_TABLE>>`) — HTTP codes typical for the API (401 / 403 / 404 / 422 / 429 / 500 usually suffice) + 2-4 "Common Issues" paragraphs (generic: "Not configured" / "Invalid API key (MCP)" / "Credentials lookup failed" + one service-specific gotcha). Adapt the provider-name references.
