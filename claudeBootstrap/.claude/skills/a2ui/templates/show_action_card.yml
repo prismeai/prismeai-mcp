@@ -1,0 +1,143 @@
+slug: show_action_card
+name: show_action_card
+description: Display a card with action buttons (Approve/Reject) that pauses the agent until the user clicks one. Tests interactive non-form surface.
+private: true
+arguments:
+  arguments:
+    type: object
+    description: Tool arguments from MCP call
+do:
+  - set:
+      name: _args
+      value: '{{arguments}}'
+  - set:
+      name: _title
+      value: '{{_args.title}}'
+  - set:
+      name: _description
+      value: '{{_args.description}}'
+  - set:
+      name: _item_name
+      value: '{{_args.item_name}}'
+  - set:
+      name: _cost
+      value: '{{_args.cost}}'
+  - conditions:
+      '!{{_title}}':
+        - set:
+            name: _title
+            value: Approval Required
+  - conditions:
+      '!{{_description}}':
+        - set:
+            name: _description
+            value: Please review the following request and approve or reject it.
+  - conditions:
+      '!{{_item_name}}':
+        - set:
+            name: _item_name
+            value: Cloud Infrastructure Upgrade
+  - conditions:
+      '!{{_cost}}':
+        - set:
+            name: _cost
+            value: $12,500/month
+output:
+  content:
+    - type: text
+      text: 'Approval card displayed: "{{_item_name}}" ({{_cost}}). Waiting for user decision.'
+  isError: false
+  __surface:
+    surface_id: action-card-1
+    catalog_id: prisme://blocks/v1
+    send_data_model: true
+    wait_for_action: true
+    text: 'Approval card displayed: "{{_item_name}}" ({{_cost}}). Waiting for user decision.'
+    components:
+      - id: card
+        component: Card
+        className: p-4
+        children:
+          - content
+      - id: content
+        component: Column
+        gap: '3'
+        children:
+          - header
+          - alert
+          - details
+          - sep
+          - actions
+      - id: header
+        component: Text
+        content:
+          path: /title
+        variant: heading
+      - id: alert
+        component: Alert
+        variant: warning
+        title: Action Required
+        description:
+          path: /description
+      - id: details
+        component: Column
+        gap: '1'
+        children:
+          - detail-name
+          - detail-cost
+      - id: detail-name
+        component: Row
+        gap: '2'
+        children:
+          - label-name
+          - value-name
+      - id: label-name
+        component: Text
+        content: 'Item:'
+        variant: caption
+      - id: value-name
+        component: Badge
+        label:
+          path: /item_name
+        variant: default
+      - id: detail-cost
+        component: Row
+        gap: '2'
+        children:
+          - label-cost
+          - value-cost
+      - id: label-cost
+        component: Text
+        content: 'Cost:'
+        variant: caption
+      - id: value-cost
+        component: Text
+        content:
+          path: /cost
+        variant: body
+      - id: sep
+        component: Divider
+      - id: actions
+        component: Row
+        gap: '2'
+        justify: end
+        children:
+          - btn-reject
+          - btn-approve
+      - id: btn-reject
+        component: Button
+        label: Reject
+        variant: outline
+        action:
+          name: reject
+      - id: btn-approve
+        component: Button
+        label: Approve
+        variant: primary
+        action:
+          name: approve
+    data_model:
+      title: '{{_title}}'
+      description: '{{_description}}'
+      item_name: '{{_item_name}}'
+      cost: '{{_cost}}'

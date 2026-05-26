@@ -1,0 +1,174 @@
+slug: show_form
+name: show_form
+description: Display an interactive form and wait for user submission
+private: true
+arguments:
+  arguments:
+    type: object
+    description: Tool arguments from MCP call
+do:
+  - set:
+      name: _args
+      value: '{{arguments}}'
+  - set:
+      name: _form_title
+      value: '{{_args.form_title}}'
+  - conditions:
+      '!{{_form_title}}':
+        - set:
+            name: _form_title
+            value: Contact Information
+  - set:
+      name: _fields
+      value:
+        - id: name
+          component: TextField
+          placeholder: Full name
+          text:
+            path: /form/name
+        - id: email
+          component: TextField
+          placeholder: Email address
+          type: email
+          text:
+            path: /form/email
+        - id: message
+          component: TextArea
+          placeholder: Your message...
+          rows: 4
+          text:
+            path: /form/message
+        - id: priority
+          component: Select
+          placeholder: Select priority
+          options:
+            - value: low
+              label: Low
+            - value: medium
+              label: Medium
+            - value: high
+              label: High
+          value:
+            path: /form/priority
+  - conditions:
+      '{{_args.fields}}':
+        - set:
+            name: _fields
+            value: '{{_args.fields}}'
+  - comment: |
+      Auto-inject bindings for LLM-generated fields that lack { path }.
+      Build data_model with initial empty values for each field.
+  - set:
+      name: _data_model
+      value: {}
+  - set:
+      name: _enriched_fields
+      value: []
+  - repeat:
+      'on': '{{_fields}}'
+      do:
+        - set:
+            name: _field
+            value: '{{item}}'
+        - comment: |
+            Determine binding prop name based on component type
+        - conditions:
+            '{{item.component}} == "TextArea" or {{item.component}} == "TextField"':
+              - conditions:
+                  '!{{item.text}}':
+                    - set:
+                        name: _field.text
+                        value:
+                          path: /form/{{item.id}}
+              - set:
+                  name: _data_model.form.{{item.id}}
+                  value: ''
+            '{{item.component}} == "Select" or {{item.component}} == "Slider"':
+              - conditions:
+                  '!{{item.value}}':
+                    - set:
+                        name: _field.value
+                        value:
+                          path: /form/{{item.id}}
+              - set:
+                  name: _data_model.form.{{item.id}}
+                  value: ''
+            '{{item.component}} == "CheckBox" or {{item.component}} == "Switch"':
+              - conditions:
+                  '!{{item.value}}':
+                    - set:
+                        name: _field.value
+                        value:
+                          path: /form/{{item.id}}
+              - set:
+                  name: _data_model.form.{{item.id}}
+                  value: false
+        - set:
+            name: _enriched_fields[]
+            value: '{{_field}}'
+  - comment: |
+      Build children IDs: [form-title, ...field_ids, actions]
+  - set:
+      name: _children_ids
+      value:
+        - form-title
+  - repeat:
+      'on': '{{_enriched_fields}}'
+      do:
+        - set:
+            name: _children_ids[]
+            value: '{{item.id}}'
+  - set:
+      name: _children_ids[]
+      value: actions
+  - comment: |
+      Build flat component list
+  - set:
+      name: _components
+      value:
+        - id: form-col
+          component: Column
+          gap: '3'
+          children: '{{_children_ids}}'
+        - id: form-title
+          component: Text
+          content: '{{_form_title}}'
+          variant: heading
+        - id: actions
+          component: Row
+          gap: '2'
+          justify: end
+          children:
+            - btn-cancel
+            - btn-submit
+        - id: btn-cancel
+          component: Button
+          label: Cancel
+          variant: outline
+          action:
+            name: cancel
+        - id: btn-submit
+          component: Button
+          label: Submit
+          variant: primary
+          action:
+            name: submit
+  - repeat:
+      'on': '{{_enriched_fields}}'
+      do:
+        - set:
+            name: _components[]
+            value: '{{item}}'
+output:
+  content:
+    - type: text
+      text: Interactive form "{{_form_title}}" displayed. Waiting for user to fill and submit.
+  isError: false
+  __surface:
+    surface_id: interactive-form
+    catalog_id: prisme://blocks/v1
+    send_data_model: true
+    wait_for_action: true
+    text: Interactive form "{{_form_title}}" displayed. Waiting for user to fill and submit.
+    components: '{{_components}}'
+    data_model: '{{_data_model}}'

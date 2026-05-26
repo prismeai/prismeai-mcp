@@ -1,0 +1,138 @@
+slug: show_feedback
+name: show_feedback
+description: Display a feedback/rating form with slider, select, checkbox, and textarea. Tests multiple interactive input types in a single surface.
+private: true
+arguments:
+  arguments:
+    type: object
+    description: Tool arguments from MCP call
+do:
+  - set:
+      name: _args
+      value: '{{arguments}}'
+  - set:
+      name: _subject
+      value: '{{_args.subject}}'
+  - conditions:
+      '!{{_subject}}':
+        - set:
+            name: _subject
+            value: your recent experience
+output:
+  content:
+    - type: text
+      text: Feedback form displayed for "{{_subject}}". Waiting for user to rate and submit.
+  isError: false
+  __surface:
+    surface_id: feedback-form-1
+    catalog_id: prisme://blocks/v1
+    send_data_model: true
+    wait_for_action: true
+    text: Feedback form displayed for "{{_subject}}". Waiting for user to rate and submit.
+    components:
+      - id: form-col
+        component: Column
+        gap: '3'
+        children:
+          - title
+          - subtitle
+          - sep1
+          - rating-section
+          - category
+          - comment
+          - sep2
+          - options-section
+          - actions
+      - id: title
+        component: Text
+        content: Share Your Feedback
+        variant: heading
+      - id: subtitle
+        component: Text
+        content: Tell us about {{_subject}}
+        variant: body
+      - id: sep1
+        component: Divider
+      - id: rating-section
+        component: Column
+        gap: '1'
+        children:
+          - rating-label
+          - rating-slider
+      - id: rating-label
+        component: Text
+        content: 'Overall rating (1-10):'
+        variant: caption
+      - id: rating-slider
+        component: Slider
+        min: 1
+        max: 10
+        step: 1
+        value:
+          path: /feedback/rating
+      - id: category
+        component: Select
+        placeholder: What area does this relate to?
+        options:
+          - value: usability
+            label: Usability
+          - value: performance
+            label: Performance
+          - value: features
+            label: Features
+          - value: support
+            label: Support
+          - value: other
+            label: Other
+        value:
+          path: /feedback/category
+      - id: comment
+        component: TextArea
+        placeholder: Tell us more about your experience...
+        rows: 4
+        text:
+          path: /feedback/comment
+      - id: sep2
+        component: Divider
+      - id: options-section
+        component: Column
+        gap: '2'
+        children:
+          - opt-contact
+          - opt-anonymous
+      - id: opt-contact
+        component: CheckBox
+        label: I'd like to be contacted about this feedback
+        value:
+          path: /feedback/contact_me
+      - id: opt-anonymous
+        component: Switch
+        label: Submit anonymously
+        value:
+          path: /feedback/anonymous
+      - id: actions
+        component: Row
+        gap: '2'
+        justify: end
+        children:
+          - btn-skip
+          - btn-submit
+      - id: btn-skip
+        component: Button
+        label: Skip
+        variant: outline
+        action:
+          name: skip
+      - id: btn-submit
+        component: Button
+        label: Submit Feedback
+        variant: primary
+        action:
+          name: submit
+    data_model:
+      feedback:
+        rating: 5
+        category: ''
+        comment: ''
+        contact_me: false
+        anonymous: false

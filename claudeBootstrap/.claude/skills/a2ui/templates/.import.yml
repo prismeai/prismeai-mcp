@@ -1,0 +1,16 @@
+workspaceId: rTFdCox
+version:
+  type: export
+  exportedAt: '2026-05-14T11:05:57.165Z'
+checksums:
+  automations:
+    show_form: 05348eb10699182edbc3838b265c6661
+    show_card: 03220e22530fc654def6b02fca0fc825
+    show_action_card: dff69acd513769c7474d35c8b515e306
+    mcp: f80245d3c85e414f96354512ec81a9bd
+    show_component_demo: 40481512f8ff41ea9f12a1c50ddfb292
+    show_feedback: c931510a7f1c11865a9adffa1b83494d
+    show_table: f8d5d8fc8ab5f687aff9a8282b864a9e
+    show_confirmation: 1e3f380c40b1607569d83a5611f93137
+  imports: {}
+  pages: {}

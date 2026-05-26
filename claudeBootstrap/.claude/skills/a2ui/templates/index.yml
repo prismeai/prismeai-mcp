@@ -1,0 +1,121 @@
+id: rTFdCox
+name: a2ui-test-mcp
+description: Minimal MCP server to test A2UI surfaces (card, form, table)
+labels:
+  - app-builder
+  - one-product
+  - mcp
+slug: perfect-wolverine-5
+customDomains: []
+repositories: {}
+config:
+  value:
+    mcpTools:
+      - name: show_card
+        description: Display a rich project status card to the user with title, status badge, description and progress bar. Use when presenting project or item summaries visually.
+        inputSchema:
+          type: object
+          properties:
+            title:
+              type: string
+              description: Card title
+            status:
+              type: string
+              description: Status label (e.g. Active, Paused, Completed)
+            progress:
+              type: number
+              description: Completion percentage (0-100)
+            description:
+              type: string
+              description: Short description text
+          required: []
+      - name: show_form
+        description: Display an interactive form to the user and wait for them to submit. Use when you need structured input from the user (contact info, feedback, preferences). The conversation pauses until user submits.
+        inputSchema:
+          type: object
+          properties:
+            form_title:
+              type: string
+              description: Title shown above the form
+            fields:
+              type: array
+              description: 'Custom field definitions. Each: { id, component, placeholder, type?, options?, rows?, label? }. Components: TextField, TextArea, Select, CheckBox.'
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  component:
+                    type: string
+                  placeholder:
+                    type: string
+          required: []
+      - name: show_table
+        description: Display a data table to the user. Use when presenting tabular data like search results, file lists, or records.
+        inputSchema:
+          type: object
+          properties:
+            title:
+              type: string
+              description: Table heading
+            columns:
+              type: array
+              description: 'Column definitions: [{ key, header }]'
+              items:
+                type: object
+                properties:
+                  key:
+                    type: string
+                  header:
+                    type: string
+            data:
+              type: array
+              description: Row data as array of objects matching column keys
+          required: []
+      - name: show_action_card
+        description: Display an approval card with Approve/Reject buttons. Use when the user must make a binary decision (approve budget, confirm deployment, accept request). Pauses until user clicks.
+        inputSchema:
+          type: object
+          properties:
+            title:
+              type: string
+              description: Card heading (default "Approval Required")
+            description:
+              type: string
+              description: Explanation of what needs approval
+            item_name:
+              type: string
+              description: Name of the item being approved
+            cost:
+              type: string
+              description: Cost or impact label
+          required: []
+      - name: show_feedback
+        description: Display a feedback form with rating slider, category selector, comment area, and options (contact me, anonymous). Use when collecting user satisfaction or feedback. Pauses until submitted.
+        inputSchema:
+          type: object
+          properties:
+            subject:
+              type: string
+              description: What the feedback is about (default "your recent experience")
+          required: []
+      - name: show_confirmation
+        description: Display a minimal Yes/No confirmation dialog. Use when the user must confirm a destructive or irreversible action. No form fields, just buttons. Pauses until user responds.
+        inputSchema:
+          type: object
+          properties:
+            question:
+              type: string
+              description: The question to confirm (default "Are you sure?")
+            detail:
+              type: string
+              description: Additional context about consequences
+          required: []
+      - name: show_component_demo
+        description: Display a visual demo of A2UI components. Shows interactive examples of all available UI components (buttons, inputs, cards, tables, etc.) or a specific component. Use to showcase UI capabilities.
+        inputSchema:
+          type: object
+          properties:
+            component:
+              type: string
+              description: 'Which component to demo. One of: button, textfield, textarea, select, checkbox, switch, slider, card, tabs, modal, text, divider, badge, alert, progress, avatar, datatable, list, image, or "all" for the full showcase.'
