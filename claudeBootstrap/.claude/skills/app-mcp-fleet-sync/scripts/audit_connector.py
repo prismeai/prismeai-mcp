@@ -424,6 +424,56 @@ def rule_audit(conn_dir, subs, is_oauth):
                                    f"they leak into the App's instructions list (e.g. a bare "
                                    f"`<App>.generateKey`): {', '.join(notpriv[:8])}{more}. "
                                    f"Add `private: true` (does not block endpoint webhooks).")
+
+    # R18 — OAuth credentials must live in the SERVICE workspace's secrets, not
+    # in the published App's config.schema. Since the central-OAuth migration
+    # (gitlab pilot, 2026-05-28) the model is: ONE OAuth Application registered
+    # by the platform admin, Client ID/Secret stored as workspace secrets
+    # (`<svc>OauthClientId`/`<svc>OauthClientSecret`), shared by every caller of
+    # /apps/<svc> without an mcp-api-key header. The published App is PAT-only:
+    # config.schema exposes only baseUrl + token + mcpEndpoint + mcpApiKey.
+    # A connector still exposing oauthClient*/authorizationUrl/etc. in
+    # config.schema is on the legacy per-tenant model. Migration is NOT
+    # mechanical (touches mcp.yml dispatch, oauthCallback scope,
+    # ensureAuthentication priorities, initiateOAuth, getConfig, and any
+    # callback page redirects) — surface to a human. Canonical: gitlab.
+    if is_oauth:
+        idx_path = os.path.join(conn_dir, "index.yml")
+        if os.path.isfile(idx_path):
+            with open(idx_path) as f:
+                idx_doc, _ = load_yaml(f.read())
+            if idx_doc:
+                cfg_schema = ((idx_doc.get("config") or {}).get("schema") or {})
+                secrets_schema = ((idx_doc.get("secrets") or {}).get("schema") or {})
+                LEGACY_OAUTH_FIELDS = (
+                    "oauthClientId", "oauthClientSecret", "oauthCallbackUrl",
+                    "authorizationUrl", "tokenUrl", "revocationUrl",
+                    "scopes", "refreshTokenTtl",
+                )
+                legacy_in_schema = [k for k in LEGACY_OAUTH_FIELDS if k in cfg_schema]
+                has_central_secrets = any(
+                    k.endswith("OauthClientId") for k in secrets_schema
+                )
+                if legacy_in_schema:
+                    sample = ", ".join(legacy_in_schema[:5])
+                    more = "..." if len(legacy_in_schema) > 5 else ""
+                    H("R18-oauth-central",
+                      f"OAuth params still in config.schema (legacy per-tenant model): "
+                      f"{sample}{more}. Since the central-OAuth migration (gitlab pilot), "
+                      f"OAuth Client ID/Secret + provider URLs belong in workspace secrets "
+                      f"(`<svc>OauthClientId`/`Secret`); the published App is PAT-only. "
+                      f"Migration touches mcp.yml dispatch (central vs tenant authMode), "
+                      f"oauthCallback scope=central, ensureAuthentication 2-priority chain, "
+                      f"initiateOAuth (drop mcpApiKey query), getConfig (PAT-only), and any "
+                      f"callback page redirects — NOT mechanical. See /app-mcp-implement "
+                      f"Phase 4.5 (central) + the gitlab pilot.")
+                elif not has_central_secrets:
+                    H("R18-oauth-central",
+                      f"OAuth model unclear: no `oauthClient*` left in config.schema (good) "
+                      f"but no `<svc>OauthClientId`/`Secret` declared in secrets.schema "
+                      f"either. Verify the connector follows the central model end-to-end "
+                      f"(workspace secrets + mcp.yml central/tenant dispatch).")
+
     return out
 
 

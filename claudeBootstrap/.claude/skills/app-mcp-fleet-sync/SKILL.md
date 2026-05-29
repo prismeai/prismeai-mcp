@@ -82,7 +82,7 @@ If the rule checklist grows (a new trap lands in `/app-mcp-implement`), add the 
 
 ### Phase 1 — Discover the connectors
 
-1. Ask the environment if `$ARGUMENTS` doesn't specify it (default **prod** here — the connectors are `production:app`; this skill audits the live fleet, unlike most workspace work which defaults to sandbox).
+1. Ask the environment if `$ARGUMENTS` doesn't specify it (default **sandbox** — the connector fleet is iterated sandbox-first, in line with memory `feedback_connector_work_sandbox_first`; the `production:app` label only flags the *intended* target, not the env you should be writing to). Only audit/push prod when the user asks for it explicitly.
 2. **Label-first**: `search_workspaces({environment, labels: "app-mcp"})`.
 3. **Bootstrap fallback** — if that returns 0 (the label convention isn't seeded yet), discover by structural fingerprint instead: list `prismeai-workspaces/workspaces/*/automations/generateKey.yml` locally, and/or `search_workspaces({environment, labels: "MCP"})` then keep only those whose pulled tree has both `automations/generateKey.yml` and `imports/MCP Core.yml`. Report which discovery path was used.
 4. If `$ARGUMENTS` names a single connector slug, scope the whole run to it (still useful for one-off propagation).
