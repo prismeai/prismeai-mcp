@@ -690,7 +690,8 @@ describe('lintAutomation', () => {
   describe('warnings', () => {
     it('should produce a warning when arguments is absent', () => {
       const result = lintAutomation({
-        name: 'test',
+        name: 'getData',
+        description: 'Gets data',
         do: [],
       });
       expect(result.valid).toBe(true);
@@ -701,7 +702,8 @@ describe('lintAutomation', () => {
 
     it('should not produce a warning when arguments is present (even empty)', () => {
       const result = lintAutomation({
-        name: 'test',
+        name: 'getData',
+        description: 'Gets data',
         do: [],
         arguments: {},
       });
@@ -711,7 +713,8 @@ describe('lintAutomation', () => {
 
     it('should not produce a warning when arguments has properties', () => {
       const result = lintAutomation({
-        name: 'test',
+        name: 'getData',
+        description: 'Gets data',
         do: [],
         arguments: { text: { type: 'string' } },
       });
@@ -733,6 +736,53 @@ describe('lintAutomation', () => {
       expect(result.valid).toBe(false);
       expect(Array.isArray(result.warnings)).toBe(true);
       expect(result.warnings).toHaveLength(0);
+    });
+
+    it('should return naming convention issues as warnings by default', () => {
+      const result = lintAutomation({
+        name: 'getData',
+        slug: 'get-data',
+        description: 'Gets data',
+        arguments: {},
+        do: [],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0].keyword).toBe('naming');
+      expect(result.warnings[0].message).toContain("Slug 'get-data' should be camelCase");
+      expect(result.warnings[0].message).toContain('update the automation definition at /slug');
+    });
+
+    it('should report automation names with hyphens as naming warnings', () => {
+      const result = lintAutomation({
+        name: 'get-data',
+        description: 'Gets data',
+        arguments: {},
+        do: [],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0].keyword).toBe('naming');
+      expect(result.warnings[0].message).toContain("Name segment 'get-data' should be camelCase");
+      expect(result.warnings[0].message).toContain('update the automation definition at /name');
+    });
+
+    it('should always report naming convention warnings', () => {
+      const result = lintAutomation(
+        {
+          name: 'getData',
+          slug: 'get-data',
+          description: 'Gets data',
+          arguments: {},
+          do: [],
+        },
+        { validateNaming: false } as any
+      );
+      expect(result.valid).toBe(true);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0].message).toContain("Slug 'get-data' should be camelCase");
     });
   });
 

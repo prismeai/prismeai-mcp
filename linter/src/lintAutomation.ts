@@ -28,6 +28,15 @@ function checkMissingArguments(automation: unknown): ErrorObject[] {
   return [];
 }
 
+function toNamingWarning(error: ErrorObject): ErrorObject {
+  const path = error.instancePath || '(root)';
+  return {
+    ...error,
+    keyword: 'naming',
+    message: `${error.message} To fix this convention issue, update the automation definition${path === '(root)' ? '' : ` at ${path}`}.`,
+  } as ErrorObject;
+}
+
 function escapeJsonPointerSegment(segment: string): string {
   return segment.replace(/~/g, '~0').replace(/\//g, '~1');
 }
@@ -142,12 +151,15 @@ export function lintAutomation(
       }
     }
 
-    // Naming convention validation (default: disabled)
-    if (options?.validateNaming) {
-      const namingErrors = validateNamingConventions(automation);
-      if (namingErrors.length > 0) {
-        return { valid: false, errors: [...errors, ...namingErrors], warnings };
-      }
+    // Naming convention validation (always enabled, warnings only)
+    const hasMissingArgumentsWarning = warnings.some(
+      (warning) => warning.schemaPath === '#/warnings/missingArguments'
+    );
+    const namingErrors = validateNamingConventions(automation).filter(
+      (error) => !(hasMissingArgumentsWarning && error.params?.namingType === 'missingArguments')
+    );
+    if (namingErrors.length > 0) {
+      warnings.push(...namingErrors.map(toNamingWarning));
     }
 
     return { valid: true, errors: [], warnings };

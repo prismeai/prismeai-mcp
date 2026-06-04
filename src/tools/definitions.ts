@@ -938,7 +938,7 @@ SECTIONS:
   {
     name: "validate_automation",
     description:
-      "Validate Prisme.ai automation(s). Checks schema compliance, expression syntax ({{variables}} and {% code %}), unknown functions, and optionally strict mode. Accepts a file path, folder path (validates all .yml/.yaml/.json files), or automation object. Returns warnings (e.g., missing arguments declaration) alongside errors even when the automation is valid.",
+      "Validate Prisme.ai automation(s). Checks schema compliance, expression syntax ({{variables}} and {% code %}), unknown functions, naming conventions, and optionally strict mode. Accepts a file path, folder path (validates all .yml/.yaml/.json files), or automation object. Returns warnings (e.g., missing arguments declaration or naming convention issues) alongside errors even when the automation is valid.",
     inputSchema: {
       type: "object",
       properties: {
@@ -957,10 +957,6 @@ SECTIONS:
         validateExpressions: {
           type: "boolean",
           description: "Enable expression validation ({{}} and {% %}). Default: true",
-        },
-        validateNaming: {
-          type: "boolean",
-          description: "Enable naming convention validation: checks automation names (camelCase with verb/on prefix), slugs (camelCase only), descriptions (required), arguments (required), variable names in set (camelCase), and event names in emit (Namespace.entity.action format). Default: false",
         },
       },
       required: [],

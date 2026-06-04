@@ -37,12 +37,6 @@ export type LintOptions = {
    */
   validateExpressions?: boolean;
 
-  /**
-   * Enable naming convention validation: validates naming patterns for
-   * automation names, slugs, descriptions, arguments, variables, and events.
-   * Default: false
-   */
-  validateNaming?: boolean;
 };
 
 export type AutomationLintResult = {
