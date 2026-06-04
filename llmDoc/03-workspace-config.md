@@ -140,6 +140,20 @@ when:
 
 ---
 
+
+## One-Product IAM
+
+Workspace `security.yml` RBAC controls workspace-level access and DSUL permissions. One-product organization IAM is managed separately by AI Governance v2 and native API Gateway `/v2` endpoints.
+
+Use AI Governance v2 for:
+
+- Org membership, roles, groups, invites, and active org context.
+- API keys with product permission scopes such as `agent-factory:agents:*`, `storage:vector_stores:*`, and `llm-gateway:models:*`.
+- Service accounts and short-lived workspace-to-workspace JWTs.
+- Observability, audit search, announcements, and cross-workspace membership helpers.
+
+Use workspace config and imports for local app configuration, secrets, and DSUL app instances.
+
 ## App Imports
 
 Apps are installed via YAML files in the `imports/` folder. Each file defines one app instance with its configuration.
@@ -150,7 +164,7 @@ Apps are installed via YAML files in the `imports/` folder. Each file defines on
 workspace/
 ├── imports/
 │   ├── MyCollection.yml
-│   ├── Knowledge Client.yml
+│   ├── Storage Client.yml
 │   └── Custom Code.yml
 ├── automations/
 ├── pages/
@@ -160,7 +174,7 @@ workspace/
 ### Import Format
 
 ```yaml
-appSlug: <AppSlugFromStore>   # App name in the App Store (case-sensitive)
+appSlug: <AppSlugFromMarketplace>   # App name in the App Marketplace (case-sensitive)
 slug: <InstanceName>          # Name referenced by automations in this workspace
 config:                       # App-specific configuration
   # ... config fields based on app's configSchema

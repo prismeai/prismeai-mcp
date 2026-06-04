@@ -108,13 +108,14 @@ Use event-driven format with dot notation:
 - `Ingestion.crawl.failed`
 - `User.profile.updated`
 
-### Workspace Guidelines (AIK Projects)
+### Workspace Guidelines (One-Product Agents And RAG)
 
-1. Create a workspace that updates prompt/params via Knowledge Client (for versioning and duplication)
-2. Group automations in numbered folders by ingestion process step (e.g., `00_init/`)
-3. Prefer webhooks for AI Store entry points, even with external connectors
-4. Implement error handling for ingestion and responses
-5. Add tests in AIK or workspace if other logic needs testing
+1. Use Agent Factory for agent runtime, publishing, conversations, A2A tasks, and tools.
+2. Use Storage vector stores for document ingestion and RAG; attach them to agents as `file_search`.
+3. Use LLM Gateway for direct completions, embeddings, model defaults, and model metadata.
+4. Use Agent Factory's Capabilities for MCP, function, skill, guardrail, sub-agent, and memory catalog entries.
+5. Use Agent Evaluations for reusable regression suites and AI Insights v2 for conversation analytics.
+6. Use `legacy-*` docs for work explicitly scoped to legacy product references.
 
 ---
 

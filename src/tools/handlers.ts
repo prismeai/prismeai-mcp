@@ -40,6 +40,26 @@ function formatLintErrors(result: AutomationLintResult): string {
   return lines.join("\n");
 }
 
+function formatAutomationWriteResult(result: unknown, lintResult: AutomationLintResult, action: "created" | "updated"): string {
+  if (!lintResult.warnings || lintResult.warnings.length === 0) {
+    return JSON.stringify(result, null, 2);
+  }
+
+  const payload: Record<string, unknown> = {
+    result,
+    warningCount: lintResult.warnings.length,
+    warnings: lintResult.warnings.map((warning) => ({
+      path: warning.instancePath || "(root)",
+      keyword: warning.keyword,
+      message: warning.message,
+      ...(warning.params && { params: warning.params }),
+    })),
+    instruction: `The automation was ${action}, but validation warnings were found. If this automation was newly created for the current task, update it to fix the listed issue(s).`,
+  };
+
+  return JSON.stringify(payload, null, 2);
+}
+
 function resolveLocalWorkspaceDirectory(resolvedPath: string): string {
   const currentDir = join(resolvedPath, "current");
   if (
@@ -172,7 +192,7 @@ export async function handleToolCall(
         content: [
           {
             type: "text",
-            text: JSON.stringify(result, null, 2),
+            text: formatAutomationWriteResult(result, lintResult, "created"),
           },
         ],
       };
@@ -789,13 +809,24 @@ export async function handleToolCall(
           "products-overview": "05-products-overview.md",
           "agent-creation": "06-agent-creation.md",
           "api-selfhosting": "07-api-selfhosting.md",
-          "product-securechat": "products/ai-securechat.md",
-          "product-store": "products/ai-store.md",
-          "product-knowledge": "products/ai-knowledge.md",
+          "product-agent-factory": "products/agent-factory.md",
+          "product-storage": "products/storage.md",
+          "product-llm-gateway": "products/llm-gateway.md",
+          "product-capabilities": "products/capabilities.md",
+          "product-agent-evaluations": "products/agent-evaluations.md",
+          "product-governance-v2": "products/ai-governance-v2.md",
+          "product-insights-v2": "products/ai-insights-v2.md",
+          "product-collection-v3": "products/ai-collection-v3.md",
+          "product-prompt-library": "products/prompt-library.md",
           "product-builder": "products/ai-builder.md",
-          "product-governance": "products/ai-governance.md",
-          "product-insights": "products/ai-insights.md",
-          "product-collection": "products/ai-collection.md",
+          "capability-workspaces": "products/capability-workspaces.md",
+          "legacy-products-overview": "legacy/products-overview.md",
+          "legacy-product-securechat": "legacy/products/ai-securechat.md",
+          "legacy-product-store": "legacy/products/ai-store.md",
+          "legacy-product-knowledge": "legacy/products/ai-knowledge.md",
+          "legacy-product-governance": "legacy/products/ai-governance.md",
+          "legacy-product-insights": "legacy/products/ai-insights.md",
+          "legacy-product-collection": "legacy/products/ai-collection.md",
         };
 
         const fileName = sectionToFile[section];

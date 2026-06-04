@@ -889,20 +889,31 @@ export const tools: Tool[] = [
 
 SECTIONS:
 - index: Table of contents and quick reference guide
-- automations: Backend logic - triggers (webhook/event/schedule), instructions (set/fetch/emit/repeat/conditions), expressions, memory scopes
+- automations: Backend logic - triggers, instructions, expressions, memory scopes
 - pages-blocks: UI components - Form, DataTable, RichText, Action, Chat, Charts, Carousel, Tabs, etc.
-- workspace-config: Secrets management, RBAC security rules, native events, versioning with Git
-- advanced-features: Web crawler, Custom Code (JS), tool-calling agents, RAG pipelines
-- products-overview: Platform architecture - SecureChat, Store, Knowledge, Builder, Collection, Governance, Insights
-- agent-creation: Prompt engineering patterns, agent types (simple/RAG/tool-using/multi-agent)
-- api-selfhosting: REST API reference, microservices, self-hosting deployment
-- product-securechat: SecureChat product details
-- product-store: Agent marketplace details
-- product-knowledge: Knowledge/RAG management details
-- product-builder: Builder orchestration details
-- product-governance: Platform administration details
-- product-insights: Conversation analytics details
-- product-collection: Tabular data + AI details`,
+- workspace-config: Secrets management, workspace RBAC, one-product IAM notes, native events, versioning with Git
+- advanced-features: Crawler, Custom Code, Agent Factory capabilities, Storage RAG, LLM Gateway, events
+- products-overview: Current one-product platform architecture and integration patterns
+- agent-creation: Agent Factory creation, prompt engineering, RAG, capabilities, evaluations
+- api-selfhosting: REST/webhook API reference, one-product endpoint families, self-hosting deployment
+- product-agent-factory: Agent Factory - agents, publishing, conversations, A2A, tools
+- product-storage: Knowledge (Storage) - files, vector stores, indexing, RAG search
+- product-llm-gateway: LLM Gateway - completions, embeddings, model catalog, routing
+- product-capabilities: Capabilities catalog - MCP, file search, functions, skills, guardrails
+- product-agent-evaluations: Agent Evaluations - test cases, runs, LLM-as-judge
+- product-governance-v2: AI Governance v2 - IAM, API keys, service accounts, observability
+- product-insights-v2: AI Insights v2 - Agent Factory analytics, criteria, feedback, GDPR
+- product-collection-v3: AI Collection v3 - structured data MCP tools for agents
+- product-prompt-library: Prompt Library - MCP prompts and showcases
+- product-builder: Builder - DSUL workspaces, automations, pages, apps
+- capability-workspaces: Backing guardrail, memory, search, vector provider, and connector workspaces
+- legacy-products-overview: Legacy product architecture overview
+- legacy-product-securechat: Legacy SecureChat product details
+- legacy-product-store: Legacy AI Store product details
+- legacy-product-knowledge: Legacy AI Knowledge and Knowledge Client details
+- legacy-product-governance: Legacy AI Governance details
+- legacy-product-insights: Legacy AI Insights details
+- legacy-product-collection: Legacy AI Collection details`,
     inputSchema: {
       type: "object",
       properties: {
@@ -917,13 +928,24 @@ SECTIONS:
             "products-overview",
             "agent-creation",
             "api-selfhosting",
-            "product-securechat",
-            "product-store",
-            "product-knowledge",
+            "product-agent-factory",
+            "product-storage",
+            "product-llm-gateway",
+            "product-capabilities",
+            "product-agent-evaluations",
+            "product-governance-v2",
+            "product-insights-v2",
+            "product-collection-v3",
+            "product-prompt-library",
             "product-builder",
-            "product-governance",
-            "product-insights",
-            "product-collection",
+            "capability-workspaces",
+            "legacy-products-overview",
+            "legacy-product-securechat",
+            "legacy-product-store",
+            "legacy-product-knowledge",
+            "legacy-product-governance",
+            "legacy-product-insights",
+            "legacy-product-collection",
           ],
           description:
             "Documentation section to retrieve. Use 'index' to see all available sections.",
@@ -1448,15 +1470,15 @@ Use this to cancel a report, edit its message, or change its type.`,
       destructiveHint: true,
     },
   },
-  // AI Knowledge tools
+  // Legacy AI Knowledge tools
   {
     name: "ai_knowledge_query",
-    description: `Query an AI Knowledge agent with RAG or retrieve context only.
+    description: `Legacy AI Knowledge API: query an AI Knowledge project with RAG or retrieve context only. For new one-product agents, use Agent Factory messages/send or messages/stream with Storage-backed file_search.
 
 Use method='query' (default) for full RAG response with LLM answer.
 Use method='context' to retrieve document chunks only without LLM response.
 
-Requires an AI Knowledge project API key (from AI Knowledge > API & Webhooks).`,
+Requires a legacy AI Knowledge project API key (from AI Knowledge > API & Webhooks).`,
     inputSchema: {
       type: "object",
       properties: {
@@ -1467,7 +1489,7 @@ Requires an AI Knowledge project API key (from AI Knowledge > API & Webhooks).`,
         },
         projectId: {
           type: "string",
-          description: "AI Knowledge project ID",
+          description: "Legacy AI Knowledge project ID",
         },
         text: {
           type: "string",
@@ -1475,7 +1497,7 @@ Requires an AI Knowledge project API key (from AI Knowledge > API & Webhooks).`,
         },
         apiKey: {
           type: "string",
-          description: "AI Knowledge project API key (from AI Knowledge > API & Webhooks)",
+          description: "Legacy AI Knowledge project API key (from AI Knowledge > API & Webhooks)",
         },
         filters: {
           type: "array",
@@ -1525,7 +1547,7 @@ Requires an AI Knowledge project API key (from AI Knowledge > API & Webhooks).`,
   },
   {
     name: "ai_knowledge_completion",
-    description: `Direct LLM completion without RAG.
+    description: `Legacy AI Knowledge API: direct LLM completion without RAG. For new direct model calls, use LLM Gateway v1/chat/completions or v1/embeddings.
 
 Methods:
 - chat: Simple completion using project's configured prompt/model
@@ -1533,9 +1555,9 @@ Methods:
 - embeddings: Generate embeddings for text
 - models: List available models configured in the project
 
-IMPORTANT: Before changing a model in an AI Knowledge project, always call this tool with method='models' first to retrieve the list of available models and verify the model name exists.
+IMPORTANT: Before changing a model in a legacy AI Knowledge project, always call this tool with method='models' first to retrieve the list of available models and verify the model name exists.
 
-Requires an AI Knowledge project API key.`,
+Requires a legacy AI Knowledge project API key.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -1546,11 +1568,11 @@ Requires an AI Knowledge project API key.`,
         },
         projectId: {
           type: "string",
-          description: "AI Knowledge project ID",
+          description: "Legacy AI Knowledge project ID",
         },
         apiKey: {
           type: "string",
-          description: "AI Knowledge project API key",
+          description: "Legacy AI Knowledge project API key",
         },
         // chat method
         prompt: {
@@ -1625,7 +1647,7 @@ Requires an AI Knowledge project API key.`,
   },
   {
     name: "ai_knowledge_document",
-    description: `Document CRUD operations for AI Knowledge.
+    description: `Legacy AI Knowledge API: document CRUD operations. For new RAG data, use Storage files/vector_stores APIs.
 
 Methods:
 - get: Get a document by ID
@@ -1636,7 +1658,7 @@ Methods:
 - reindex: Reprocess a document
 - download: Download original document file
 
-Requires an AI Knowledge project API key.`,
+Requires a legacy AI Knowledge project API key.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -1647,11 +1669,11 @@ Requires an AI Knowledge project API key.`,
         },
         projectId: {
           type: "string",
-          description: "AI Knowledge project ID",
+          description: "Legacy AI Knowledge project ID",
         },
         apiKey: {
           type: "string",
-          description: "AI Knowledge project API key",
+          description: "Legacy AI Knowledge project API key",
         },
         // get, update, delete, reindex, download
         id: {
@@ -1745,7 +1767,7 @@ Requires an AI Knowledge project API key.`,
   },
   {
     name: "ai_knowledge_project",
-    description: `Project/Agent management for AI Knowledge.
+    description: `Legacy AI Knowledge API: project/agent management. For new agents, use Agent Factory /v1/agents APIs.
 
 Methods requiring project apiKey (existing project):
 - get: Get a project by ID
@@ -1770,7 +1792,7 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
         },
         apiKey: {
           type: "string",
-          description: "AI Knowledge project API key (required for: get, update, delete, tools, datasources)",
+          description: "Legacy AI Knowledge project API key (required for: get, update, delete, tools, datasources)",
         },
         // get, update, delete, tools, datasources
         id: {

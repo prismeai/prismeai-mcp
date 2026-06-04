@@ -1,255 +1,131 @@
 # Agent Creation & Prompt Engineering
 
+Use Agent Factory as the baseline for agent creation, runtime configuration, publishing, tools, conversations, and evaluations.
+
 ## Agent Types
 
-| Type | Complexity | Created In |
-|------|------------|------------|
-| Simple Prompting | Low | Store |
-| RAG | Medium | Knowledge |
-| Tool-Using | Med-High | Knowledge/Builder |
-| Multi-Agent | High | Builder |
-
----
+| Type | Complexity | Created In | Main integrations |
+|------|------------|------------|-------------------|
+| Simple prompting | Low | Agent Factory | LLM Gateway |
+| RAG | Medium | Agent Factory | Storage vector store + `file_search` |
+| Tool-using | Med-High | Agent Factory | Capabilities: MCP, function, skill, guardrail, memory |
+| Multi-agent | High | Agent Factory | `sub_agent` capabilities and A2A |
 
 ## Prompt Anatomy
 
 ### 1. Role Definition
-```
+
+```text
 You are a Customer Support Specialist for Acme Financial, with expertise in retirement accounts.
 ```
-- Specific domain expertise
-- Brand voice alignment
-- Authority level
-- User relationship
+
+Use specific domain expertise, voice, authority, and user relationship.
 
 ### 2. Task Instructions
+
+```text
+Help users understand retirement products, troubleshoot accounts, and guide users on next steps.
 ```
-Help users understand retirement products, troubleshoot accounts, guide on investment options.
-```
-- Specific actions
-- Scope boundaries
-- Task priorities
-- Success criteria
+
+Define actions, scope boundaries, priorities, and success criteria.
 
 ### 3. Response Guidelines
-```
+
+```text
 When responding:
-1. Keep concise, jargon-free
-2. Include regulatory disclaimers for investments
-3. Simple overview first, then details
-4. Summarize next steps at end
+1. Keep answers concise and jargon-free.
+2. Include required disclaimers.
+3. Give a simple overview first, then details.
+4. Summarize next steps at the end.
 ```
 
 ### 4. Constraints
-```
+
+```text
 Limitations:
-- No investment recommendations
-- No competitor mentions
-- No specific fees unless asked
-- Defer tax to professionals
+- No investment recommendations.
+- No private pricing.
+- No unpublished customer names.
+- Escalate tax/legal advice to professionals.
 ```
 
 ### 5. Knowledge Context
-```
-Key info:
-- 401(k) offers 12 investment options
-- 2023 contribution limit: $22,500
-- Early withdrawal penalties before 59½
-```
 
----
+For static facts, put stable context in instructions. For document-grounded answers, attach a Storage vector store as an Agent Factory `file_search` capability.
 
-## Principles
+## RAG Agents
 
-### Be Specific
+RAG agents use Storage vector stores and Agent Factory `file_search`.
 
-**Instead of:**
-```
-Help with product questions.
-```
+Recommended flow:
 
-**Use:**
-```
-Respond to enterprise software questions by:
-1. Identify specific product
-2. Provide accurate features from docs
-3. Explain business value/ROI
-4. Address implementation concerns
-5. Suggest relevant case studies
+1. Create a Storage vector store.
+2. Add files or URLs with Storage APIs.
+3. Wait for indexing status to complete.
+4. Attach the vector store to the Agent Factory agent as `file_search`.
+5. In the prompt, require citations and explicit uncertainty when no relevant source is found.
+
+Example guidance:
+
+```text
+When answering with retrieved sources:
+1. Use retrieved content as the source of truth.
+2. Cite the source title or file name when available.
+3. State clearly when the answer is not in the available sources.
+4. Do not invent facts outside retrieved context.
 ```
 
-### Explicit Formatting
-```
-Product comparison format:
+## Tool-Using Agents
 
-PRODUCT COMPARISON: [A] vs [B]
+Tools are Agent Factory capabilities:
 
-FEATURES:
-- [Category]:
-  * [A]: [desc]
-  * [B]: [desc]
+| Capability | Use |
+|------------|-----|
+| `file_search` | Query Storage vector stores |
+| `mcp` | Call MCP servers through `tools/list` and `tools/call` |
+| `function` | Call an HTTP endpoint with structured arguments |
+| `skill` | Activate reusable instructions and tool hints |
+| `guardrail` | Run input/output/action safety checks |
+| `sub_agent` | Delegate to another Agent Factory agent |
+| system memory | Remember, recall, and forget long-term user facts |
 
-USE CASES:
-- [A]: [cases]
-- [B]: [cases]
-```
+When using tools, define clear tool descriptions, narrow JSON schemas, failure behavior, and user-facing summaries.
 
-### Provide Examples
-```
-Security features response:
+## Prompt Library
 
-"Our platform includes:
-1. Auth: MFA, SSO (Okta, Azure AD), RBAC
-2. Data: E2E encryption (TLS 1.3, AES-256), customer-managed keys
-3. Compliance: SOC 2 Type II, GDPR, regular pentests
+Prompt Library exposes reusable prompt templates through MCP:
 
-Elaborate on any aspect?"
-```
+- `prompts/list` to browse templates.
+- `prompts/get` to retrieve a template.
+- `tools/call` with `prompt_library` to search by query, category, or name.
 
-### Guardrails
-```
-Guidelines:
-1. No competitor comparisons by name
-2. No private pricing
-3. No future feature promises
-4. No absolute security claims
-5. No unpublished customer names
-6. Include compliance disclaimers
-```
-
-### Contextual
-```
-For technical questions: detailed, IT terminology
-For business value: high-level, ROI focus
-For confused users: clarity first, offer human support
-```
-
----
-
-## Advanced Techniques
-
-### Chain-of-Thought
-```
-For complex questions:
-1. Acknowledge question
-2. Break into components
-3. Address each with reasoning
-4. Synthesize answer
-5. Verify logic
-```
-
-### Few-Shot Learning
-```
-Classification examples:
-
-"Reset password?" → ACCOUNT_ACCESS, MEDIUM
-"Data deleted!" → DATA_ISSUE, HIGH
-"Non-profit discounts?" → PRICING, LOW
-```
-
-### Decision Tree
-```
-1. Issue type:
-   - Technical → step 2
-   - Billing → step 3
-   - Feature request → step 4
-
-2. Technical:
-   - Login → check account
-   - Performance → check system
-   - Data → verify backups
-```
-
----
-
-## Agent-Specific Prompting
-
-### Simple Agents
-- Comprehensive instructions essential
-- Detailed examples improve consistency
-- Clear boundaries prevent drift
-- Response templates ensure format
-
-### RAG Agents
-```
-When answering:
-1. Use retrieved info as truth
-2. Cite specific document/section
-3. State gaps clearly
-4. Don't speculate beyond docs
-
-Citation format:
-"According to [Doc] (Section: [X]), [info]."
-
-If no info:
-"Not in current docs. Recommend [alternative]."
-```
-
-### Tool-Using Agents
-```
-Tool usage:
-• Account Lookup: verify account status
-• Knowledge Base: get documentation
-• Ticket Creation: unresolved issues
-
-When using tools:
-1. Tell user you're checking
-2. Interpret results clearly
-3. On error: retry once, then alternative
-4. Summarize key info
-```
-
----
+Prompt Library stores reusable prompt templates. Agent Factory owns agent runtime behavior.
 
 ## Testing
 
-### Criteria
-- Accuracy
-- Format adherence
-- Policy compliance
-- Tone appropriateness
-- Edge case handling
+Use Agent Evaluations for reusable regression suites:
 
-### Test Categories
-- Common scenarios
-- Edge cases
-- Problematic queries
-- Different personas
-
-### Iteration
-1. Change one aspect
-2. Test impact
-3. Build on success
-4. Document versions
-
----
+- Create test cases with input, expected output, criteria, and optional tags.
+- Start evaluation runs against Agent Factory agents.
+- Use LLM-as-judge scoring, tool assertions, and multi-turn cases when needed.
+- Track regressions over time.
 
 ## Best Practices
 
 | Practice | Description |
 |----------|-------------|
-| Prompt Library | Centralized successful prompts |
-| Governance | Review for production |
-| Customization | Org voice/values |
-| Version Control | Track changes |
-| Regular Reviews | Update from feedback |
-
----
+| Version prompts | Export/import Agent Factory agents and keep prompt changes reviewable |
+| Keep RAG scoped | Use Storage vector stores and metadata filters instead of broad generic retrieval |
+| Use Capabilities | Register MCP, functions, skills, guardrails, and memory as explicit capabilities |
+| Add guardrails | Use input, output, and action guardrails for risky workflows |
+| Evaluate regularly | Use Agent Evaluations before publishing or changing production agents |
+| Monitor quality | Use AI Insights v2 for conversation analytics and feedback trends |
+| Govern access | Use AI Governance v2 for org IAM, API keys, and service accounts |
 
 ## Temperature Settings
 
-| Purpose | Temp | Rationale |
-|---------|------|-----------|
+| Purpose | Temperature | Rationale |
+|---------|-------------|-----------|
 | Factual | 0.0-0.3 | Deterministic |
 | General | 0.3-0.7 | Balanced |
 | Creative | 0.7-1.0 | Varied |
-
----
-
-## Implementation
-
-| Interface | Use |
-|-----------|-----|
-| Store | No-code, visual editor |
-| Knowledge | RAG prompts, knowledge integration |
-| Builder | Programmatic, dynamic generation |

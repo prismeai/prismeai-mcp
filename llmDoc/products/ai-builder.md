@@ -372,8 +372,9 @@ automations:
 
 ## Integrations
 
-- Knowledge: Webhook RAG
-- Store: Deploy as agents
-- Collection: Data integration
-- Governance: Policies
-- Insights: Metrics
+- Storage: files, vector stores, and RAG data for agents
+- Agent Factory: deploy DSUL-backed capabilities as agent tools or workflows
+- Capabilities: register MCP servers, functions, skills, guardrails, and sub-agents
+- AI Collection v3: structured data tools for agents
+- AI Governance v2: org IAM, API keys, service accounts, policies, and observability
+- AI Insights v2: conversation analytics and feedback metrics

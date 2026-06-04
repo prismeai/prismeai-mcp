@@ -52,6 +52,22 @@ DELETE /v2/workspaces/:id          # Delete
 POST   /v2/workspaces/:id/webhooks/:slug   # Trigger
 ```
 
+
+### One-Product API Surfaces
+
+Current one-product APIs are split between native API Gateway `/v2` endpoints and workspace webhooks.
+
+| Surface | Endpoint family | Use |
+|---------|-----------------|-----|
+| Native IAM | `/v2/me`, `/v2/orgs`, `/v2/orgs/:orgSlug/*` | Org context, members, roles, groups, API keys, service accounts |
+| Agent Factory | `/v2/workspaces/slug:agent-factory/webhooks/v1/agents/*` | Agents, conversations, streaming, A2A, tools |
+| Storage | `/v2/workspaces/slug:storage/webhooks/v1/files`, `/v1/vector_stores` | Files, vector stores, indexing, RAG search |
+| LLM Gateway | `/v2/workspaces/slug:llm-gateway/webhooks/v1/chat/completions`, `/v1/embeddings`, `/v1/models` | Model calls, embeddings, model catalog |
+| Capabilities | `/v2/workspaces/slug:capabilities/webhooks/v1/servers` | Capability catalog entries |
+| Agent Evaluations | `/v2/workspaces/slug:agent-evaluations/webhooks/v1/eval/*` | Test cases and evaluation runs |
+| AI Insights v2 | `/v2/workspaces/slug:ai-insights-v2/webhooks/v1/analytics/*`, `/v1/insights` | Conversation analytics and feedback |
+| AI Collection v3 | `/v2/workspaces/slug:ai-collection-v3/webhooks/ai-collection/mcp` | Structured data MCP tools |
+
 ### Secrets
 ```
 GET    /v2/workspaces/:id/security/secrets
@@ -108,6 +124,22 @@ config:
     headers:
       apiKey: someAPIKey
 ```
+
+
+### One-Product API Surfaces
+
+Current one-product APIs are split between native API Gateway `/v2` endpoints and workspace webhooks.
+
+| Surface | Endpoint family | Use |
+|---------|-----------------|-----|
+| Native IAM | `/v2/me`, `/v2/orgs`, `/v2/orgs/:orgSlug/*` | Org context, members, roles, groups, API keys, service accounts |
+| Agent Factory | `/v2/workspaces/slug:agent-factory/webhooks/v1/agents/*` | Agents, conversations, streaming, A2A, tools |
+| Storage | `/v2/workspaces/slug:storage/webhooks/v1/files`, `/v1/vector_stores` | Files, vector stores, indexing, RAG search |
+| LLM Gateway | `/v2/workspaces/slug:llm-gateway/webhooks/v1/chat/completions`, `/v1/embeddings`, `/v1/models` | Model calls, embeddings, model catalog |
+| Capabilities | `/v2/workspaces/slug:capabilities/webhooks/v1/servers` | Capability catalog entries |
+| Agent Evaluations | `/v2/workspaces/slug:agent-evaluations/webhooks/v1/eval/*` | Test cases and evaluation runs |
+| AI Insights v2 | `/v2/workspaces/slug:ai-insights-v2/webhooks/v1/analytics/*`, `/v1/insights` | Conversation analytics and feedback |
+| AI Collection v3 | `/v2/workspaces/slug:ai-collection-v3/webhooks/ai-collection/mcp` | Structured data MCP tools |
 
 ### Secrets
 ```yaml
