@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip'
-import { Copy, Check } from 'lucide-react'
+import { Copy, Check, Eye, EyeOff } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
 /**
@@ -132,6 +132,32 @@ function CopyBtn({ text }: { text: string }) {
     >
       {ok ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
     </Button>
+  )
+}
+
+// Password input with an eye toggle to reveal/hide the value.
+function SecretInput({ id, value, onChange, placeholder }: { id: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [show, setShow] = useState(false)
+  return (
+    <div className="relative">
+      <Input
+        id={id}
+        type={show ? 'text' : 'password'}
+        className="pr-10"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={() => setShow((s) => !s)}
+        aria-label={show ? 'Hide' : 'Show'}
+        className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
+      >
+        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
   )
 }
 
@@ -517,10 +543,17 @@ function ConfigApp(props: Props) {
                           onChange={(e) => set(f.key, e.target.value)}
                           placeholder={f.placeholder}
                         />
+                      ) : f.secret ? (
+                        <SecretInput
+                          id={f.key}
+                          value={(auth[f.key] as string) || ''}
+                          onChange={(v) => set(f.key, v)}
+                          placeholder={f.placeholder}
+                        />
                       ) : (
                         <Input
                           id={f.key}
-                          type={f.secret ? 'password' : 'text'}
+                          type="text"
                           value={(auth[f.key] as string) || ''}
                           onChange={(e) => set(f.key, e.target.value)}
                           placeholder={f.placeholder}
