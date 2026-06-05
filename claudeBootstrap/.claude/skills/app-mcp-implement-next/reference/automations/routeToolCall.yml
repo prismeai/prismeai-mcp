@@ -1,0 +1,61 @@
+slug: routeToolCall
+name: /01_Helpers/routeToolCall
+description: Route an MCP tool call. Tools are grouped by entity (e.g. `records`, `query`, `bulkIngest`); each tool takes an `action` argument that maps to a concrete operationId via the ENTITY_OPS registry in Custom Code. Falls back to direct operationName dispatch if the toolName isn't an entity but matches a real op.
+private: true
+arguments:
+  toolName:
+    type: string
+  toolArgs:
+    type: object
+do:
+  - Custom Code.run:
+      function: resolveToolAction
+      parameters:
+        toolName: '{{toolName}}'
+        action: '{{toolArgs.arguments.action}}'
+      output: resolved
+  - conditions:
+      '!{{resolved.error}}':
+        - set:
+            name: operationName
+            value: '{{resolved.operationName}}'
+      default:
+        - comment: Backward-compat — toolName might already be a direct operationId
+        - Custom Code.run:
+            function: getOperation
+            parameters:
+              operationName: '{{toolName}}'
+            output: directOp
+        - conditions:
+            '{{directOp.error}}':
+              - set:
+                  name: result
+                  value:
+                    content:
+                      - type: text
+                        text: '{{resolved.error}}'
+                    isError: true
+              - break: {}
+        - set:
+            name: operationName
+            value: '{{toolName}}'
+  - Custom Code.run:
+      function: getOperation
+      parameters:
+        operationName: '{{operationName}}'
+      output: opMeta
+  - conditions:
+      '{{opMeta.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Internal error — resolved operation `{{operationName}}` not found in registry.
+              isError: true
+        - break: {}
+  - tool-restOp:
+      toolName: '{{operationName}}'
+      body: '{{toolArgs}}'
+      output: result
+output: '{{result}}'

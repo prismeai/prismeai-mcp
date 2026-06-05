@@ -1,0 +1,811 @@
+appSlug: MCP Core
+slug: MCP Core
+config:
+  apiKey: ''
+  mcpTools:
+  - name: versions
+    description: 'Discovery — REST API versions, available resources, org limits and recently-viewed items.
+
+
+      Available actions:
+
+      - **getLimits** (getLimits): Get org limits (DailyApiRequests, DataStorageMB, ...)
+
+      - **getRecent** (getRecentItems): Most recently viewed items — params: query: limit
+
+      - **listResources** (listResources): List available resources for the current API version
+
+      - **listVersions** (listVersions): List available REST API versions'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - getLimits
+          - getRecent
+          - listResources
+          - listVersions
+          description: Operation to perform on versions.
+        limit:
+          type: number
+          description: Query parameter `limit`.
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: sobjects
+    description: 'Salesforce sObject metadata — describe global (all objects) or per-object (fields, picklists, relationships).
+
+
+      Available actions:
+
+      - **describe** (describeSObject): Full describe of a single sObject (fields, picklists, child relationships) — params: path: sObjectName
+
+      - **describeBasic** (describeSObjectBasic): Basic metadata for a single sObject (URLs + recent items) — params: path: sObjectName
+
+      - **describeGlobal** (describeGlobal): List all available sObjects and basic metadata for each'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - describe
+          - describeBasic
+          - describeGlobal
+          description: Operation to perform on sobjects.
+        sObjectName:
+          type: string
+          description: Salesforce path parameter `sObjectName`.
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: records
+    description: 'CRUD on individual Salesforce records (Accounts, Contacts, Leads, Opportunities, …). One record per call.
+
+
+      Available actions:
+
+      - **create** (createRecord): Create a new record — params: path: sObjectName
+
+      - **delete** (deleteRecord): Delete a record by ID — params: path: sObjectName, recordId
+
+      - **get** (getRecord): Retrieve a single record by ID — params: path: sObjectName, recordId; query: fields
+
+      - **getDeleted** (getDeletedRecords): Records deleted within a time window (recycle bin) — params: path: sObjectName; query: start, end
+
+      - **getField** (getRecordField): Get a single field on a record (incl. blob/document body) — params: path: sObjectName, recordId, fieldName
+
+      - **getUpdated** (getUpdatedRecords): Records updated within a time window — params: path: sObjectName; query: start, end
+
+      - **update** (updateRecord): Update fields on an existing record — params: path: sObjectName, recordId
+
+      - **upsert** (upsertRecord): Upsert a record by external ID field — params: path: sObjectName, externalIdField, externalIdValue'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - create
+          - delete
+          - get
+          - getDeleted
+          - getField
+          - getUpdated
+          - update
+          - upsert
+          description: Operation to perform on records.
+        sObjectName:
+          type: string
+          description: Salesforce path parameter `sObjectName`.
+        recordId:
+          type: string
+          description: Salesforce path parameter `recordId`.
+        fields:
+          type: string
+          description: Query parameter `fields`.
+        externalIdField:
+          type: string
+          description: Salesforce path parameter `externalIdField`.
+        externalIdValue:
+          type: string
+          description: Salesforce path parameter `externalIdValue`.
+        fieldName:
+          type: string
+          description: Salesforce path parameter `fieldName`.
+        start:
+          type: string
+          description: Query parameter `start`.
+        end:
+          type: string
+          description: Query parameter `end`.
+        body:
+          type: object
+          additionalProperties: true
+          description: 'JSON request body. Required for actions: create, update, upsert.'
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: query
+    description: 'SOQL queries (database language), SOSL searches (cross-object text search), parameterized search and query pagination.
+
+
+      Available actions:
+
+      - **next** (getQueryNext): Retrieve the next batch of a paginated SOQL query — params: path: queryLocator
+
+      - **parameterizedSearch** (runParameterizedSearch): Structured parameterized search (richer than SOSL string)
+
+      - **soql** (runQuery): Run a SOQL query (excludes deleted/archived) — params: query: q
+
+      - **soqlAll** (runQueryAll): Run a SOQL query including deleted/archived records — params: query: q
+
+      - **sosl** (runSearch): Run a SOSL search across multiple sObjects — params: query: q'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - next
+          - parameterizedSearch
+          - soql
+          - soqlAll
+          - sosl
+          description: Operation to perform on query.
+        q:
+          type: string
+          description: Query parameter `q`.
+        queryLocator:
+          type: string
+          description: Salesforce path parameter `queryLocator`.
+        body:
+          type: object
+          additionalProperties: true
+          description: 'JSON request body. Required for actions: parameterizedSearch.'
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: composite
+    description: 'Composite endpoints — execute up to 25 sub-requests in order (with refs), a batch (no refs), a graph (multiple in one transaction), or a parent+children tree insert.
+
+
+      Available actions:
+
+      - **batch** (runCompositeBatch): Execute up to 25 independent sub-requests (no refs) — params: body: haltOnError, batchRequests
+
+      - **graph** (runCompositeGraph): Execute multiple composite graphs in a single transaction — params: body: graphs
+
+      - **request** (runComposite): Execute up to 25 sub-requests in order, with refs between them — params: body: allOrNone, collateSubrequests, compositeRequest
+
+      - **tree** (createSObjectTree): Insert a parent record and related children in a single transaction — params: path: sObjectName; body: records'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - batch
+          - graph
+          - request
+          - tree
+          description: Operation to perform on composite.
+        allOrNone:
+          type: object
+          additionalProperties: true
+          description: Body field `allOrNone` (shape varies per action).
+        collateSubrequests:
+          type: object
+          additionalProperties: true
+          description: Body field `collateSubrequests` (shape varies per action).
+        compositeRequest:
+          type: object
+          additionalProperties: true
+          description: Body field `compositeRequest` (shape varies per action).
+        haltOnError:
+          type: object
+          additionalProperties: true
+          description: Body field `haltOnError` (shape varies per action).
+        batchRequests:
+          type: object
+          additionalProperties: true
+          description: Body field `batchRequests` (shape varies per action).
+        graphs:
+          type: object
+          additionalProperties: true
+          description: Body field `graphs` (shape varies per action).
+        sObjectName:
+          type: string
+          description: Salesforce path parameter `sObjectName`.
+        records:
+          type: object
+          additionalProperties: true
+          description: Body field `records` (shape varies per action).
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: compositeRecords
+    description: 'Bulk records via the composite/sobjects collection — create/update/delete up to 200 records of mixed sObject types in a single call.
+
+
+      Available actions:
+
+      - **createMany** (createRecords): Create up to 200 records (mixed sObjects) in one call — params: body: allOrNone, records
+
+      - **createManyForType** (createRecordsForType): Create up to 200 records of the same sObject type — params: path: sObjectName; body: allOrNone, records
+
+      - **deleteMany** (deleteRecords): Delete up to 200 records (mixed sObjects) in one call — params: query: ids, allOrNone
+
+      - **getMany** (getRecordsCollection): Retrieve up to 2000 records of mixed sObjects in one call — params: query: ids, fields
+
+      - **updateMany** (updateRecords): Update up to 200 records (mixed sObjects) in one call — params: body: allOrNone, records
+
+      - **upsertManyForType** (upsertRecordsForType): Upsert up to 200 records of the same sObject by external ID — params: path: sObjectName, externalIdField; body: allOrNone, records'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - createMany
+          - createManyForType
+          - deleteMany
+          - getMany
+          - updateMany
+          - upsertManyForType
+          description: Operation to perform on compositeRecords.
+        ids:
+          type: string
+          description: Query parameter `ids`.
+        fields:
+          type: string
+          description: Query parameter `fields`.
+        allOrNone:
+          type: object
+          additionalProperties: true
+          description: Body field `allOrNone` (shape varies per action).
+        records:
+          type: object
+          additionalProperties: true
+          description: Body field `records` (shape varies per action).
+        sObjectName:
+          type: string
+          description: Salesforce path parameter `sObjectName`.
+        externalIdField:
+          type: string
+          description: Salesforce path parameter `externalIdField`.
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: bulkIngest
+    description: 'Bulk API 2.0 ingest jobs — upload CSV data for insert/update/upsert/delete of large record sets. Asynchronous: poll `get` until state=JobComplete.
+
+
+      Available actions:
+
+      - **create** (createIngestJob): Create a new bulk ingest job (operation + sObject + lineEnding + columnDelimiter) — params: body: object, operation, externalIdFieldName, contentType, lineEnding, columnDelimiter, assignmentRuleId
+
+      - **delete** (deleteIngestJob): Delete a bulk ingest job (only after JobComplete/Aborted/Failed) — params: path: jobId
+
+      - **get** (getIngestJob): Get bulk ingest job state and metrics — params: path: jobId
+
+      - **getFailed** (getIngestFailed): Download CSV of failed rows with error messages — params: path: jobId
+
+      - **getSuccessful** (getIngestSuccessful): Download CSV of successfully processed rows — params: path: jobId
+
+      - **getUnprocessed** (getIngestUnprocessed): Download CSV of rows not processed (job aborted before completion) — params: path: jobId
+
+      - **list** (listIngestJobs): List bulk ingest jobs — params: query: isPkChunkingEnabled, jobType, queryLocator
+
+      - **update** (updateIngestJob): Update job state (UploadComplete to start processing, Aborted to stop) — params: path: jobId; body: state
+
+      - **uploadData** (uploadIngestData): Upload CSV data to an Open ingest job — params: path: jobId; rawBody: rawBody (text/csv)'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - create
+          - delete
+          - get
+          - getFailed
+          - getSuccessful
+          - getUnprocessed
+          - list
+          - update
+          - uploadData
+          description: Operation to perform on bulkIngest.
+        isPkChunkingEnabled:
+          type: boolean
+          description: Query parameter `isPkChunkingEnabled`.
+        jobType:
+          type: string
+          description: Query parameter `jobType`.
+          enum:
+          - BigObjectIngest
+          - Classic
+          - V2Ingest
+        queryLocator:
+          type: string
+          description: Query parameter `queryLocator`.
+        object:
+          type: object
+          additionalProperties: true
+          description: Body field `object` (shape varies per action).
+        operation:
+          type: object
+          additionalProperties: true
+          description: Body field `operation` (shape varies per action).
+        externalIdFieldName:
+          type: object
+          additionalProperties: true
+          description: Body field `externalIdFieldName` (shape varies per action).
+        contentType:
+          type: object
+          additionalProperties: true
+          description: Body field `contentType` (shape varies per action).
+        lineEnding:
+          type: object
+          additionalProperties: true
+          description: Body field `lineEnding` (shape varies per action).
+        columnDelimiter:
+          type: object
+          additionalProperties: true
+          description: Body field `columnDelimiter` (shape varies per action).
+        assignmentRuleId:
+          type: object
+          additionalProperties: true
+          description: Body field `assignmentRuleId` (shape varies per action).
+        jobId:
+          type: string
+          description: Salesforce path parameter `jobId`.
+        state:
+          type: object
+          additionalProperties: true
+          description: Body field `state` (shape varies per action).
+        rawBody:
+          type: string
+          description: 'Raw request body (CSV / other text). Content-Type: text/csv.'
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: bulkQuery
+    description: 'Bulk API 2.0 query jobs — run a SOQL query asynchronously and download CSV results (handles >2000 records that SOQL caps).
+
+
+      Available actions:
+
+      - **create** (createQueryJob): Create a bulk SOQL query job (returns jobId for polling) — params: body: operation, query, contentType, lineEnding, columnDelimiter
+
+      - **delete** (deleteQueryJob): Delete a bulk query job (only after completion/abort) — params: path: jobId
+
+      - **get** (getQueryJob): Get bulk query job state and metrics — params: path: jobId
+
+      - **getResults** (getQueryJobResults): Download CSV results of a completed bulk query job — params: path: jobId; query: locator, maxRecords
+
+      - **list** (listQueryJobs): List bulk query jobs — params: query: isPkChunkingEnabled, jobType, concurrencyMode
+
+      - **update** (updateQueryJob): Update query job state (Aborted only) — params: path: jobId; body: state'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - create
+          - delete
+          - get
+          - getResults
+          - list
+          - update
+          description: Operation to perform on bulkQuery.
+        isPkChunkingEnabled:
+          type: boolean
+          description: Query parameter `isPkChunkingEnabled`.
+        jobType:
+          type: string
+          description: Query parameter `jobType`.
+          enum:
+          - Classic
+          - V2Query
+        concurrencyMode:
+          type: string
+          description: Query parameter `concurrencyMode`.
+          enum:
+          - Parallel
+          - Serial
+        operation:
+          type: object
+          additionalProperties: true
+          description: Body field `operation` (shape varies per action).
+        query:
+          type: object
+          additionalProperties: true
+          description: Body field `query` (shape varies per action).
+        contentType:
+          type: object
+          additionalProperties: true
+          description: Body field `contentType` (shape varies per action).
+        lineEnding:
+          type: object
+          additionalProperties: true
+          description: Body field `lineEnding` (shape varies per action).
+        columnDelimiter:
+          type: object
+          additionalProperties: true
+          description: Body field `columnDelimiter` (shape varies per action).
+        jobId:
+          type: string
+          description: Salesforce path parameter `jobId`.
+        state:
+          type: object
+          additionalProperties: true
+          description: Body field `state` (shape varies per action).
+        locator:
+          type: string
+          description: Query parameter `locator`.
+        maxRecords:
+          type: number
+          description: Query parameter `maxRecords`.
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: tooling
+    description: 'Tooling API — query/CRUD metadata (ApexClass, CustomField, FlexiPage, …), run Apex synchronously or asynchronously, execute anonymous Apex, code completions.
+
+
+      Available actions:
+
+      - **completions** (getApexCompletions): Apex / VisualForce code completions — params: query: type
+
+      - **createRecord** (createToolingRecord): Create a Tooling API record (e.g. ApexClass, CustomField) — params: path: sObjectName
+
+      - **deleteRecord** (deleteToolingRecord): Delete a Tooling API record — params: path: sObjectName, recordId
+
+      - **describeGlobal** (describeToolingGlobal): List Tooling API sObjects
+
+      - **describeSObject** (describeToolingSObject): Describe a Tooling API sObject — params: path: sObjectName
+
+      - **executeAnonymous** (executeAnonymousApex): Run a one-off Apex code block as the current user — params: query: anonymousBody
+
+      - **getRecord** (getToolingRecord): Retrieve a Tooling API record — params: path: sObjectName, recordId
+
+      - **query** (runToolingQuery): Run a Tooling SOQL query (CustomField, ApexClass, FlexiPage, ...) — params: query: q
+
+      - **runTestsAsync** (runApexTestsAsync): Schedule async Apex test execution — params: body: classNames, classids, suiteNames, suiteids, maxFailedTests, testLevel, tests
+
+      - **runTestsSync** (runApexTestsSync): Run Apex tests synchronously (small scope only) — params: body: tests
+
+      - **updateRecord** (updateToolingRecord): Update a Tooling API record — params: path: sObjectName, recordId'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - completions
+          - createRecord
+          - deleteRecord
+          - describeGlobal
+          - describeSObject
+          - executeAnonymous
+          - getRecord
+          - query
+          - runTestsAsync
+          - runTestsSync
+          - updateRecord
+          description: Operation to perform on tooling.
+        sObjectName:
+          type: string
+          description: Salesforce path parameter `sObjectName`.
+        q:
+          type: string
+          description: Query parameter `q`.
+        anonymousBody:
+          type: string
+          description: Query parameter `anonymousBody`.
+        classNames:
+          type: object
+          additionalProperties: true
+          description: Body field `classNames` (shape varies per action).
+        classids:
+          type: object
+          additionalProperties: true
+          description: Body field `classids` (shape varies per action).
+        suiteNames:
+          type: object
+          additionalProperties: true
+          description: Body field `suiteNames` (shape varies per action).
+        suiteids:
+          type: object
+          additionalProperties: true
+          description: Body field `suiteids` (shape varies per action).
+        maxFailedTests:
+          type: object
+          additionalProperties: true
+          description: Body field `maxFailedTests` (shape varies per action).
+        testLevel:
+          type: object
+          additionalProperties: true
+          description: Body field `testLevel` (shape varies per action).
+        tests:
+          type: object
+          additionalProperties: true
+          description: Body field `tests` (shape varies per action).
+        type:
+          type: string
+          description: Query parameter `type`.
+          enum:
+          - apex
+          - visualforce
+        recordId:
+          type: string
+          description: Salesforce path parameter `recordId`.
+        body:
+          type: object
+          additionalProperties: true
+          description: 'JSON request body. Required for actions: createRecord, updateRecord.'
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: process
+    description: 'Process Rules and Approval Processes — list, trigger, submit records for approval.
+
+
+      Available actions:
+
+      - **listApprovals** (listApprovals): List approval requests visible to the current user
+
+      - **listRules** (listProcessRules): List active process rules across the org
+
+      - **listRulesForObject** (listProcessRulesForObject): Process rules for a given sObject — params: path: sObjectName
+
+      - **submitApproval** (submitApproval): Submit a record into an approval process or act on an existing one — params: body: requests
+
+      - **triggerRule** (triggerProcessRule): Trigger a specific process rule against record IDs — params: path: sObjectName, ruleId; body: contextIds'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - listApprovals
+          - listRules
+          - listRulesForObject
+          - submitApproval
+          - triggerRule
+          description: Operation to perform on process.
+        requests:
+          type: object
+          additionalProperties: true
+          description: Body field `requests` (shape varies per action).
+        sObjectName:
+          type: string
+          description: Salesforce path parameter `sObjectName`.
+        ruleId:
+          type: string
+          description: Salesforce path parameter `ruleId`.
+        contextIds:
+          type: object
+          additionalProperties: true
+          description: Body field `contextIds` (shape varies per action).
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: quickActions
+    description: 'Quick Actions — list/describe/invoke org-level quick actions (object-specific actions like LogACall, NewTask, …).
+
+
+      Available actions:
+
+      - **describe** (describeQuickAction): Describe a specific quick action — params: path: actionName
+
+      - **invoke** (invokeQuickAction): Invoke a quick action with payload — params: path: actionName
+
+      - **list** (listQuickActions): Global quick actions'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - describe
+          - invoke
+          - list
+          description: Operation to perform on quickActions.
+        actionName:
+          type: string
+          description: Salesforce path parameter `actionName`.
+        body:
+          type: object
+          additionalProperties: true
+          description: 'JSON request body. Required for actions: invoke.'
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: analytics
+    description: 'Reports & Dashboards — list, describe, run reports/dashboards async, fetch async-instance results.
+
+
+      Available actions:
+
+      - **describeDashboard** (describeDashboard): Describe a dashboard (components, filters, cache state) — params: path: dashboardId
+
+      - **describeReport** (describeReport): Describe a report (metadata + reportFactWithDetails when ?includeDetails=true) — params: path: reportId; query: includeDetails
+
+      - **getDashboardStatus** (getDashboardStatus): Get the current refresh status of a dashboard — params: path: dashboardId
+
+      - **getReportInstance** (getReportInstance): Get the results of a specific report instance — params: path: reportId, instanceId
+
+      - **listDashboards** (listDashboards): List all dashboards accessible to the current user
+
+      - **listReportInstances** (listReportInstances): List async report instances for a report — params: path: reportId
+
+      - **listReports** (listReports): List all reports accessible to the current user
+
+      - **runDashboard** (runDashboard): Refresh a dashboard (async) — params: path: dashboardId
+
+      - **runReport** (runReport): Execute a report asynchronously and return a report instance — params: path: reportId; query: includeDetails'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - describeDashboard
+          - describeReport
+          - getDashboardStatus
+          - getReportInstance
+          - listDashboards
+          - listReportInstances
+          - listReports
+          - runDashboard
+          - runReport
+          description: Operation to perform on analytics.
+        reportId:
+          type: string
+          description: Salesforce path parameter `reportId`.
+        includeDetails:
+          type: boolean
+          description: Query parameter `includeDetails`.
+        instanceId:
+          type: string
+          description: Salesforce path parameter `instanceId`.
+        dashboardId:
+          type: string
+          description: Salesforce path parameter `dashboardId`.
+        body:
+          type: object
+          additionalProperties: true
+          description: 'JSON request body. Required for actions: runReport.'
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.
+  - name: metadata
+    description: 'Metadata REST deploy — submit a zipped metadata package and poll the deploy status (recommended over SOAP Metadata API for new integrations).
+
+
+      Available actions:
+
+      - **deploy** (deployMetadata): Deploy a zipped metadata package (Metadata REST) — params: body: deployOptions, file
+
+      - **getDeployStatus** (getMetadataDeployStatus): Get status + details of a metadata deploy request — params: path: requestId; query: includeDetails'
+    inputSchema:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - deploy
+          - getDeployStatus
+          description: Operation to perform on metadata.
+        deployOptions:
+          type: object
+          additionalProperties: true
+          description: Body field `deployOptions` (shape varies per action).
+        file:
+          type: object
+          additionalProperties: true
+          description: Body field `file` (shape varies per action).
+        requestId:
+          type: string
+          description: Salesforce path parameter `requestId`.
+        includeDetails:
+          type: boolean
+          description: Query parameter `includeDetails`.
+        outputFormat:
+          type: string
+          enum:
+          - structured
+          - verbose
+          - both
+          default: verbose
+          description: Response format for the MCP client.

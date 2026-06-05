@@ -1,0 +1,142 @@
+---
+name: app-mcp-implement-next
+description: Build a brand-new Prisme.ai App+MCP connector for a third-party SaaS using the tenant-context model (no HMAC), an entity-grouped registry driven by a generated OpenAPI spec, multi-mode auth (API key / OAuth2 client-credentials / OAuth2 per-user PKCE / JWT service-account) resolved by buildAppAuth, per-user OAuth tokens resolvable from cron, and a model-B config SPA. Reproduces the validated `salesforce-next` build for any service. Use when the user says "build an app+mcp for X", "créer une app+mcp pour X", "implémente un connecteur X". Supersedes (and will replace) `app-mcp-implement` — do NOT read or reuse the old skill; everything needed is here + in `reference/`.
+argument-hint: '[service-name] [?api-docs-url]'
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, Agent, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__upload_file, mcp__prisme-ai-builder__create_workspace, mcp__prisme-ai-builder__search_workspaces, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__get_app_instance_config, mcp__prisme-ai-builder__update_app_instance_config
+---
+
+# App + MCP connector builder (tenant-context model)
+
+You are building a **Prisme.ai workspace published as an app** ("app+mcp"). It is **never used directly** — it is consumed as an **appInstance inside a tenant workspace**. Its job: wrap a third-party API as **App-mode instructions** (`<AppSlug>.<op>:`) AND expose an **MCP server** that AI agents call. Both run **in the tenant app-instance context** (the MCP webhook is `/workspaces/<tenantId>/webhooks/<appInstanceSlug>.mcp`), so the connector reads the tenant's own `config.*`/secrets locally — there is **no central HMAC key, no cross-workspace getConfig, no central/tenant split**.
+
+This skill reproduces, for a NEW service, the exact build we validated on `salesforce-next`. That connector is bundled at **`reference/`** inside this skill — it is the **canonical, working implementation**. Read it constantly. Your task = mirror it for the target service, adapting only the service-specific parts (the API surface and the available auth methods).
+
+> The old `app-mcp-implement` skill is deprecated and will be deleted. Ignore it. Do not copy its HMAC `generateKey`/`getConfig`/`mcp-auto-install`/per-tool 3-layer patterns — they are gone in this model.
+
+---
+
+## The model in one screen (read before doing anything)
+
+- **Tenant-context MCP endpoint** (`automations/mcp.yml`): JSON-RPC 2.0. `tools/call` → extract `agent_id` (injected by agent-factory's capability `scope`) → `validateAgent` (allowlist) → `buildAppAuth` → `routeToolCall`. Everything else → **MCP Core** (`imports/MCP Core.yml`, `handleMcpMethod`) which serves `initialize`/`tools/list`. **MCP notifications (JSON-RPC with no `id`, e.g. `notifications/initialized`) MUST return HTTP 202** or strict MCP clients (agent-factory) fail the handshake and never register the tools.
+- **Entity-grouped tools + registry dispatch**: tools are *entities* (e.g. `records`, `query`, `mail`, `files`) each taking an `action` enum, NOT one tool per endpoint. The mapping `entity+action → operationName → {method, path, params}` lives in a **generated registry** inside `imports/Custom Code.yml` (`resolveToolAction` / `getOperation` / `buildSalesforceRequest`). Dispatch chain: `routeToolCall → tool-restOp / method-restOp → executeApiCall → formatToolOutput` (+ `handleApiError`). The per-endpoint **App-mode automations** (`<op>.yml`, e.g. `runQuery.yml`) are thin public wrappers, reached dynamically via the registry — they have **no static slug references and that is by design**.
+- **Multi-mode auth in `buildAppAuth`** resolved from ONE tenant config object `config.auth = {mode, ...creds}`: branches per `mode`. Returns `{accessToken, baseUrl}` or `{error}`. Adapt the modes to what the service supports.
+- **OAuth2 per-user (authorization_code + PKCE)**: `oauthConnect` (PKCE+state in user scope → redirect to provider authorize) → `oauthCallback` (exchange code, store token) → SPA result view + auto-close. `oauthStatus` / `oauthDisconnect`. Per-user tokens are ALSO persisted as **workspace secrets keyed by userId** (`<pfx>Refresh_<userId>`) so **cron / autonomous** runs can act on a user via `buildAppAuth(targetUserId)`; lazy refresh. Interactive (incl. agent piloted by a logged-in user) works via user-scope because agent-factory propagates the end-user `user_id`.
+- **2-hop secret binding** (set up by `onInstall`): instance `config.X = {{config.<camel>X}}` (binding A, terminal `set: config` merge) → tenant workspace `config.value.<camel>X = {{secret.<camel>X}}` (binding B, written via a minted workspace JWT to `PATCH /config`) → secret store. `{{secret.*}}` resolves ONLY inside workspace `config.value`. Literals are built by Custom Code `makeConfigRef`/`makeSecretRef` (plain JS, never let DSUL parse `{{`).
+- **Config SPA (model B)**: one SPA hosted in the connector workspace (`pages/<slug>/`), opened at `https://<studio>/apps/<slug>?workspaceId=<tenant>&appInstance=<slug>`; link surfaced in the instance config via a readOnly `configAppUrl` set by `onInstall`. The SPA talks to the platform API with the **user session** (`Authorization: Bearer {{sdk.token}}` + `x-prismeai-csrf-token` + `credentials:'include'`) so native RBAC applies. It reads/writes the tenant secrets, lists/【de】selects agents, and installs the MCP capability on chosen agents.
+- **Agent capability wiring**: the MCP capability (Governance → Org → Capabilities, or the SPA "Install capability" button) needs: SSE/WebSocket URL = the MCP endpoint, and **Scope = `context_id,agent_id,user_id`** (this injects the agent/user identity — distinct from OAuth scopes). The connector identifies the agent via the injected `agent_id` checked against the allowlist; no API key minted.
+- **Allow-all sentinel**: the allowlist secret `<camel>AuthorizedAgents` accepts `*` meaning "any agent". `isAgentAllowed` returns `{wildcard:true}` and `validateAgent` short-circuits to `{valid:true}` (no `agent_id` even required). The SPA exposes an "Autoriser tous les agents" toggle that sets/clears `*`, disables the per-agent selection (search + checkboxes + Save allowlist) and shows a warning. `installCapability` must NOT overwrite `*` with an explicit list. Use it when a tenant wants every agent to reach the connector without per-agent allowlisting.
+
+Full rationale + every gotcha is the project memory `app-mcp-refacto-design`. The non-negotiable gotchas are in **§ Gotchas** below — read them, they each cost hours.
+
+---
+
+## Generic vs service-specific (what to copy vs regenerate)
+
+**Copy ~verbatim from `reference/`, only parameterize names** (see placeholders):
+- `automations/mcp.yml`, `validateAgent.yml`, `routeToolCall.yml`, `tool-restOp.yml`, `method-restOp.yml`, `executeApiCall.yml`, `formatToolOutput.yml`, `handleApiError.yml`, `testAuth.yml`, `onInstall.yml`
+- `automations/oauthConnect.yml`, `oauthCallback.yml`, `oauthStatus.yml`, `oauthDisconnect.yml` (OAuth2 authcode+PKCE is standard; swap only the provider authorize/token/revoke URLs, scopes, and host rule)
+- `imports/MCP Core.yml` (verbatim), `security.yml` (verbatim)
+- `imports/Custom Code.yml` generic helpers: `isAgentAllowed`, `makeConfigRef`, `makeSecretRef`, `makeTokenSecretName`, `normalizeLoginHost` (rename → `normalizeAuthHost` if the host rule differs), `generatePkce`, `generateState`, `buildAuthorizeUrl`, `buildJwtAssertion` (drop if no JWT mode), `buildQueryString`
+- `pages/<slug>/` SPA: everything except `src/App.tsx`'s `MODES`/`FIELDS`/`PREAMBLE`/`AuthConfig` (those follow the auth modes) and the connector strings. `scripts/externals.mjs`, `components/`, `lib/`, vite/ts config = verbatim.
+
+**Regenerate per service** (this is the actual work):
+- `swagger.yml` (the API surface) → the registry tables `ENTITY_OPS` + `OPERATIONS` in `imports/Custom Code.yml` (`resolveToolAction`/`getOperation`/`buildSalesforceRequest`) → the per-op App-mode automations → `index.yml` `mcpTools` + entity tool `inputSchema`s.
+- `buildAppAuth.yml` branches + the SPA `MODES`/`FIELDS`/`PREAMBLE` → the service's available auth methods.
+- `baseUrl` shape: Salesforce = one `{instance_url}/services/data/{ver}`. **Multi-API services (e.g. Google: drive/docs/sheets/gmail/calendar) have DIFFERENT host/base per API** → carry an absolute base (or `host`) per op in the `OPERATIONS` entry and have `executeApiCall` use it, instead of one global `baseUrl`. Decide this early.
+
+## Placeholders (substitute everywhere when copying)
+
+| Placeholder | Meaning | salesforce-next value | google example |
+|---|---|---|---|
+| `<slug>` | workspace + SPA route + `pages/<slug>` | `salesforce-next` | `google-workspace` |
+| `<AppSlug>` | app/appInstance prefix in webhooks | `SalesforceNext` | `GoogleWorkspace` |
+| `<camel>` | var/secret/event prefix | `salesforceNext` | `googleWorkspace` |
+| `<pfx>` | per-user token secret prefix | `sfn` (`sfnRefresh_<id>`) | `gws` |
+| `<Service>` | human label | `Salesforce Next` | `Google Workspace` |
+
+Service auth specifics to fill: authorize/token/revoke URLs, OAuth scopes, host-normalization rule (if any), JWT audience, and the `baseUrl`/per-op host shape.
+
+---
+
+## Workflow
+
+Offer a **worktree** first (per repo convention): branch `workspace/<slug>-scaffold` from `sandbox`. Do all edits there.
+
+### Phase 1 — Service identity + AUTH MODES (the key decision)
+Ask / confirm: service name, `<slug>`/`<AppSlug>`/`<camel>`/`<pfx>`, the API docs URL(s). Then determine **which auth methods the service supports** and which to expose. Use `AskUserQuestion` if ambiguous. Common modes (mirror `buildAppAuth` branches + SPA `MODES`):
+- `oauth` — OAuth2 authorization_code + PKCE, per-user (interactive + cron-via-targetUserId). Almost always offer this.
+- `clientCredentials` — OAuth2 client_credentials (service identity).
+- `jwt` — JWT Bearer / service account (e.g. Google domain-wide delegation, Salesforce Connected App). Uses `buildJwtAssertion`.
+- `accessToken` — caller-supplied token + base/instance (quick, no exchange; great for testing).
+- `apiKey` — static API key in a header/query (many simple APIs). Add a branch returning `{apiKeyHeader/value, baseUrl}` and have `executeApiCall` send it.
+Record, for each chosen mode, the exact provider endpoints/fields. This drives Phases 6–7.
+
+### Phase 2 — Generate `swagger.yml` (kept in git, ignored by Prisme)
+Fetch the official API docs (WebFetch/WebSearch the OpenAPI spec). Produce a single **OpenAPI 3.x `swagger.yml` at the workspace root**. Prisme's importer ignores unknown root files, but **commit it** — it is the source of truth for the registry and must be retrievable from git. For multi-API services, merge the APIs into one spec, tagging each operation with its API/base host. Keep operationIds stable; they become the registry `operationName`s.
+
+### Phase 3 — Logo / photo (required to publish the app)
+Find the service's official logo (WebSearch). Upload it (`upload_file`, public) and set `index.yml` `photo:` to the URL. **An app cannot be published without a photo** — do this before the first push.
+
+### Phase 4 — Scaffold the generic infra
+Create the workspace (`create_workspace` or copy `reference/` and adjust `index.yml` `id`/`slug`/`name`/`photo`). Copy + parameterize the generic files listed above (mcp, validateAgent, the dispatcher chain, executeApiCall, formatToolOutput, handleApiError, onInstall, testAuth, MCP Core, security, Custom Code generic helpers, index.yml skeleton). Substitute placeholders. Do NOT carry over the reference's `id` or any bundle URL.
+- `onInstall.yml`: provisions tenant secrets `<camel>Auth` (object) + `<camel>AuthorizedAgents`; writes binding B (workspace `config.value` via minted workspace JWT + `makeSecretRef`) then binding A (terminal `set: config` merge via `makeConfigRef`); sets `mcpEndpoint`, `configAppUrl`, `oauthCallbackUrl`. Idempotent.
+- `index.yml`: `config.schema` (mcpEndpoint/configAppUrl readOnly, apiVersion if any), `config.value` (apiVersion, the two binding aliases, `bundles[<slug>]` for the SPA), `secrets.schema` (`<camel>Auth` object + `<camel>AuthorizedAgents`), `mcpTools` (filled in Phase 5). `labels` incl. `app-mcp`.
+
+### Phase 5 — API surface: registry + ops + mcpTools
+From `swagger.yml`, generate (this mirrors `reference/imports/Custom Code.yml` `resolveToolAction`/`getOperation`/`buildSalesforceRequest`):
+1. **`ENTITY_OPS`**: `{ <entity>: { <action>: <operationName> } }` — group endpoints into a handful of entities, each with action verbs. Keep the tool count small (entities, not endpoints).
+2. **`OPERATIONS`**: `{ <operationName>: {method, path, pathParams, queryParams, bodyParams|bodyPassthrough, rawBodyParam?, contentType?, host?/baseUrl?} }`. For multi-API services include the per-op base/host.
+3. **Per-op App-mode automation** `<operationName>.yml` (thin public wrapper → `method-restOp`/`tool-restOp`). Generate one per operationName (the reference has ~78). Keep them uniform.
+4. **`index.yml` `mcpTools`**: one entry per entity, with an `inputSchema` whose `action` enum lists the entity's actions + the shared params. Mirror the reference's shape.
+Validate the registry/op coherence: every `OPERATIONS` key has an automation file and vice-versa; every entity in `mcpTools` routes.
+
+### Phase 6 — Auth (`buildAppAuth` + OAuth flow + host helper + testAuth)
+- `buildAppAuth.yml`: keep the structure of `reference/`; replace the mode branches with the service's modes (Phase 1). Each branch returns `{accessToken, baseUrl}` or sets `{error}`. Add the `targetUserId` arg + the `oauth` cron branch (read `<pfx>Refresh_<targetUserId>` workspace secret via `run: module: secrets, scope: workspace`, exchange refresh→access on the spot, return fresh token). Keep the host helper call.
+- Host rule: if the provider's OAuth/API host differs from a UI host (Salesforce lightning→my), keep `normalizeLoginHost`; otherwise rename to `normalizeAuthHost` and adjust/no-op the rule. **Provider OAuth endpoints are never on the UI/console host.**
+- `oauthConnect/Callback/Status/Disconnect`: swap authorize/token/revoke URLs + scopes. **Token exchange `body:` MUST be a YAML object** (runtime serializes to form-urlencoded when `Content-Type: application/x-www-form-urlencoded`) — never a string. Store the user-scope token AND best-effort the workspace `<pfx>Refresh_<userId>` secret (works when the connecting user is workspace Editor/Owner — see Gotchas RBAC). Redirect pages use **meta-refresh only (no inline `<script>` — CSP blocks it)** to the SPA view `?view=oauthCallback&status=…`; the SPA does the countdown/auto-close.
+- `testAuth.yml`: `buildAppAuth` → one lightweight authenticated GET (a "limits"/"about"/"profile" endpoint) → `{ok}`/`{ok:false,error}`. Powers the SPA "Test connexion".
+
+### Phase 7 — Config SPA (model B)
+Start from `reference/pages/<slug>/`. Adapt `src/App.tsx`:
+- `AuthConfig`/`Mode`/`MODES`/`FIELDS`/`PREAMBLE` → the service's auth modes (each `PREAMBLE` explains where to create the credential on the provider + the needed fields; each `FIELDS` entry is the per-mode form).
+- Keep: design-system components, dark-vars `@media` injection (AppRenderer does NOT toggle `.dark`), `readParam`, `wh(slug)`, `apiHeaders(sdk)` (Bearer + CSRF), the per-action inline result banners, the **"Autoriser tous les agents" toggle** (sets the `*` sentinel, disables the per-agent selection + Save allowlist, shows a warning), the agent search + checkbox list + **Install capability** (POST agent tool `{type:mcp, name, server:mcpEndpoint, scope:'context_id,agent_id,user_id', [auth block if oauth]}` after ensuring the allowlist), the MCP endpoint + copy button, the **OAuth capability JSON block** (status/connect/disconnect URLs + scopes, to paste in Governance), and the OAuth **Connexion ⇄ Déconnexion toggle** driven by `oauthStatus`.
+- `scripts/externals.mjs`: keep the socle externals; do NOT add radix modules absent from the platform socle (ModuleLoadError) — the reference already drops `react-label`/`react-switch`/`react-slider`. `@radix-ui/react-tooltip` IS in the socle (use the design-system `Tooltip` for long/secondary text like agent ids — it portals to body, so it isn't clipped by scroll containers; avoid the native `title` attr).
+- **i18n**: all user-facing strings go through `t()` (`src/lib/i18n.ts`: `en`+`fr` dicts, locale from `navigator.language`, `{var}` interpolation, fallback en→key). Mode labels via `t('mode.<value>')`, field labels via `t('field.<key>')`, preambles via `t('preamble.<mode>')`; placeholders/identifiers stay literal. Keep the dictionary in sync when you add/rename a string.
+- Build: `npm install && npm run typecheck && npm run build` in `pages/<slug>/`.
+
+### Phase 8 — Deploy, publish, smoke
+Deploy runbook (back changes need only a push; front changes need a bundle upload first):
+1. (front) `upload_file` `dist/bundle.js` (public) → bump the URL in `index.yml` `config.value.bundles[<slug>]` (use a NEW filename each deploy — AppRenderer/browser cache aggressively).
+2. **Stage the SPA aside before push** (the importer chokes on `pages/`): move `pages/` out → `push_workspace` (version name **≤15 chars**) → move `pages/` back.
+3. Publish requires the photo (Phase 3). Install the app in a test tenant.
+4. Smoke the MCP transport (curl, `dangerouslyDisableSandbox` to dodge the rtk hook):
+   - `initialize` → 200 + serverInfo; `notifications/initialized` → **202**; `tools/list` → the entities with correct `inputSchema`s.
+5. Wire a test agent's capability (SSE URL = mcp endpoint, **Scope `context_id,agent_id,user_id`**), allowlist it (SPA), and call a tool from a fresh agent session (MCP clients cache the tool registry per session). Test `testAuth` for each non-oauth mode and the OAuth connect/disconnect popups.
+6. After each verify pass, run the review agents if available (`verify-correctness`, `verify-dead-code`, `verify-dsul-consistency`, `verify-global-scope`, `verify-system-first`); they may be unregistered in a worktree — then run them inline.
+
+---
+
+## Gotchas (each cost hours — do not relearn them)
+
+1. **Secret refs are opaque.** `run: module: secrets, function: get` returns a `$secret:` reference that decrypts ONLY when interpolated inside a `fetch` (url/headers/body). You CANNOT read a field off it (`.accessToken`) in DSUL, and Custom Code cannot decrypt it. → store per-field secrets, and for the cron OAuth path **exchange the refresh token on the spot** (you get a plaintext access token back).
+2. **RBAC on workspace secrets.** A `SecureSecret scope: workspace` can be written only by **Owner/Editor/SuperAdmin** (CASL); a plain member only manages their own `scope: user`. The config-app connector flow is admin/editor so the workspace token write succeeds; a non-editor end-user connecting via an agent connect_url stays interactive-only. Make the workspace write best-effort.
+3. **Two secret stores, don't confuse them.** `PATCH /workspaces/:id/security/secrets` writes `SubjectType.Secret` (config secrets, resolved via `{{secret.X}}` 2-hop binding). The `secrets` runtime module (`set/get/delete`, returns refs) writes `SubjectType.SecureSecret`. They are DIFFERENT — don't write with one and read with the other.
+4. **MCP notifications → 202.** `mcp.yml` must answer any JSON-RPC message with no `id` (e.g. `notifications/initialized`) with HTTP 202 (set `$http.status: 202`), not a JSON-RPC object, or the agent never registers tools and the LLM hallucinates tool names.
+5. **CSP blocks inline `<script>`.** Webhook-served HTML runs under `script-src 'self'`. OAuth redirect pages must rely on `<meta http-equiv="refresh">` only (+ a fallback `<a>`); never an inline `<script>`. The countdown/auto-close lives in the SPA bundle (allowed), reached via the redirect.
+6. **OAuth host ≠ UI host.** Providers serve OAuth/API on a specific host, never the console/UI domain (Salesforce: `*.my.salesforce.com`, never `*.lightning.force.com`). Normalize via the host helper. Same trap when configuring the CLI/Connected App.
+7. **Token-exchange body = object.** form-urlencoded fetches send `body:` as a YAML **map** (the runtime serializes it). A string body fails (`unsupported_grant_type`).
+8. **Agent identity.** agent-factory injects `context_id,agent_id,user_id` (capability `scope`) into the tool-call **arguments** AND propagates `user_id` as the runtime user. So per-user OAuth works for interactive/agent-piloted calls (user-scope). For cron use a workspace store keyed by userId + a **server-only** `targetUserId` — NEVER source it from tool/LLM arguments; `mcp.yml` must call `buildAppAuth` without `targetUserId`.
+9. **2-hop binding.** `{{secret.X}}` resolves only inside tenant workspace `config.value`. Build the literal binding strings with Custom Code (`makeConfigRef`/`makeSecretRef`) so DSUL never parses `{{`. `onInstall` does GET-merge-PATCH on `/config` (don't clobber). `push_workspace` does NOT update runtime `config.value`.
+10. **SPA dark mode + cache.** AppRenderer doesn't toggle `.dark` → inject palette via `@media (prefers-color-scheme: dark)`. Bundle URL must change per deploy (cache). `externals.mjs` must match the socle (no extra radix). Platform API from the SPA: Bearer `sdk.token` + `x-prismeai-csrf-token: sdk._csrfToken` + `credentials:'include'`.
+11. **Dynamic dispatch is intentional.** The ~N per-op automations have no static references (reached via the registry) — reviewers must not flag them as orphaned.
+12. **`validate_automation` is authoritative.** Run it on every automation. `push_workspace` version name ≤ 15 chars. Nested expressions need inner `{% %}`; `replace(...)` all-occurrences via JS `split().join()` in Custom Code; `matches/and/or` only at condition level.
+
+---
+
+## Reference
+
+- **`reference/`** — the full validated `salesforce-next` connector (automations, `imports/`, `index.yml`, `security.yml`, `pages/<slug>/src`). The canonical implementation. Mirror it.
+- Project memory `app-mcp-refacto-design` — locked design decisions + the rationale behind every gotcha above.
+
+## Output to the user
+When done: the workspace path + id, the published app slug, the MCP endpoint, the configAppUrl, the auth modes wired, and the smoke results (handshake 202, tools/list count, a tool call, OAuth connect/disconnect). Commit on the worktree branch only when the user asks.

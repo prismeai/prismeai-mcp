@@ -1,0 +1,203 @@
+slug: buildAppAuth
+name: /01_Helpers/buildAppAuth
+description: >-
+  Resolve Salesforce auth from the tenant config object `config.auth`
+  (`{mode, loginHost, jwtUsername, oauthClientId, oauthClientSecret,
+  jwtPrivateKey, accessToken, instanceUrl}`). Supported modes:
+  - `jwt` (default): OAuth2 JWT Bearer (Connected App + service-account user).
+  - `clientCredentials`: OAuth2 client_credentials grant (Connected App run-as user).
+  - `accessToken`: caller-managed access token + instance URL (no exchange).
+  Returns { accessToken, baseUrl } (baseUrl = {instance_url}/services/data/{apiVersion})
+  or { error }. Runs in tenant context — used by the MCP endpoint and App-mode.
+private: true
+arguments:
+  accessToken:
+    type: string
+    description: Pre-resolved access token (bypasses config).
+  instanceUrl:
+    type: string
+    description: Pre-resolved instance URL (paired with accessToken).
+  apiVersion:
+    type: string
+  targetUserId:
+    type: string
+    description: >-
+      OAuth mode only. Server-controlled userId on whose behalf to resolve the
+      Salesforce token in a NON-interactive context (cron / autonomous). Reads
+      that user's refresh token from the workspace store and exchanges it for a
+      fresh access token. MUST be set only from trusted server config (e.g. a
+      cron automation) — NEVER from inbound/LLM tool arguments.
+do:
+  - set:
+      name: effectiveApiVersion
+      value: '{% {{apiVersion}} || {{config.apiVersion}} || "v62.0" %}'
+  - set:
+      name: auth
+      value: '{{config.auth}}'
+  - set:
+      name: mode
+      value: '{% {{auth.mode}} || "jwt" %}'
+  - comment: OAuth endpoints live on *.my.salesforce.com, never on the Lightning UI host.
+  - Custom Code.run:
+      function: normalizeLoginHost
+      parameters:
+        rawHost: '{{auth.loginHost}}'
+      output: lh
+  - set:
+      name: normHost
+      value: '{{lh.host}}'
+  - comment: Priority 0 — caller passed an explicit accessToken + instanceUrl.
+  - conditions:
+      '{{accessToken}} && {{instanceUrl}}':
+        - set:
+            name: output
+            value:
+              accessToken: '{{accessToken}}'
+              baseUrl: '{{instanceUrl}}/services/data/{{effectiveApiVersion}}'
+        - break: {}
+  - comment: Mode accessToken — stored token + instance URL, no exchange.
+  - conditions:
+      '{{mode}} == "accessToken"':
+        - conditions:
+            '{{auth.accessToken}} && {{auth.instanceUrl}}':
+              - set:
+                  name: output
+                  value:
+                    accessToken: '{{auth.accessToken}}'
+                    baseUrl: '{{auth.instanceUrl}}/services/data/{{effectiveApiVersion}}'
+              - break: {}
+  - comment: >-
+      Mode oauth — per-user delegated token. If targetUserId is set (cron /
+      autonomous, server-controlled), resolve that user's refresh token from the
+      workspace store and exchange it for a fresh access token. Otherwise use the
+      interactive user-scope token stored by oauthCallback. targetUserId must
+      NEVER be sourced from tool arguments (see mcp.yml — it calls without it).
+  - conditions:
+      '{{mode}} == "oauth"':
+        - conditions:
+            '{{targetUserId}}':
+              - Custom Code.run:
+                  function: makeTokenSecretName
+                  parameters:
+                    userId: '{{targetUserId}}'
+                  output: tokName
+              - conditions:
+                  '{{tokName.error}}':
+                    - set:
+                        name: output
+                        value:
+                          error: Invalid targetUserId for Salesforce OAuth resolution.
+                    - break: {}
+              - run:
+                  module: secrets
+                  function: get
+                  parameters:
+                    name: '{{tokName.name}}'
+                    scope: workspace
+                  output: refRef
+              - conditions:
+                  '{{refRef.error}}':
+                    - set:
+                        name: output
+                        value:
+                          error: No stored Salesforce token for this user. They must connect once from the connector config app (OAuth mode) as a workspace editor.
+                    - break: {}
+              - fetch:
+                  url: '{{normHost}}/services/oauth2/token'
+                  method: POST
+                  headers:
+                    Content-Type: application/x-www-form-urlencoded
+                  body:
+                    grant_type: refresh_token
+                    refresh_token: '{{refRef}}'
+                    client_id: '{{auth.oauthClientId}}'
+                    client_secret: '{{auth.oauthClientSecret}}'
+                  output: refResp
+                  outputMode: detailed_response
+                  emitErrors: false
+              - conditions:
+                  '{{refResp.status}} == 200':
+                    - set:
+                        name: output
+                        value:
+                          accessToken: '{{refResp.body.access_token}}'
+                          baseUrl: '{{refResp.body.instance_url}}/services/data/{{effectiveApiVersion}}'
+                    - break: {}
+                  default:
+                    - set:
+                        name: output
+                        value:
+                          error: 'Salesforce token refresh failed ({{refResp.status}}) for this user. They must reconnect from the config app.'
+                    - break: {}
+        - conditions:
+            '{{user.salesforceNext.oauth.accessToken}}':
+              - set:
+                  name: output
+                  value:
+                    accessToken: '{{user.salesforceNext.oauth.accessToken}}'
+                    baseUrl: '{{user.salesforceNext.oauth.instanceUrl}}/services/data/{{effectiveApiVersion}}'
+              - break: {}
+            default:
+              - set:
+                  name: output
+                  value:
+                    error: Salesforce is not connected for this user. Open the connector config app (OAuth mode) and click Connexion, or use the agent's connect action.
+              - break: {}
+  - comment: Mode clientCredentials — OAuth2 client_credentials grant.
+  - conditions:
+      '{{mode}} == "clientCredentials"':
+        - conditions:
+            '{{auth.oauthClientId}} && {{auth.oauthClientSecret}}':
+              - set:
+                  name: ccHost
+                  value: '{{normHost}}'
+              - fetch:
+                  url: '{{ccHost}}/services/oauth2/token'
+                  method: POST
+                  headers:
+                    Content-Type: application/x-www-form-urlencoded
+                  body:
+                    grant_type: client_credentials
+                    client_id: '{{auth.oauthClientId}}'
+                    client_secret: '{{auth.oauthClientSecret}}'
+                  output: ccResp
+                  outputMode: detailed_response
+                  emitErrors: false
+              - conditions:
+                  '{{ccResp.status}} == 200':
+                    - set:
+                        name: output
+                        value:
+                          accessToken: '{{ccResp.body.access_token}}'
+                          baseUrl: '{{ccResp.body.instance_url}}/services/data/{{effectiveApiVersion}}'
+                    - break: {}
+                  default:
+                    - set:
+                        name: output
+                        value:
+                          error: 'Salesforce client_credentials exchange failed ({{ccResp.status}}). Check the Consumer Key/Secret and that the Connected App has a run-as user.'
+                    - break: {}
+  - comment: Mode jwt (default) — OAuth2 JWT Bearer.
+  - conditions:
+      '{{mode}} == "jwt"':
+        - conditions:
+            '{{auth.jwtUsername}} && {{auth.jwtPrivateKey}}':
+              - exchangeJwtBearer:
+                  username: '{{auth.jwtUsername}}'
+                  privateKey: '{{auth.jwtPrivateKey}}'
+                  clientId: '{{auth.oauthClientId}}'
+                  loginHost: '{{normHost}}'
+                  output: jwtResult
+              - conditions:
+                  '!{{jwtResult.error}} && {{jwtResult.accessToken}} && {{jwtResult.instanceUrl}}':
+                    - set:
+                        name: output
+                        value:
+                          accessToken: '{{jwtResult.accessToken}}'
+                          baseUrl: '{{jwtResult.instanceUrl}}/services/data/{{effectiveApiVersion}}'
+                    - break: {}
+  - set:
+      name: output
+      value:
+        error: Salesforce not authenticated. Configure the auth mode and its credentials in the connector config app.
+output: '{{output}}'

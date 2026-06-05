@@ -1,0 +1,54 @@
+slug: deleteToolingRecord
+name: deleteToolingRecord
+description: Delete a Tooling API record (DELETE /tooling/sobjects/{sObjectName}/{recordId}). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.deleteToolingRecord:` directly from their own automations.
+arguments:
+  sObjectName:
+    type: string
+    description: Path param `sObjectName` (required).
+  recordId:
+    type: string
+    description: Path param `recordId` (required).
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        sObjectName: '{{sObjectName}}'
+        recordId: '{{recordId}}'
+  - method-restOp:
+      operationName: deleteToolingRecord
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: deleteToolingRecord result
+      identifier: deleteToolingRecord
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

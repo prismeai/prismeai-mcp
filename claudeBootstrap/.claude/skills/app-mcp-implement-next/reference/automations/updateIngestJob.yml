@@ -1,0 +1,55 @@
+slug: updateIngestJob
+name: updateIngestJob
+description: Update job state (UploadComplete to start processing, Aborted to stop) (PATCH /jobs/ingest/{jobId}). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.updateIngestJob:` directly from their own automations.
+arguments:
+  jobId:
+    type: string
+    description: Path param `jobId` (required).
+  state:
+    type: object
+    additionalProperties: true
+    description: Body field `state`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        jobId: '{{jobId}}'
+        state: '{{state}}'
+  - method-restOp:
+      operationName: updateIngestJob
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: updateIngestJob result
+      identifier: updateIngestJob
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

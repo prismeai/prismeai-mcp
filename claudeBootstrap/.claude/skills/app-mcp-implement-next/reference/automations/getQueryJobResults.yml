@@ -1,0 +1,58 @@
+slug: getQueryJobResults
+name: getQueryJobResults
+description: Download CSV results of a completed bulk query job (GET /jobs/query/{jobId}/results). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.getQueryJobResults:` directly from their own automations.
+arguments:
+  jobId:
+    type: string
+    description: Path param `jobId` (required).
+  locator:
+    type: string
+    description: Query param `locator`.
+  maxRecords:
+    type: number
+    description: Query param `maxRecords`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        jobId: '{{jobId}}'
+        locator: '{{locator}}'
+        maxRecords: '{{maxRecords}}'
+  - method-restOp:
+      operationName: getQueryJobResults
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: getQueryJobResults result
+      identifier: getQueryJobResults
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

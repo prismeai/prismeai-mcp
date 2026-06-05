@@ -1,0 +1,54 @@
+slug: uploadIngestData
+name: uploadIngestData
+description: Upload CSV data to an Open ingest job (PUT /jobs/ingest/{jobId}/batches). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.uploadIngestData:` directly from their own automations.
+arguments:
+  jobId:
+    type: string
+    description: Path param `jobId` (required).
+  rawBody:
+    type: string
+    description: Raw body (text/csv).
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        jobId: '{{jobId}}'
+        rawBody: '{{rawBody}}'
+  - method-restOp:
+      operationName: uploadIngestData
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: uploadIngestData result
+      identifier: uploadIngestData
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

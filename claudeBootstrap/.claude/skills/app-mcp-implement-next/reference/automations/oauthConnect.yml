@@ -1,0 +1,77 @@
+slug: oauthConnect
+name: 00_OAuth/oauthConnect
+description: >-
+  Per-user OAuth2 (authorization-code + PKCE) connect endpoint. Opened in the
+  user's browser (Connexion button / agent-factory connect_url). Reads the tenant
+  Connected App creds from config.auth (OAuth mode), stores PKCE + state in user
+  scope, and redirects to Salesforce's authorize endpoint. oauthCallback then
+  exchanges the code and stores the token for this user.
+private: true
+when:
+  endpoint: true
+do:
+  - conditions:
+      '!{{user.id}}':
+        - set:
+            name: $http
+            value:
+              status: 401
+        - set:
+            name: output
+            value: Authentication required. Please log in to Prisme.ai first.
+        - break: {}
+  - set:
+      name: a
+      value: '{{config.auth}}'
+  - conditions:
+      '!{{a.oauthClientId}} || !{{a.oauthClientSecret}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: output
+            value: Salesforce OAuth is not configured. Set OAuth mode + Consumer Key/Secret in the config app and Save before connecting.
+        - break: {}
+  - comment: OAuth endpoints live on *.my.salesforce.com, never on the Lightning UI host.
+  - Custom Code.run:
+      function: normalizeLoginHost
+      parameters:
+        rawHost: '{{a.loginHost}}'
+      output: lh
+  - set:
+      name: loginHost
+      value: '{{lh.host}}'
+  - Custom Code.run:
+      function: generatePkce
+      output: pkce
+  - Custom Code.run:
+      function: generateState
+      output: stateResult
+  - set:
+      name: user.salesforceNext.oauthPending
+      scope: user
+      value:
+        codeVerifier: '{{pkce.codeVerifier}}'
+        state: '{{stateResult.state}}'
+        createdAt: '{{run.date}}'
+  - Custom Code.run:
+      function: buildAuthorizeUrl
+      parameters:
+        authorizeUrl: '{{loginHost}}/services/oauth2/authorize'
+        clientId: '{{a.oauthClientId}}'
+        redirectUri: '{{config.oauthCallbackUrl}}'
+        scopes: '{% {{a.scopes}} || "api refresh_token offline_access" %}'
+        state: '{{stateResult.state}}'
+        codeChallenge: '{{pkce.codeChallenge}}'
+      output: urlResult
+  - set:
+      name: $http
+      value:
+        headers:
+          Content-Type: text/html
+  - set:
+      name: output
+      value: >-
+        <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={{urlResult.url}}"><title>Redirecting to Salesforce…</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting to Salesforce… <a href="{{urlResult.url}}">continue</a></body></html>
+output: '{{output}}'

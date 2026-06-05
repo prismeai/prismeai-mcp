@@ -1,0 +1,50 @@
+slug: method-restOp
+name: /02_Methods/method-restOp
+description: Generic REST dispatcher for Salesforce. Looks up the operation in the Custom Code registry (`buildSalesforceRequest`), substitutes path placeholders, then calls executeApiCall. Returns the raw apiResult; the caller (tool-restOp or App-mode wrapper) is responsible for formatting.
+private: true
+arguments:
+  operationName:
+    type: string
+  args:
+    type: object
+  accessToken:
+    type: string
+  baseUrl:
+    type: string
+    description: Full Salesforce REST base — `{instance_url}/services/data/{apiVersion}`.
+  apiVersion:
+    type: string
+do:
+  - Custom Code.run:
+      function: buildSalesforceRequest
+      parameters:
+        operationName: '{{operationName}}'
+        args: '{{args}}'
+      output: req
+  - conditions:
+      '{{req.error}}':
+        - set:
+            name: result
+            value:
+              success: false
+              error:
+                isError: true
+                content:
+                  - type: text
+                    text: 'Salesforce request build failed for {{operationName}}: {{req.error}}'
+        - break: {}
+  - executeApiCall:
+      path: '{{req.path}}'
+      method: '{{req.method}}'
+      query: '{{req.query}}'
+      body: '{{req.body}}'
+      rawBody: '{{req.rawBody}}'
+      contentType: '{{req.contentType}}'
+      accessToken: '{{accessToken}}'
+      baseUrl: '{{baseUrl}}'
+      operation: '{{operationName}}'
+      output: apiResult
+  - set:
+      name: result
+      value: '{{apiResult}}'
+output: '{{result}}'

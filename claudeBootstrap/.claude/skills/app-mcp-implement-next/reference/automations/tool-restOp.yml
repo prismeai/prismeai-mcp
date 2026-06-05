@@ -1,0 +1,35 @@
+slug: tool-restOp
+name: /03_Tools/tool-restOp
+description: MCP wrapper for any Salesforce REST operation. Forwards arguments to method-restOp and formats the response for MCP clients via formatToolOutput.
+private: true
+arguments:
+  toolName:
+    type: string
+  body:
+    type: object
+do:
+  - set:
+      name: outputFormat
+      value: '{% {{body.arguments.outputFormat}} || "verbose" %}'
+  - method-restOp:
+      operationName: '{{toolName}}'
+      args: '{{body.arguments}}'
+      accessToken: '{{body.accessToken}}'
+      baseUrl: '{{body.baseUrl}}'
+      apiVersion: '{{body.apiVersion}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: '{{toolName}} result'
+      identifier: '{{toolName}}'
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{{outputFormat}}'
+      output: result
+output: '{{result}}'

@@ -1,0 +1,23 @@
+slug: oauthStatus
+name: 00_OAuth/oauthStatus
+description: >-
+  Returns the per-user Salesforce OAuth connection status for the current user.
+  Used by the config app and by agent-factory's capability `status_url`.
+private: true
+when:
+  endpoint: true
+do:
+  - set:
+      name: output
+      value:
+        connected: false
+  - conditions:
+      '{{user.salesforceNext.oauth.accessToken}}':
+        - set:
+            name: output
+            value:
+              connected: true
+              instanceUrl: '{{user.salesforceNext.oauth.instanceUrl}}'
+              scopes: '{{user.salesforceNext.oauth.scopes}}'
+              connectedAt: '{{user.salesforceNext.oauth.connectedAt}}'
+output: '{{output}}'

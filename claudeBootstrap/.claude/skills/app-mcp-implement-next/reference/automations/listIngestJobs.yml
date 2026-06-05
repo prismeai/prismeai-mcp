@@ -1,0 +1,62 @@
+slug: listIngestJobs
+name: listIngestJobs
+description: List bulk ingest jobs (GET /jobs/ingest). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.listIngestJobs:` directly from their own automations.
+arguments:
+  isPkChunkingEnabled:
+    type: boolean
+    description: Query param `isPkChunkingEnabled`.
+  jobType:
+    type: string
+    description: Query param `jobType`.
+    enum:
+      - BigObjectIngest
+      - Classic
+      - V2Ingest
+  queryLocator:
+    type: string
+    description: Query param `queryLocator`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        isPkChunkingEnabled: '{{isPkChunkingEnabled}}'
+        jobType: '{{jobType}}'
+        queryLocator: '{{queryLocator}}'
+  - method-restOp:
+      operationName: listIngestJobs
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: listIngestJobs result
+      identifier: listIngestJobs
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

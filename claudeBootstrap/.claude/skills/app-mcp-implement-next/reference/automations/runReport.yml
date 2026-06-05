@@ -1,0 +1,59 @@
+slug: runReport
+name: runReport
+description: Execute a report asynchronously and return a report instance (POST /analytics/reports/{reportId}). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.runReport:` directly from their own automations.
+arguments:
+  reportId:
+    type: string
+    description: Path param `reportId` (required).
+  includeDetails:
+    type: boolean
+    description: Query param `includeDetails`.
+  body:
+    type: object
+    additionalProperties: true
+    description: JSON request body.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        reportId: '{{reportId}}'
+        includeDetails: '{{includeDetails}}'
+        body: '{{body}}'
+  - method-restOp:
+      operationName: runReport
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: runReport result
+      identifier: runReport
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

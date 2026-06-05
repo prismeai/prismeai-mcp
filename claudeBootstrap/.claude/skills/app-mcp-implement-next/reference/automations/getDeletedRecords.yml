@@ -1,0 +1,58 @@
+slug: getDeletedRecords
+name: getDeletedRecords
+description: Records deleted within a time window (recycle bin) (GET /sobjects/{sObjectName}/deleted). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.getDeletedRecords:` directly from their own automations.
+arguments:
+  sObjectName:
+    type: string
+    description: Path param `sObjectName` (required).
+  start:
+    type: string
+    description: Query param `start`.
+  end:
+    type: string
+    description: Query param `end`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        sObjectName: '{{sObjectName}}'
+        start: '{{start}}'
+        end: '{{end}}'
+  - method-restOp:
+      operationName: getDeletedRecords
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: getDeletedRecords result
+      identifier: getDeletedRecords
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

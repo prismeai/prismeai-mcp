@@ -1,0 +1,81 @@
+slug: runApexTestsAsync
+name: runApexTestsAsync
+description: Schedule async Apex test execution (POST /tooling/runTestsAsynchronous). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.runApexTestsAsync:` directly from their own automations.
+arguments:
+  classNames:
+    type: object
+    additionalProperties: true
+    description: Body field `classNames`.
+  classids:
+    type: object
+    additionalProperties: true
+    description: Body field `classids`.
+  suiteNames:
+    type: object
+    additionalProperties: true
+    description: Body field `suiteNames`.
+  suiteids:
+    type: object
+    additionalProperties: true
+    description: Body field `suiteids`.
+  maxFailedTests:
+    type: object
+    additionalProperties: true
+    description: Body field `maxFailedTests`.
+  testLevel:
+    type: object
+    additionalProperties: true
+    description: Body field `testLevel`.
+  tests:
+    type: object
+    additionalProperties: true
+    description: Body field `tests`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        classNames: '{{classNames}}'
+        classids: '{{classids}}'
+        suiteNames: '{{suiteNames}}'
+        suiteids: '{{suiteids}}'
+        maxFailedTests: '{{maxFailedTests}}'
+        testLevel: '{{testLevel}}'
+        tests: '{{tests}}'
+  - method-restOp:
+      operationName: runApexTestsAsync
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: runApexTestsAsync result
+      identifier: runApexTestsAsync
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

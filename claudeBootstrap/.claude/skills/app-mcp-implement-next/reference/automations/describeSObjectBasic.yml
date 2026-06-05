@@ -1,0 +1,50 @@
+slug: describeSObjectBasic
+name: describeSObjectBasic
+description: Basic metadata for a single sObject (URLs + recent items) (GET /sobjects/{sObjectName}). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.describeSObjectBasic:` directly from their own automations.
+arguments:
+  sObjectName:
+    type: string
+    description: Path param `sObjectName` (required).
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        sObjectName: '{{sObjectName}}'
+  - method-restOp:
+      operationName: describeSObjectBasic
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: describeSObjectBasic result
+      identifier: describeSObjectBasic
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

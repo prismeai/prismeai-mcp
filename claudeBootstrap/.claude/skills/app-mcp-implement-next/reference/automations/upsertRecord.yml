@@ -1,0 +1,63 @@
+slug: upsertRecord
+name: upsertRecord
+description: Upsert a record by external ID field (PATCH /sobjects/{sObjectName}/{externalIdField}/{externalIdValue}). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.upsertRecord:` directly from their own automations.
+arguments:
+  sObjectName:
+    type: string
+    description: Path param `sObjectName` (required).
+  externalIdField:
+    type: string
+    description: Path param `externalIdField` (required).
+  externalIdValue:
+    type: string
+    description: Path param `externalIdValue` (required).
+  body:
+    type: object
+    additionalProperties: true
+    description: JSON request body.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        sObjectName: '{{sObjectName}}'
+        externalIdField: '{{externalIdField}}'
+        externalIdValue: '{{externalIdValue}}'
+        body: '{{body}}'
+  - method-restOp:
+      operationName: upsertRecord
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: upsertRecord result
+      identifier: upsertRecord
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

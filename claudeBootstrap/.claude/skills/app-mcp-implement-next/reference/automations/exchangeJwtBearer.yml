@@ -1,0 +1,80 @@
+slug: exchangeJwtBearer
+name: /01_Helpers/exchangeJwtBearer
+description: OAuth2 JWT Bearer flow (service-to-service). Signs an RS256 JWT assertion with the tenant's private key and exchanges it at `{loginHost}/services/oauth2/token` for an access_token + instance_url. Result cached in `session.salesforceJwt[cacheKey]` for ~30 min (Salesforce default JWT-flow token lifetime is 120 min — we under-cache for safety). Returns `{ accessToken, instanceUrl }` or `{ error }`.
+private: true
+arguments:
+  username:
+    type: string
+  privateKey:
+    type: string
+  clientId:
+    type: string
+  loginHost:
+    type: string
+do:
+  - conditions:
+      '!{{username}} || !{{privateKey}} || !{{clientId}}':
+        - set:
+            name: jwtResult
+            value:
+              error: JWT Bearer requires username + privateKey + clientId (oauthClientId).
+        - break: {}
+  - set:
+      name: effectiveHost
+      value: '{% {{loginHost}} || "https://login.salesforce.com" %}'
+  - comment: Cache key = sha-truncated of (clientId+username+host). Recompute every call but TTL gates the network exchange.
+  - set:
+      name: cacheKey
+      value: '{{clientId}}|{{username}}|{{effectiveHost}}'
+  - conditions:
+      '{{session.salesforceJwt[{{cacheKey}}].accessToken}} && {{session.salesforceJwt[{{cacheKey}}].expiresAt}} > {% date({{run.date}}).ts %}':
+        - set:
+            name: jwtResult
+            value:
+              accessToken: '{{session.salesforceJwt[{{cacheKey}}].accessToken}}'
+              instanceUrl: '{{session.salesforceJwt[{{cacheKey}}].instanceUrl}}'
+        - break: {}
+  - comment: Build + sign the JWT assertion in Custom Code (RS256 via Node crypto.createSign)
+  - Custom Code.run:
+      function: buildJwtAssertion
+      parameters:
+        clientId: '{{clientId}}'
+        username: '{{username}}'
+        audience: '{{effectiveHost}}'
+        privateKey: '{{privateKey}}'
+      output: assertionResult
+  - conditions:
+      '{{assertionResult.error}}':
+        - set:
+            name: jwtResult
+            value:
+              error: 'JWT signing failed: {{assertionResult.error}}'
+        - break: {}
+  - fetch:
+      url: '{{effectiveHost}}/services/oauth2/token'
+      method: POST
+      headers:
+        Content-Type: application/x-www-form-urlencoded
+      body: grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={{assertionResult.assertion}}
+      output: tokenResponse
+      outputMode: detailed_response
+      emitErrors: false
+  - conditions:
+      '{{tokenResponse.status}} != 200':
+        - set:
+            name: jwtResult
+            value:
+              error: 'JWT exchange failed ({{tokenResponse.status}}): {{tokenResponse.body.error_description}}'
+        - break: {}
+  - set:
+      name: session.salesforceJwt[{{cacheKey}}]
+      value:
+        accessToken: '{{tokenResponse.body.access_token}}'
+        instanceUrl: '{{tokenResponse.body.instance_url}}'
+        expiresAt: '{% date({{run.date}}).ts + 1800000 %}'
+  - set:
+      name: jwtResult
+      value:
+        accessToken: '{{tokenResponse.body.access_token}}'
+        instanceUrl: '{{tokenResponse.body.instance_url}}'
+output: '{{jwtResult}}'

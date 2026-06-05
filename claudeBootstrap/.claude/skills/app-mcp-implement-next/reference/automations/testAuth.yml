@@ -1,0 +1,55 @@
+slug: testAuth
+name: 00_MCP/testAuth
+description: >-
+  Test the configured Salesforce service credentials: resolves auth via
+  buildAppAuth (JWT Bearer / client_credentials / access token / per-user OAuth)
+  and makes a lightweight authenticated call (GET /limits). Returns { ok,
+  baseUrl } or { ok:false, error }. Used by the config app's "Test connexion".
+  Runs in tenant context. No credential value is echoed.
+private: true
+when:
+  endpoint: true
+do:
+  - conditions:
+      '!{{user.id}}':
+        - set:
+            name: $http
+            value:
+              status: 401
+        - set:
+            name: response
+            value:
+              ok: false
+              error: Unauthorized
+        - break: {}
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: response
+            value:
+              ok: false
+              error: '{{auth.error}}'
+        - break: {}
+  - executeApiCall:
+      path: limits
+      method: GET
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      operation: testAuth
+      output: apiResult
+  - conditions:
+      '{{apiResult.success}}':
+        - set:
+            name: response
+            value:
+              ok: true
+              baseUrl: '{{auth.baseUrl}}'
+      default:
+        - set:
+            name: response
+            value:
+              ok: false
+              error: 'Authenticated, but the Salesforce test call failed (status {{apiResult.status}}). Check the user, permissions and scopes.'
+output: '{{response}}'

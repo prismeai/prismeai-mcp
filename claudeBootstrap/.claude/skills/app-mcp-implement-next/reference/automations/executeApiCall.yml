@@ -1,0 +1,127 @@
+slug: executeApiCall
+name: /01_Helpers/executeApiCall
+description: 'Execute a Salesforce REST API call with auth. `baseUrl` is the full `{instance_url}/services/data/{apiVersion}` (instance URL is returned by the OAuth token endpoint and stored per-user; apiVersion comes from config). Auth header is `Authorization: Bearer {accessToken}`. Returns { success, data, status } or { success: false, error, data, status }.'
+private: true
+arguments:
+  path:
+    type: string
+    description: Relative path under the API version root (no leading slash).
+  method:
+    type: string
+    description: HTTP method (POST default, GET, PUT, PATCH, DELETE).
+  body:
+    type: object
+    description: Request JSON body.
+  rawBody:
+    type: string
+    description: Raw body — takes precedence over `body`. Used for Bulk API CSV ingest (uploadIngestData) and metadata zip uploads.
+  contentType:
+    type: string
+    description: Override Content-Type. Default is application/json. Bulk CSV upload uses text/csv.
+  query:
+    type: object
+    description: Query string parameters (will be URL-encoded).
+  accessToken:
+    type: string
+  baseUrl:
+    type: string
+    description: Full Salesforce REST API base — `{instance_url}/services/data/{apiVersion}`.
+  operation:
+    type: string
+    description: Short description used in error messages.
+do:
+  - conditions:
+      '!{{baseUrl}}':
+        - set:
+            name: result
+            value:
+              success: false
+              error:
+                isError: true
+                content:
+                  - type: text
+                    text: Salesforce baseUrl not resolved — auth context returned no instance_url.
+              status: 0
+        - break: {}
+  - set:
+      name: effectiveMethod
+      value: '{% {{method}} || "POST" %}'
+  - set:
+      name: qs
+      value: ''
+  - conditions:
+      '{{query}}':
+        - Custom Code.run:
+            function: buildQueryString
+            parameters:
+              params: '{{query}}'
+            output: qs
+  - set:
+      name: fetchHeaders
+      value:
+        Authorization: Bearer {{accessToken}}
+        Accept: application/json
+  - conditions:
+      '{{effectiveMethod}} == "POST" || {{effectiveMethod}} == "PUT" || {{effectiveMethod}} == "PATCH"':
+        - set:
+            name: fetchHeaders.Content-Type
+            value: '{% {{contentType}} || "application/json" %}'
+  - conditions:
+      '{{effectiveMethod}} == "GET" || {{effectiveMethod}} == "DELETE"':
+        - fetch:
+            url: '{{baseUrl}}/{{path}}{{qs}}'
+            method: '{{effectiveMethod}}'
+            headers: '{{fetchHeaders}}'
+            output: response
+            outputMode: detailed_response
+            emitErrors: false
+      default:
+        - conditions:
+            '{{rawBody}}':
+              - fetch:
+                  url: '{{baseUrl}}/{{path}}{{qs}}'
+                  method: '{{effectiveMethod}}'
+                  headers: '{{fetchHeaders}}'
+                  body: '{{rawBody}}'
+                  output: response
+                  outputMode: detailed_response
+                  emitErrors: false
+            '{{body}}':
+              - fetch:
+                  url: '{{baseUrl}}/{{path}}{{qs}}'
+                  method: '{{effectiveMethod}}'
+                  headers: '{{fetchHeaders}}'
+                  body: '{{body}}'
+                  output: response
+                  outputMode: detailed_response
+                  emitErrors: false
+            default:
+              - fetch:
+                  url: '{{baseUrl}}/{{path}}{{qs}}'
+                  method: '{{effectiveMethod}}'
+                  headers: '{{fetchHeaders}}'
+                  body: {}
+                  output: response
+                  outputMode: detailed_response
+                  emitErrors: false
+  - handleApiError:
+      response: '{{response}}'
+      operation: '{{operation}}'
+      output: errorResult
+  - conditions:
+      '{{errorResult}}':
+        - set:
+            name: result
+            value:
+              success: false
+              error: '{{errorResult}}'
+              data: '{{response.body}}'
+              status: '{{response.status}}'
+        - break: {}
+  - set:
+      name: result
+      value:
+        success: true
+        data: '{{response.body}}'
+        status: '{{response.status}}'
+output: '{{result}}'

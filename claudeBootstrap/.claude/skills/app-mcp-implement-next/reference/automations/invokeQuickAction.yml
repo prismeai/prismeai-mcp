@@ -1,0 +1,55 @@
+slug: invokeQuickAction
+name: invokeQuickAction
+description: Invoke a quick action with payload (POST /quickActions/{actionName}). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.invokeQuickAction:` directly from their own automations.
+arguments:
+  actionName:
+    type: string
+    description: Path param `actionName` (required).
+  body:
+    type: object
+    additionalProperties: true
+    description: JSON request body.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        actionName: '{{actionName}}'
+        body: '{{body}}'
+  - method-restOp:
+      operationName: invokeQuickAction
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: invokeQuickAction result
+      identifier: invokeQuickAction
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

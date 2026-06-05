@@ -1,0 +1,54 @@
+slug: getRecordsCollection
+name: getRecordsCollection
+description: Retrieve up to 2000 records of mixed sObjects in one call (GET /composite/sobjects). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.getRecordsCollection:` directly from their own automations.
+arguments:
+  ids:
+    type: string
+    description: Query param `ids`.
+  fields:
+    type: string
+    description: Query param `fields`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        ids: '{{ids}}'
+        fields: '{{fields}}'
+  - method-restOp:
+      operationName: getRecordsCollection
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: getRecordsCollection result
+      identifier: getRecordsCollection
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

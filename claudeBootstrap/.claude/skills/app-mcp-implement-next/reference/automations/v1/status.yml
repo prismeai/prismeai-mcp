@@ -1,0 +1,12 @@
+slug: v1/status
+name: API/v1/Status
+description: 'Sync: HTTP endpoint that returns the current server status (Studio SPA detection).'
+when:
+  endpoint: true
+do:
+  - set:
+      name: result
+      value:
+        status: ok
+        timestamp: '{{run.date}}'
+output: '{{result}}'

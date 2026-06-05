@@ -1,0 +1,56 @@
+slug: createRecords
+name: createRecords
+description: Create up to 200 records (mixed sObjects) in one call (POST /composite/sobjects). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.createRecords:` directly from their own automations.
+arguments:
+  allOrNone:
+    type: object
+    additionalProperties: true
+    description: Body field `allOrNone`.
+  records:
+    type: object
+    additionalProperties: true
+    description: Body field `records`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        allOrNone: '{{allOrNone}}'
+        records: '{{records}}'
+  - method-restOp:
+      operationName: createRecords
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: createRecords result
+      identifier: createRecords
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

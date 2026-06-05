@@ -1,0 +1,50 @@
+slug: executeAnonymousApex
+name: executeAnonymousApex
+description: Run a one-off Apex code block as the current user (GET /tooling/executeAnonymous). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.executeAnonymousApex:` directly from their own automations.
+arguments:
+  anonymousBody:
+    type: string
+    description: Query param `anonymousBody`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        anonymousBody: '{{anonymousBody}}'
+  - method-restOp:
+      operationName: executeAnonymousApex
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: executeAnonymousApex result
+      identifier: executeAnonymousApex
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

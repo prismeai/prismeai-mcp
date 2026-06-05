@@ -1,0 +1,56 @@
+slug: deployMetadata
+name: deployMetadata
+description: Deploy a zipped metadata package (Metadata REST) (POST /metadata/deployRequest). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.deployMetadata:` directly from their own automations.
+arguments:
+  deployOptions:
+    type: object
+    additionalProperties: true
+    description: Body field `deployOptions`.
+  file:
+    type: object
+    additionalProperties: true
+    description: Body field `file`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        deployOptions: '{{deployOptions}}'
+        file: '{{file}}'
+  - method-restOp:
+      operationName: deployMetadata
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: deployMetadata result
+      identifier: deployMetadata
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

@@ -1,0 +1,64 @@
+slug: upsertRecordsForType
+name: upsertRecordsForType
+description: Upsert up to 200 records of the same sObject by external ID (PATCH /composite/sobjects/{sObjectName}/{externalIdField}). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.upsertRecordsForType:` directly from their own automations.
+arguments:
+  sObjectName:
+    type: string
+    description: Path param `sObjectName` (required).
+  externalIdField:
+    type: string
+    description: Path param `externalIdField` (required).
+  allOrNone:
+    type: object
+    additionalProperties: true
+    description: Body field `allOrNone`.
+  records:
+    type: object
+    additionalProperties: true
+    description: Body field `records`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        sObjectName: '{{sObjectName}}'
+        externalIdField: '{{externalIdField}}'
+        allOrNone: '{{allOrNone}}'
+        records: '{{records}}'
+  - method-restOp:
+      operationName: upsertRecordsForType
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: upsertRecordsForType result
+      identifier: upsertRecordsForType
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

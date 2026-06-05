@@ -1,0 +1,59 @@
+slug: triggerProcessRule
+name: triggerProcessRule
+description: Trigger a specific process rule against record IDs (POST /process/rules/{sObjectName}/{ruleId}). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.triggerProcessRule:` directly from their own automations.
+arguments:
+  sObjectName:
+    type: string
+    description: Path param `sObjectName` (required).
+  ruleId:
+    type: string
+    description: Path param `ruleId` (required).
+  contextIds:
+    type: object
+    additionalProperties: true
+    description: Body field `contextIds`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        sObjectName: '{{sObjectName}}'
+        ruleId: '{{ruleId}}'
+        contextIds: '{{contextIds}}'
+  - method-restOp:
+      operationName: triggerProcessRule
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: triggerProcessRule result
+      identifier: triggerProcessRule
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

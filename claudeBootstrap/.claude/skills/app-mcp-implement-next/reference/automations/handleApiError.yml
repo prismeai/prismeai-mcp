@@ -1,0 +1,80 @@
+slug: handleApiError
+name: /01_Helpers/handleApiError
+description: Normalize Salesforce API errors into MCP-compatible error format. Returns null on 2xx (no error), or { isError, content } on non-2xx. Salesforce's REST API returns an array of `{ message, errorCode, fields? }` on errors — we extract the first element's message.
+private: true
+arguments:
+  response:
+    type: object
+    description: The detailed_response from fetch {body, headers, status}.
+  operation:
+    type: string
+    description: Description of the operation for error messages.
+do:
+  - set:
+      name: result
+      value: null
+  - conditions:
+      '{{response.status}} >= 200 && {{response.status}} < 300':
+        - break: {}
+  - comment: Extract the Salesforce-specific error body shape
+  - conditions:
+      '{{response.body[0].message}}':
+        - set:
+            name: bodyDetail
+            value: '{{response.body[0].errorCode}}: {{response.body[0].message}}'
+      '{{response.body.error_description}}':
+        - comment: OAuth token endpoint shape — { error, error_description }
+        - set:
+            name: bodyDetail
+            value: '{{response.body.error}}: {{response.body.error_description}}'
+      '{{response.body.error}}':
+        - set:
+            name: bodyDetail
+            value: '{{response.body.error}}'
+      '{{response.body.message}}':
+        - set:
+            name: bodyDetail
+            value: '{{response.body.message}}'
+      default:
+        - comment: No recognized error field — do NOT dump the raw response body. It may carry credential echoes or sensitive provider metadata.
+        - set:
+            name: bodyDetail
+            value: (no further detail)
+  - conditions:
+      '{{response.status}} == 400':
+        - set:
+            name: errorMessage
+            value: 'Bad request while {{operation}}: {{bodyDetail}}'
+      '{{response.status}} == 401':
+        - set:
+            name: errorMessage
+            value: 'Authentication failed while {{operation}}. Check Salesforce credentials. Detail: {{bodyDetail}}'
+      '{{response.status}} == 403':
+        - set:
+            name: errorMessage
+            value: 'Forbidden while {{operation}}. Check user/CRUD permissions in Salesforce. Detail: {{bodyDetail}}'
+      '{{response.status}} == 404':
+        - set:
+            name: errorMessage
+            value: 'Resource not found while {{operation}}. Detail: {{bodyDetail}}'
+      '{{response.status}} == 429':
+        - set:
+            name: errorMessage
+            value: 'Rate limit / org limit exceeded while {{operation}}. Wait and retry. Detail: {{bodyDetail}}'
+      '{{response.status}} == 500':
+        - set:
+            name: errorMessage
+            value: 'Salesforce server error while {{operation}}. Detail: {{bodyDetail}}'
+      default:
+        - set:
+            name: errorMessage
+            value: 'Error {{response.status}} while {{operation}}: {{bodyDetail}}'
+  - set:
+      name: result
+      value:
+        isError: true
+        content:
+          - type: text
+            text: '{{errorMessage}}'
+validateArguments: true
+output: '{{result}}'

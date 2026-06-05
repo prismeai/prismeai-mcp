@@ -1,0 +1,54 @@
+slug: validateAgent
+name: /01_Helpers/validateAgent
+description: >-
+  Authorize an incoming MCP agent. The agentId is injected server-side by
+  agent-factory via the MCP capability `scope: "...,agent_id"` (so it reflects
+  the real calling agent). Authorization = the agentId must be in the tenant
+  allowlist (config.authorizedAgents, comma-separated, backed by a workspace
+  secret). Returns { valid, reason }.
+private: true
+arguments:
+  agentId:
+    type: string
+    description: Agent id (scope-injected by agent-factory, or header).
+do:
+  - comment: >-
+      Allow-all sentinel: config.authorizedAgents = "*" disables the per-agent
+      gate entirely (any caller authorized, agentId not even required). Set from
+      the config app "Autoriser tous les agents" toggle.
+  - Custom Code.run:
+      function: isAgentAllowed
+      parameters:
+        list: '{{config.authorizedAgents}}'
+        agentId: '{{agentId}}'
+      output: allow
+  - conditions:
+      '{{allow.wildcard}}':
+        - set:
+            name: output
+            value:
+              valid: true
+              reason: all_agents
+        - break: {}
+  - conditions:
+      '!{{agentId}}':
+        - set:
+            name: output
+            value:
+              valid: false
+              reason: missing_agent_id
+        - break: {}
+  - conditions:
+      '!{{allow.allowed}}':
+        - set:
+            name: output
+            value:
+              valid: false
+              reason: not_allowlisted
+      default:
+        - set:
+            name: output
+            value:
+              valid: true
+              agentId: '{{agentId}}'
+output: '{{output}}'

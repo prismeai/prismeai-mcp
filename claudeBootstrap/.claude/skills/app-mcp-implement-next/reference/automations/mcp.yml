@@ -1,0 +1,94 @@
+slug: mcp
+name: 00_MCP/endpoint
+description: >-
+  MCP JSON-RPC 2.0 endpoint for Salesforce Next. Runs in the TENANT app-instance
+  context (`config.*` = this tenant's credentials, `{{global.workspaceId}}` = the
+  tenant). `tools/call` authorizes the calling agent against the tenant allowlist
+  + agent-factory identity check (`validateAgent`), resolves Salesforce
+  service-to-service auth via `buildAppAuth`, then routes. `tools/list` /
+  `initialize` are delegated to MCP Core. No central endpoint, no HMAC key.
+when:
+  endpoint: true
+do:
+  - comment: >-
+      MCP notifications (no JSON-RPC id, e.g. notifications/initialized) MUST get
+      202 Accepted with an empty body — never a JSON-RPC object — or strict MCP
+      clients (agent-factory) fail the handshake and never register the tools.
+  - conditions:
+      '!{{body.id}}':
+        - set:
+            name: $http
+            value:
+              status: 202
+        - set:
+            name: response
+            value: ''
+        - break: {}
+  - conditions:
+      '{{body.method}} == "tools/call"':
+        - set:
+            name: toolName
+            value: '{{body.params.name}}'
+        - comment: >-
+            Agent identity = agent_id injected server-side by agent-factory via
+            the MCP capability `scope` (falls back to an agent-id header). The
+            capability only needs the endpoint URL — no key.
+        - set:
+            name: agentId
+            value: '{% {{headers["agent-id"]}} || {{body.params.arguments.agent_id}} %}'
+        - validateAgent:
+            agentId: '{{agentId}}'
+            output: agentCheck
+        - conditions:
+            '!{{agentCheck.valid}}':
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    error:
+                      code: -32001
+                      message: Unauthorized agent
+              - break: {}
+        - comment: Resolve Salesforce service auth from tenant config (JWT Bearer / OAuth client).
+        - buildAppAuth:
+            output: auth
+        - conditions:
+            '{{auth.error}}':
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    result:
+                      content:
+                        - type: text
+                          text: Salesforce is not configured for this workspace. An administrator must set the service credentials (JWT Bearer or OAuth client) in the connector config app.
+                      isError: true
+              - break: {}
+        - routeToolCall:
+            toolName: '{{toolName}}'
+            toolArgs:
+              arguments: '{{body.params.arguments}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+              apiVersion: '{{config.apiVersion}}'
+            output: toolResult
+        - set:
+            name: response
+            value:
+              jsonrpc: '2.0'
+              id: '{{body.id}}'
+              result: '{{toolResult}}'
+      default:
+        - comment: tools/list, initialize, notifications/* — delegate to MCP Core.
+        - MCP Core.handleMcpMethod:
+            body: '{{body}}'
+            serverName: salesforce-next-mcp
+            serverVersion: 1.0.0
+            headers: '{{headers}}'
+            output: mcpResult
+        - set:
+            name: response
+            value: '{{mcpResult.response}}'
+output: '{{response}}'

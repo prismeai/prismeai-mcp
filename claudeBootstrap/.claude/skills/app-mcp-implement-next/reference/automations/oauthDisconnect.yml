@@ -1,0 +1,65 @@
+slug: oauthDisconnect
+name: 00_OAuth/oauthDisconnect
+description: >-
+  Disconnect the current user's Salesforce OAuth session: best-effort token
+  revocation, then delete the stored token. Opened in a popup by the config app
+  and by agent-factory's capability `disconnect_url` (both navigate to it, never
+  fetch it server-side) — so it always redirects (meta-refresh, CSP-safe) to the
+  SPA callback view (?view=oauthCallback&status=disconnected), which auto-closes.
+private: true
+when:
+  endpoint: true
+do:
+  - conditions:
+      '{{user.salesforceNext.oauth.accessToken}}':
+        - Custom Code.run:
+            function: normalizeLoginHost
+            parameters:
+              rawHost: '{{config.auth.loginHost}}'
+            output: lh
+        - set:
+            name: loginHost
+            value: '{{lh.host}}'
+        - fetch:
+            url: '{{loginHost}}/services/oauth2/revoke'
+            method: POST
+            headers:
+              Content-Type: application/x-www-form-urlencoded
+            body:
+              token: '{{user.salesforceNext.oauth.accessToken}}'
+            output: revokeResp
+            outputMode: detailed_response
+            emitErrors: false
+  - delete:
+      name: user.salesforceNext.oauth
+      scope: user
+  - comment: Also drop the workspace refresh-token secret (cron/non-interactive store), if any.
+  - conditions:
+      '{{user.id}}':
+        - Custom Code.run:
+            function: makeTokenSecretName
+            parameters:
+              userId: '{{user.id}}'
+            output: tokName
+        - conditions:
+            '!{{tokName.error}}':
+              - run:
+                  module: secrets
+                  function: delete
+                  parameters:
+                    name: '{{tokName.name}}'
+                    scope: workspace
+                  output: tokDelResp
+  - set:
+      name: $http
+      value:
+        headers:
+          Content-Type: text/html
+  - set:
+      name: studioHost
+      value: '{% replace(URL({{global.apiUrl}}).hostname, "api.", "") %}'
+  - set:
+      name: redirectTo
+      value: 'https://{{studioHost}}/apps/salesforce-next?view=oauthCallback&status=disconnected'
+output: |
+  <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={{redirectTo}}"><title>Salesforce</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting… <a href="{{redirectTo}}">continue</a></body></html>

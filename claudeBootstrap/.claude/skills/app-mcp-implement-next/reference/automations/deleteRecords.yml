@@ -1,0 +1,54 @@
+slug: deleteRecords
+name: deleteRecords
+description: Delete up to 200 records (mixed sObjects) in one call (DELETE /composite/sobjects). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.deleteRecords:` directly from their own automations.
+arguments:
+  ids:
+    type: string
+    description: Query param `ids`.
+  allOrNone:
+    type: boolean
+    description: Query param `allOrNone`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        ids: '{{ids}}'
+        allOrNone: '{{allOrNone}}'
+  - method-restOp:
+      operationName: deleteRecords
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: deleteRecords result
+      identifier: deleteRecords
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

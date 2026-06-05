@@ -1,0 +1,243 @@
+appSlug: Custom Code
+slug: Custom Code
+config:
+  functions:
+    isAgentAllowed:
+      parameters:
+        list:
+          type: string
+        agentId:
+          type: string
+      code: |
+        const v = (list === null || list === undefined) ? '' : String(list);
+        if (v.indexOf('{' + '{') !== -1) return { allowed: false, wildcard: false };
+        const ids = v.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+        // "*" = allow ALL agents (disables the per-agent gate).
+        const wildcard = ids.indexOf('*') !== -1;
+        return { allowed: wildcard || ids.indexOf(String(agentId)) !== -1, wildcard: wildcard };
+    makeConfigRef:
+      parameters:
+        key:
+          type: string
+      code: |
+        // Build the literal binding string "{{config.<key>}}" in plain JS so
+        // DSUL never parses it as a token. Used by onInstall to write binding A
+        // into the app instance config (single-pass substitution stores the
+        // literal, which resolves later against the tenant workspace config).
+        return '{' + '{config.' + key + '}' + '}';
+
+    makeSecretRef:
+      parameters:
+        key:
+          type: string
+      code: |
+        // Build the literal binding string "{{secret.<key>}}" in plain JS.
+        // Used by onInstall to write binding B into the tenant workspace
+        // config.value (the only place {{secret.x}} resolves).
+        return '{' + '{secret.' + key + '}' + '}';
+
+    makeTokenSecretName:
+      parameters:
+        userId:
+          type: string
+      code: |
+        // Workspace-secret name holding a user's Salesforce OAuth refresh token,
+        // used for non-interactive (cron / autonomous) resolution. Reject empty
+        // or unresolved-binding ids so distinct users can never collapse onto the
+        // same secret name (defense-in-depth).
+        var u = (userId === null || userId === undefined) ? '' : String(userId).trim();
+        if (!u || u.indexOf('{' + '{') >= 0) { return { error: 'invalid_user' }; }
+        return { name: 'sfnRefresh_' + u };
+
+    normalizeLoginHost:
+      parameters:
+        rawHost:
+          type: string
+      code: |
+        // Single source of truth for the Salesforce host rule (used by every
+        // OAuth/token flow). Salesforce OAuth/API endpoints live ONLY on
+        // *.my.salesforce.com (or login/test.salesforce.com) — NEVER on the
+        // Lightning UI host. Apply the default fallback + rewrite the Lightning
+        // host (replace-all) so a pasted lightning.force.com URL still works.
+        var h = (rawHost === null || rawHost === undefined || String(rawHost).trim() === '')
+          ? 'https://login.salesforce.com'
+          : String(rawHost).trim();
+        return { host: h.split('.lightning.force.com').join('.my.salesforce.com') };
+
+    buildQueryString:
+      parameters:
+        params:
+          type: object
+      code: |
+        const p = params || {};
+        const parts = [];
+        for (const [k, v] of Object.entries(p)) {
+          if (v === null || v === undefined || v === '') continue;
+          if (Array.isArray(v)) {
+            for (const item of v) parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(item)));
+          } else if (typeof v === 'object') {
+            parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(JSON.stringify(v)));
+          } else {
+            parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v)));
+          }
+        }
+        return parts.length ? '?' + parts.join('&') : '';
+    generatePkce:
+      parameters: {}
+      code: |
+        const crypto = require('crypto');
+        const codeVerifier = crypto.randomBytes(32).toString('base64url');
+        const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+        return { codeVerifier, codeChallenge };
+    generateState:
+      parameters: {}
+      code: |
+        const crypto = require('crypto');
+        return { state: crypto.randomBytes(16).toString('base64url') };
+    buildAuthorizeUrl:
+      parameters:
+        authorizeUrl:
+          type: string
+        clientId:
+          type: string
+        redirectUri:
+          type: string
+        scopes:
+          type: string
+        state:
+          type: string
+        codeChallenge:
+          type: string
+      code: |
+        // No URL/URLSearchParams in the sandbox — build the querystring manually
+        const enc = encodeURIComponent;
+        const qs = [
+          'client_id=' + enc(clientId || ''),
+          'redirect_uri=' + enc(redirectUri || ''),
+          'response_type=code',
+          'state=' + enc(state || ''),
+          'scope=' + enc(scopes || 'api refresh_token offline_access'),
+          'code_challenge=' + enc(codeChallenge || ''),
+          'code_challenge_method=S256'
+        ].join('&');
+        return { url: (authorizeUrl || '') + '?' + qs };
+    buildJwtAssertion:
+      parameters:
+        clientId:
+          type: string
+        username:
+          type: string
+        audience:
+          type: string
+        privateKey:
+          type: string
+      code: |
+        const crypto = require('crypto');
+        try {
+          const header = { alg: 'RS256', typ: 'JWT' };
+          const now = Math.floor(Date.now() / 1000);
+          const claims = {
+            iss: clientId,
+            sub: username,
+            aud: audience,
+            exp: now + 300
+          };
+          const h = Buffer.from(JSON.stringify(header)).toString('base64url');
+          const c = Buffer.from(JSON.stringify(claims)).toString('base64url');
+          const signingInput = h + '.' + c;
+          const signer = crypto.createSign('RSA-SHA256');
+          signer.update(signingInput);
+          signer.end();
+          const sig = signer.sign(privateKey).toString('base64url');
+          return { assertion: signingInput + '.' + sig };
+        } catch (e) {
+          return { error: (e && e.message) || 'JWT signing failed' };
+        }
+    resolveToolAction:
+      parameters:
+        toolName:
+          type: string
+        action:
+          type: string
+      code: |
+        // <<GENERATED>> Phase 5 — entity → action → operationName
+        const ENTITY_OPS = {"versions": {"listVersions": "listVersions", "listResources": "listResources", "getLimits": "getLimits", "getRecent": "getRecentItems"}, "sobjects": {"describeGlobal": "describeGlobal", "describeBasic": "describeSObjectBasic", "describe": "describeSObject"}, "records": {"create": "createRecord", "get": "getRecord", "update": "updateRecord", "delete": "deleteRecord", "upsert": "upsertRecord", "getField": "getRecordField", "getDeleted": "getDeletedRecords", "getUpdated": "getUpdatedRecords"}, "query": {"soql": "runQuery", "soqlAll": "runQueryAll", "next": "getQueryNext", "sosl": "runSearch", "parameterizedSearch": "runParameterizedSearch"}, "composite": {"request": "runComposite", "batch": "runCompositeBatch", "graph": "runCompositeGraph", "tree": "createSObjectTree"}, "compositeRecords": {"getMany": "getRecordsCollection", "createMany": "createRecords", "updateMany": "updateRecords", "deleteMany": "deleteRecords", "createManyForType": "createRecordsForType", "upsertManyForType": "upsertRecordsForType"}, "bulkIngest": {"list": "listIngestJobs", "create": "createIngestJob", "get": "getIngestJob", "update": "updateIngestJob", "delete": "deleteIngestJob", "uploadData": "uploadIngestData", "getSuccessful": "getIngestSuccessful", "getFailed": "getIngestFailed", "getUnprocessed": "getIngestUnprocessed"}, "bulkQuery": {"list": "listQueryJobs", "create": "createQueryJob", "get": "getQueryJob", "update": "updateQueryJob", "delete": "deleteQueryJob", "getResults": "getQueryJobResults"}, "tooling": {"describeGlobal": "describeToolingGlobal", "describeSObject": "describeToolingSObject", "query": "runToolingQuery", "executeAnonymous": "executeAnonymousApex", "runTestsAsync": "runApexTestsAsync", "runTestsSync": "runApexTestsSync", "completions": "getApexCompletions", "createRecord": "createToolingRecord", "getRecord": "getToolingRecord", "updateRecord": "updateToolingRecord", "deleteRecord": "deleteToolingRecord"}, "process": {"listApprovals": "listApprovals", "submitApproval": "submitApproval", "listRules": "listProcessRules", "listRulesForObject": "listProcessRulesForObject", "triggerRule": "triggerProcessRule"}, "quickActions": {"list": "listQuickActions", "describe": "describeQuickAction", "invoke": "invokeQuickAction"}, "analytics": {"listReports": "listReports", "describeReport": "describeReport", "runReport": "runReport", "listReportInstances": "listReportInstances", "getReportInstance": "getReportInstance", "listDashboards": "listDashboards", "describeDashboard": "describeDashboard", "runDashboard": "runDashboard", "getDashboardStatus": "getDashboardStatus"}, "metadata": {"deploy": "deployMetadata", "getDeployStatus": "getMetadataDeployStatus"}};
+        const ent = ENTITY_OPS[toolName];
+        if (!ent) return { error: 'Unknown entity: ' + toolName + '. Available: ' + Object.keys(ENTITY_OPS).sort().join(', ') };
+        if (!action) return { error: 'Missing required argument `action` for ' + toolName + '. Available actions: ' + Object.keys(ent).sort().join(', ') };
+        const op = ent[action];
+        if (!op) return { error: 'Unknown action `' + action + '` for entity `' + toolName + '`. Available actions: ' + Object.keys(ent).sort().join(', ') };
+        return { operationName: op };
+    getOperation:
+      parameters:
+        operationName:
+          type: string
+      code: |
+        // <<GENERATED>> Phase 5 — operationName → {method, path, pathParams, queryParams, bodyParams, ...}
+        const OPERATIONS = {"listVersions": {"method": "GET", "path": "/", "pathParams": [], "queryParams": [], "bodyParams": []}, "listResources": {"method": "GET", "path": "/resources", "pathParams": [], "queryParams": [], "bodyParams": []}, "getLimits": {"method": "GET", "path": "/limits", "pathParams": [], "queryParams": [], "bodyParams": []}, "getRecentItems": {"method": "GET", "path": "/recent", "pathParams": [], "queryParams": ["limit"], "bodyParams": []}, "describeGlobal": {"method": "GET", "path": "/sobjects", "pathParams": [], "queryParams": [], "bodyParams": []}, "describeSObjectBasic": {"method": "GET", "path": "/sobjects/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": []}, "createRecord": {"method": "POST", "path": "/sobjects/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "describeSObject": {"method": "GET", "path": "/sobjects/{sObjectName}/describe", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": []}, "getRecord": {"method": "GET", "path": "/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": ["fields"], "bodyParams": []}, "updateRecord": {"method": "PATCH", "path": "/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "deleteRecord": {"method": "DELETE", "path": "/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": [], "bodyParams": []}, "upsertRecord": {"method": "PATCH", "path": "/sobjects/{sObjectName}/{externalIdField}/{externalIdValue}", "pathParams": ["sObjectName", "externalIdField", "externalIdValue"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "getRecordField": {"method": "GET", "path": "/sobjects/{sObjectName}/{recordId}/{fieldName}", "pathParams": ["sObjectName", "recordId", "fieldName"], "queryParams": [], "bodyParams": []}, "getDeletedRecords": {"method": "GET", "path": "/sobjects/{sObjectName}/deleted", "pathParams": ["sObjectName"], "queryParams": ["start", "end"], "bodyParams": []}, "getUpdatedRecords": {"method": "GET", "path": "/sobjects/{sObjectName}/updated", "pathParams": ["sObjectName"], "queryParams": ["start", "end"], "bodyParams": []}, "runQuery": {"method": "GET", "path": "/query", "pathParams": [], "queryParams": ["q"], "bodyParams": []}, "runQueryAll": {"method": "GET", "path": "/queryAll", "pathParams": [], "queryParams": ["q"], "bodyParams": []}, "getQueryNext": {"method": "GET", "path": "/query/{queryLocator}", "pathParams": ["queryLocator"], "queryParams": [], "bodyParams": []}, "runSearch": {"method": "GET", "path": "/search", "pathParams": [], "queryParams": ["q"], "bodyParams": []}, "runParameterizedSearch": {"method": "POST", "path": "/parameterizedSearch", "pathParams": [], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "runComposite": {"method": "POST", "path": "/composite", "pathParams": [], "queryParams": [], "bodyParams": ["allOrNone", "collateSubrequests", "compositeRequest"]}, "runCompositeBatch": {"method": "POST", "path": "/composite/batch", "pathParams": [], "queryParams": [], "bodyParams": ["haltOnError", "batchRequests"]}, "runCompositeGraph": {"method": "POST", "path": "/composite/graph", "pathParams": [], "queryParams": [], "bodyParams": ["graphs"]}, "getRecordsCollection": {"method": "GET", "path": "/composite/sobjects/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": ["ids", "fields"], "bodyParams": []}, "createRecords": {"method": "POST", "path": "/composite/sobjects", "pathParams": [], "queryParams": [], "bodyParams": ["allOrNone", "records"]}, "updateRecords": {"method": "PATCH", "path": "/composite/sobjects", "pathParams": [], "queryParams": [], "bodyParams": ["allOrNone", "records"]}, "deleteRecords": {"method": "DELETE", "path": "/composite/sobjects", "pathParams": [], "queryParams": ["ids", "allOrNone"], "bodyParams": []}, "createRecordsForType": {"method": "POST", "path": "/composite/sobjects/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": ["allOrNone", "records"]}, "upsertRecordsForType": {"method": "PATCH", "path": "/composite/sobjects/{sObjectName}/{externalIdField}", "pathParams": ["sObjectName", "externalIdField"], "queryParams": [], "bodyParams": ["allOrNone", "records"]}, "createSObjectTree": {"method": "POST", "path": "/composite/tree/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": ["records"]}, "listIngestJobs": {"method": "GET", "path": "/jobs/ingest", "pathParams": [], "queryParams": ["isPkChunkingEnabled", "jobType", "queryLocator"], "bodyParams": []}, "createIngestJob": {"method": "POST", "path": "/jobs/ingest", "pathParams": [], "queryParams": [], "bodyParams": ["object", "operation", "externalIdFieldName", "contentType", "lineEnding", "columnDelimiter", "assignmentRuleId"]}, "getIngestJob": {"method": "GET", "path": "/jobs/ingest/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "updateIngestJob": {"method": "PATCH", "path": "/jobs/ingest/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": ["state"]}, "deleteIngestJob": {"method": "DELETE", "path": "/jobs/ingest/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "uploadIngestData": {"method": "PUT", "path": "/jobs/ingest/{jobId}/batches", "pathParams": ["jobId"], "queryParams": [], "bodyParams": [], "rawBodyParam": "rawBody", "contentType": "text/csv"}, "getIngestSuccessful": {"method": "GET", "path": "/jobs/ingest/{jobId}/successfulResults", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "getIngestFailed": {"method": "GET", "path": "/jobs/ingest/{jobId}/failedResults", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "getIngestUnprocessed": {"method": "GET", "path": "/jobs/ingest/{jobId}/unprocessedRecords", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "listQueryJobs": {"method": "GET", "path": "/jobs/query", "pathParams": [], "queryParams": ["isPkChunkingEnabled", "jobType", "concurrencyMode"], "bodyParams": []}, "createQueryJob": {"method": "POST", "path": "/jobs/query", "pathParams": [], "queryParams": [], "bodyParams": ["operation", "query", "contentType", "lineEnding", "columnDelimiter"]}, "getQueryJob": {"method": "GET", "path": "/jobs/query/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "updateQueryJob": {"method": "PATCH", "path": "/jobs/query/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": ["state"]}, "deleteQueryJob": {"method": "DELETE", "path": "/jobs/query/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "getQueryJobResults": {"method": "GET", "path": "/jobs/query/{jobId}/results", "pathParams": ["jobId"], "queryParams": ["locator", "maxRecords"], "bodyParams": []}, "describeToolingGlobal": {"method": "GET", "path": "/tooling/sobjects", "pathParams": [], "queryParams": [], "bodyParams": []}, "describeToolingSObject": {"method": "GET", "path": "/tooling/sobjects/{sObjectName}/describe", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": []}, "runToolingQuery": {"method": "GET", "path": "/tooling/query", "pathParams": [], "queryParams": ["q"], "bodyParams": []}, "executeAnonymousApex": {"method": "GET", "path": "/tooling/executeAnonymous", "pathParams": [], "queryParams": ["anonymousBody"], "bodyParams": []}, "runApexTestsAsync": {"method": "POST", "path": "/tooling/runTestsAsynchronous", "pathParams": [], "queryParams": [], "bodyParams": ["classNames", "classids", "suiteNames", "suiteids", "maxFailedTests", "testLevel", "tests"]}, "runApexTestsSync": {"method": "POST", "path": "/tooling/runTestsSynchronous", "pathParams": [], "queryParams": [], "bodyParams": ["tests"]}, "getApexCompletions": {"method": "GET", "path": "/tooling/completions", "pathParams": [], "queryParams": ["type"], "bodyParams": []}, "createToolingRecord": {"method": "POST", "path": "/tooling/sobjects/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "getToolingRecord": {"method": "GET", "path": "/tooling/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": [], "bodyParams": []}, "updateToolingRecord": {"method": "PATCH", "path": "/tooling/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "deleteToolingRecord": {"method": "DELETE", "path": "/tooling/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": [], "bodyParams": []}, "listApprovals": {"method": "GET", "path": "/process/approvals", "pathParams": [], "queryParams": [], "bodyParams": []}, "submitApproval": {"method": "POST", "path": "/process/approvals", "pathParams": [], "queryParams": [], "bodyParams": ["requests"]}, "listProcessRules": {"method": "GET", "path": "/process/rules", "pathParams": [], "queryParams": [], "bodyParams": []}, "listProcessRulesForObject": {"method": "GET", "path": "/process/rules/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": []}, "triggerProcessRule": {"method": "POST", "path": "/process/rules/{sObjectName}/{ruleId}", "pathParams": ["sObjectName", "ruleId"], "queryParams": [], "bodyParams": ["contextIds"]}, "listQuickActions": {"method": "GET", "path": "/quickActions", "pathParams": [], "queryParams": [], "bodyParams": []}, "describeQuickAction": {"method": "GET", "path": "/quickActions/{actionName}", "pathParams": ["actionName"], "queryParams": [], "bodyParams": []}, "invokeQuickAction": {"method": "POST", "path": "/quickActions/{actionName}", "pathParams": ["actionName"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "listReports": {"method": "GET", "path": "/analytics/reports", "pathParams": [], "queryParams": [], "bodyParams": []}, "describeReport": {"method": "GET", "path": "/analytics/reports/{reportId}", "pathParams": ["reportId"], "queryParams": ["includeDetails"], "bodyParams": []}, "runReport": {"method": "POST", "path": "/analytics/reports/{reportId}", "pathParams": ["reportId"], "queryParams": ["includeDetails"], "bodyParams": [], "bodyPassthrough": true}, "listReportInstances": {"method": "GET", "path": "/analytics/reports/{reportId}/instances", "pathParams": ["reportId"], "queryParams": [], "bodyParams": []}, "getReportInstance": {"method": "GET", "path": "/analytics/reports/{reportId}/instances/{instanceId}", "pathParams": ["reportId", "instanceId"], "queryParams": [], "bodyParams": []}, "listDashboards": {"method": "GET", "path": "/analytics/dashboards", "pathParams": [], "queryParams": [], "bodyParams": []}, "describeDashboard": {"method": "GET", "path": "/analytics/dashboards/{dashboardId}", "pathParams": ["dashboardId"], "queryParams": [], "bodyParams": []}, "runDashboard": {"method": "POST", "path": "/analytics/dashboards/{dashboardId}", "pathParams": ["dashboardId"], "queryParams": [], "bodyParams": []}, "getDashboardStatus": {"method": "GET", "path": "/analytics/dashboards/{dashboardId}/status", "pathParams": ["dashboardId"], "queryParams": [], "bodyParams": []}, "deployMetadata": {"method": "POST", "path": "/metadata/deployRequest", "pathParams": [], "queryParams": [], "bodyParams": ["deployOptions", "file"]}, "getMetadataDeployStatus": {"method": "GET", "path": "/metadata/deployRequest/{requestId}", "pathParams": ["requestId"], "queryParams": ["includeDetails"], "bodyParams": []}};
+        const op = OPERATIONS[operationName];
+        if (!op) return { error: 'Unknown operation: ' + operationName };
+        return op;
+    buildSalesforceRequest:
+      parameters:
+        operationName:
+          type: string
+        args:
+          type: object
+      code: |
+        // <<GENERATED>> Phase 5
+        const OPERATIONS = {"listVersions": {"method": "GET", "path": "/", "pathParams": [], "queryParams": [], "bodyParams": []}, "listResources": {"method": "GET", "path": "/resources", "pathParams": [], "queryParams": [], "bodyParams": []}, "getLimits": {"method": "GET", "path": "/limits", "pathParams": [], "queryParams": [], "bodyParams": []}, "getRecentItems": {"method": "GET", "path": "/recent", "pathParams": [], "queryParams": ["limit"], "bodyParams": []}, "describeGlobal": {"method": "GET", "path": "/sobjects", "pathParams": [], "queryParams": [], "bodyParams": []}, "describeSObjectBasic": {"method": "GET", "path": "/sobjects/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": []}, "createRecord": {"method": "POST", "path": "/sobjects/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "describeSObject": {"method": "GET", "path": "/sobjects/{sObjectName}/describe", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": []}, "getRecord": {"method": "GET", "path": "/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": ["fields"], "bodyParams": []}, "updateRecord": {"method": "PATCH", "path": "/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "deleteRecord": {"method": "DELETE", "path": "/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": [], "bodyParams": []}, "upsertRecord": {"method": "PATCH", "path": "/sobjects/{sObjectName}/{externalIdField}/{externalIdValue}", "pathParams": ["sObjectName", "externalIdField", "externalIdValue"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "getRecordField": {"method": "GET", "path": "/sobjects/{sObjectName}/{recordId}/{fieldName}", "pathParams": ["sObjectName", "recordId", "fieldName"], "queryParams": [], "bodyParams": []}, "getDeletedRecords": {"method": "GET", "path": "/sobjects/{sObjectName}/deleted", "pathParams": ["sObjectName"], "queryParams": ["start", "end"], "bodyParams": []}, "getUpdatedRecords": {"method": "GET", "path": "/sobjects/{sObjectName}/updated", "pathParams": ["sObjectName"], "queryParams": ["start", "end"], "bodyParams": []}, "runQuery": {"method": "GET", "path": "/query", "pathParams": [], "queryParams": ["q"], "bodyParams": []}, "runQueryAll": {"method": "GET", "path": "/queryAll", "pathParams": [], "queryParams": ["q"], "bodyParams": []}, "getQueryNext": {"method": "GET", "path": "/query/{queryLocator}", "pathParams": ["queryLocator"], "queryParams": [], "bodyParams": []}, "runSearch": {"method": "GET", "path": "/search", "pathParams": [], "queryParams": ["q"], "bodyParams": []}, "runParameterizedSearch": {"method": "POST", "path": "/parameterizedSearch", "pathParams": [], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "runComposite": {"method": "POST", "path": "/composite", "pathParams": [], "queryParams": [], "bodyParams": ["allOrNone", "collateSubrequests", "compositeRequest"]}, "runCompositeBatch": {"method": "POST", "path": "/composite/batch", "pathParams": [], "queryParams": [], "bodyParams": ["haltOnError", "batchRequests"]}, "runCompositeGraph": {"method": "POST", "path": "/composite/graph", "pathParams": [], "queryParams": [], "bodyParams": ["graphs"]}, "getRecordsCollection": {"method": "GET", "path": "/composite/sobjects/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": ["ids", "fields"], "bodyParams": []}, "createRecords": {"method": "POST", "path": "/composite/sobjects", "pathParams": [], "queryParams": [], "bodyParams": ["allOrNone", "records"]}, "updateRecords": {"method": "PATCH", "path": "/composite/sobjects", "pathParams": [], "queryParams": [], "bodyParams": ["allOrNone", "records"]}, "deleteRecords": {"method": "DELETE", "path": "/composite/sobjects", "pathParams": [], "queryParams": ["ids", "allOrNone"], "bodyParams": []}, "createRecordsForType": {"method": "POST", "path": "/composite/sobjects/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": ["allOrNone", "records"]}, "upsertRecordsForType": {"method": "PATCH", "path": "/composite/sobjects/{sObjectName}/{externalIdField}", "pathParams": ["sObjectName", "externalIdField"], "queryParams": [], "bodyParams": ["allOrNone", "records"]}, "createSObjectTree": {"method": "POST", "path": "/composite/tree/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": ["records"]}, "listIngestJobs": {"method": "GET", "path": "/jobs/ingest", "pathParams": [], "queryParams": ["isPkChunkingEnabled", "jobType", "queryLocator"], "bodyParams": []}, "createIngestJob": {"method": "POST", "path": "/jobs/ingest", "pathParams": [], "queryParams": [], "bodyParams": ["object", "operation", "externalIdFieldName", "contentType", "lineEnding", "columnDelimiter", "assignmentRuleId"]}, "getIngestJob": {"method": "GET", "path": "/jobs/ingest/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "updateIngestJob": {"method": "PATCH", "path": "/jobs/ingest/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": ["state"]}, "deleteIngestJob": {"method": "DELETE", "path": "/jobs/ingest/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "uploadIngestData": {"method": "PUT", "path": "/jobs/ingest/{jobId}/batches", "pathParams": ["jobId"], "queryParams": [], "bodyParams": [], "rawBodyParam": "rawBody", "contentType": "text/csv"}, "getIngestSuccessful": {"method": "GET", "path": "/jobs/ingest/{jobId}/successfulResults", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "getIngestFailed": {"method": "GET", "path": "/jobs/ingest/{jobId}/failedResults", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "getIngestUnprocessed": {"method": "GET", "path": "/jobs/ingest/{jobId}/unprocessedRecords", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "listQueryJobs": {"method": "GET", "path": "/jobs/query", "pathParams": [], "queryParams": ["isPkChunkingEnabled", "jobType", "concurrencyMode"], "bodyParams": []}, "createQueryJob": {"method": "POST", "path": "/jobs/query", "pathParams": [], "queryParams": [], "bodyParams": ["operation", "query", "contentType", "lineEnding", "columnDelimiter"]}, "getQueryJob": {"method": "GET", "path": "/jobs/query/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "updateQueryJob": {"method": "PATCH", "path": "/jobs/query/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": ["state"]}, "deleteQueryJob": {"method": "DELETE", "path": "/jobs/query/{jobId}", "pathParams": ["jobId"], "queryParams": [], "bodyParams": []}, "getQueryJobResults": {"method": "GET", "path": "/jobs/query/{jobId}/results", "pathParams": ["jobId"], "queryParams": ["locator", "maxRecords"], "bodyParams": []}, "describeToolingGlobal": {"method": "GET", "path": "/tooling/sobjects", "pathParams": [], "queryParams": [], "bodyParams": []}, "describeToolingSObject": {"method": "GET", "path": "/tooling/sobjects/{sObjectName}/describe", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": []}, "runToolingQuery": {"method": "GET", "path": "/tooling/query", "pathParams": [], "queryParams": ["q"], "bodyParams": []}, "executeAnonymousApex": {"method": "GET", "path": "/tooling/executeAnonymous", "pathParams": [], "queryParams": ["anonymousBody"], "bodyParams": []}, "runApexTestsAsync": {"method": "POST", "path": "/tooling/runTestsAsynchronous", "pathParams": [], "queryParams": [], "bodyParams": ["classNames", "classids", "suiteNames", "suiteids", "maxFailedTests", "testLevel", "tests"]}, "runApexTestsSync": {"method": "POST", "path": "/tooling/runTestsSynchronous", "pathParams": [], "queryParams": [], "bodyParams": ["tests"]}, "getApexCompletions": {"method": "GET", "path": "/tooling/completions", "pathParams": [], "queryParams": ["type"], "bodyParams": []}, "createToolingRecord": {"method": "POST", "path": "/tooling/sobjects/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "getToolingRecord": {"method": "GET", "path": "/tooling/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": [], "bodyParams": []}, "updateToolingRecord": {"method": "PATCH", "path": "/tooling/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "deleteToolingRecord": {"method": "DELETE", "path": "/tooling/sobjects/{sObjectName}/{recordId}", "pathParams": ["sObjectName", "recordId"], "queryParams": [], "bodyParams": []}, "listApprovals": {"method": "GET", "path": "/process/approvals", "pathParams": [], "queryParams": [], "bodyParams": []}, "submitApproval": {"method": "POST", "path": "/process/approvals", "pathParams": [], "queryParams": [], "bodyParams": ["requests"]}, "listProcessRules": {"method": "GET", "path": "/process/rules", "pathParams": [], "queryParams": [], "bodyParams": []}, "listProcessRulesForObject": {"method": "GET", "path": "/process/rules/{sObjectName}", "pathParams": ["sObjectName"], "queryParams": [], "bodyParams": []}, "triggerProcessRule": {"method": "POST", "path": "/process/rules/{sObjectName}/{ruleId}", "pathParams": ["sObjectName", "ruleId"], "queryParams": [], "bodyParams": ["contextIds"]}, "listQuickActions": {"method": "GET", "path": "/quickActions", "pathParams": [], "queryParams": [], "bodyParams": []}, "describeQuickAction": {"method": "GET", "path": "/quickActions/{actionName}", "pathParams": ["actionName"], "queryParams": [], "bodyParams": []}, "invokeQuickAction": {"method": "POST", "path": "/quickActions/{actionName}", "pathParams": ["actionName"], "queryParams": [], "bodyParams": [], "bodyPassthrough": true}, "listReports": {"method": "GET", "path": "/analytics/reports", "pathParams": [], "queryParams": [], "bodyParams": []}, "describeReport": {"method": "GET", "path": "/analytics/reports/{reportId}", "pathParams": ["reportId"], "queryParams": ["includeDetails"], "bodyParams": []}, "runReport": {"method": "POST", "path": "/analytics/reports/{reportId}", "pathParams": ["reportId"], "queryParams": ["includeDetails"], "bodyParams": [], "bodyPassthrough": true}, "listReportInstances": {"method": "GET", "path": "/analytics/reports/{reportId}/instances", "pathParams": ["reportId"], "queryParams": [], "bodyParams": []}, "getReportInstance": {"method": "GET", "path": "/analytics/reports/{reportId}/instances/{instanceId}", "pathParams": ["reportId", "instanceId"], "queryParams": [], "bodyParams": []}, "listDashboards": {"method": "GET", "path": "/analytics/dashboards", "pathParams": [], "queryParams": [], "bodyParams": []}, "describeDashboard": {"method": "GET", "path": "/analytics/dashboards/{dashboardId}", "pathParams": ["dashboardId"], "queryParams": [], "bodyParams": []}, "runDashboard": {"method": "POST", "path": "/analytics/dashboards/{dashboardId}", "pathParams": ["dashboardId"], "queryParams": [], "bodyParams": []}, "getDashboardStatus": {"method": "GET", "path": "/analytics/dashboards/{dashboardId}/status", "pathParams": ["dashboardId"], "queryParams": [], "bodyParams": []}, "deployMetadata": {"method": "POST", "path": "/metadata/deployRequest", "pathParams": [], "queryParams": [], "bodyParams": ["deployOptions", "file"]}, "getMetadataDeployStatus": {"method": "GET", "path": "/metadata/deployRequest/{requestId}", "pathParams": ["requestId"], "queryParams": ["includeDetails"], "bodyParams": []}};
+        const op = OPERATIONS[operationName];
+        if (!op) return { error: 'Unknown operation: ' + operationName };
+        const a = Object.assign({}, args || {});
+        let path = op.path.startsWith('/') ? op.path.substring(1) : op.path;
+        // Path params (Salesforce uses camelCase placeholders)
+        for (const placeholder of (op.pathParams || [])) {
+          const value = a[placeholder];
+          if (value === undefined || value === null || value === '') {
+            return { error: 'Missing required path param: ' + placeholder };
+          }
+          path = path.replace('{' + placeholder + '}', encodeURIComponent(String(value)));
+          delete a[placeholder];
+        }
+        // Query params
+        const query = {};
+        for (const k of (op.queryParams || [])) {
+          if (a[k] !== undefined && a[k] !== null && a[k] !== '') query[k] = a[k];
+        }
+        const result = { method: op.method, path, query };
+        // Raw body (Bulk CSV upload, etc.)
+        if (op.rawBodyParam && a[op.rawBodyParam] !== undefined && a[op.rawBodyParam] !== null && a[op.rawBodyParam] !== '') {
+          result.rawBody = a[op.rawBodyParam];
+          result.contentType = op.contentType || 'text/csv';
+          return result;
+        }
+        // JSON body — passthrough (entire `body` arg) or smart top-level fallback
+        if (op.bodyPassthrough) {
+          if (a.body && typeof a.body === 'object' && Object.keys(a.body).length) {
+            result.body = a.body;
+            return result;
+          }
+          // Fallback: caller passed record fields at the top level instead of nesting them in `body`.
+          // Collect every unknown arg into a body object (excluding control args + path/query params).
+          const reserved = new Set(['action', 'outputFormat', 'body', 'fields']);
+          if (op.rawBodyParam) reserved.add(op.rawBodyParam);
+          for (const k of (op.pathParams || [])) reserved.add(k);
+          for (const k of (op.queryParams || [])) reserved.add(k);
+          const fallback = {};
+          for (const k of Object.keys(a)) {
+            if (!reserved.has(k) && a[k] !== undefined && a[k] !== null && a[k] !== '') {
+              fallback[k] = a[k];
+            }
+          }
+          if (Object.keys(fallback).length) result.body = fallback;
+          return result;
+        }
+        if ((op.bodyParams || []).length) {
+          const body = {};
+          for (const k of (op.bodyParams || [])) {
+            if (a[k] !== undefined && a[k] !== null && a[k] !== '') body[k] = a[k];
+          }
+          if (Object.keys(body).length) result.body = body;
+        }
+        return result;

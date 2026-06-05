@@ -1,0 +1,61 @@
+slug: runComposite
+name: runComposite
+description: Execute up to 25 sub-requests in order, with refs between them (POST /composite). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.runComposite:` directly from their own automations.
+arguments:
+  allOrNone:
+    type: object
+    additionalProperties: true
+    description: Body field `allOrNone`.
+  collateSubrequests:
+    type: object
+    additionalProperties: true
+    description: Body field `collateSubrequests`.
+  compositeRequest:
+    type: object
+    additionalProperties: true
+    description: Body field `compositeRequest`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        allOrNone: '{{allOrNone}}'
+        collateSubrequests: '{{collateSubrequests}}'
+        compositeRequest: '{{compositeRequest}}'
+  - method-restOp:
+      operationName: runComposite
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: runComposite result
+      identifier: runComposite
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

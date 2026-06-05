@@ -1,0 +1,54 @@
+slug: getReportInstance
+name: getReportInstance
+description: Get the results of a specific report instance (GET /analytics/reports/{reportId}/instances/{instanceId}). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.getReportInstance:` directly from their own automations.
+arguments:
+  reportId:
+    type: string
+    description: Path param `reportId` (required).
+  instanceId:
+    type: string
+    description: Path param `instanceId` (required).
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        reportId: '{{reportId}}'
+        instanceId: '{{instanceId}}'
+  - method-restOp:
+      operationName: getReportInstance
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: getReportInstance result
+      identifier: getReportInstance
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

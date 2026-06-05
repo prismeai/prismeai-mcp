@@ -1,0 +1,56 @@
+slug: runCompositeBatch
+name: runCompositeBatch
+description: Execute up to 25 independent sub-requests (no refs) (POST /composite/batch). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.runCompositeBatch:` directly from their own automations.
+arguments:
+  haltOnError:
+    type: object
+    additionalProperties: true
+    description: Body field `haltOnError`.
+  batchRequests:
+    type: object
+    additionalProperties: true
+    description: Body field `batchRequests`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    description: Response format.
+do:
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              error: '{{auth.error}}'
+        - break: {}
+  - set:
+      name: methodArgs
+      value:
+        haltOnError: '{{haltOnError}}'
+        batchRequests: '{{batchRequests}}'
+  - method-restOp:
+      operationName: runCompositeBatch
+      args: '{{methodArgs}}'
+      accessToken: '{{auth.accessToken}}'
+      baseUrl: '{{auth.baseUrl}}'
+      output: apiResult
+  - conditions:
+      '!{{apiResult.success}}':
+        - set:
+            name: result
+            value:
+              error: '{{apiResult.error}}'
+        - break: {}
+  - formatToolOutput:
+      operation: read
+      itemType: runCompositeBatch result
+      identifier: runCompositeBatch
+      structuredData: '{{apiResult.data}}'
+      jsonData: '{{apiResult.data}}'
+      outputFormat: '{% {{outputFormat}} || "verbose" %}'
+      output: result
+output: '{{result}}'

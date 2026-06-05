@@ -1,0 +1,111 @@
+slug: oauthCallback
+name: 00_OAuth/oauthCallback
+description: >-
+  OAuth2 authorization-code callback. Validates state, exchanges the code at
+  {loginHost}/services/oauth2/token (config.auth creds + stored code_verifier),
+  stores the token in user scope, then redirects (meta-refresh, CSP-safe) to the
+  config SPA callback view (?view=oauthCallback&status=…) which shows the result
+  and auto-closes the popup. The redirect URI must equal config.oauthCallbackUrl.
+private: true
+when:
+  endpoint: true
+do:
+  - set:
+      name: $http
+      value:
+        headers:
+          Content-Type: text/html
+  - set:
+      name: studioHost
+      value: '{% replace(URL({{global.apiUrl}}).hostname, "api.", "") %}'
+  - set:
+      name: spaBase
+      value: 'https://{{studioHost}}/apps/salesforce-next?view=oauthCallback'
+  - set:
+      name: redirectTo
+      value: '{{spaBase}}&status=error&message=unknown'
+  - conditions:
+      '{{query.error}}':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message={{query.error}}'
+        - break: {}
+  - set:
+      name: pending
+      value: '{{user.salesforceNext.oauthPending}}'
+  - conditions:
+      '!{{query.code}} || !{{query.state}} || {{query.state}} != {{pending.state}}':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message=invalid_state'
+        - break: {}
+  - set:
+      name: a
+      value: '{{config.auth}}'
+  - Custom Code.run:
+      function: normalizeLoginHost
+      parameters:
+        rawHost: '{{a.loginHost}}'
+      output: lh
+  - set:
+      name: loginHost
+      value: '{{lh.host}}'
+  - fetch:
+      url: '{{loginHost}}/services/oauth2/token'
+      method: POST
+      headers:
+        Content-Type: application/x-www-form-urlencoded
+      body:
+        grant_type: authorization_code
+        code: '{{query.code}}'
+        client_id: '{{a.oauthClientId}}'
+        client_secret: '{{a.oauthClientSecret}}'
+        redirect_uri: '{{config.oauthCallbackUrl}}'
+        code_verifier: '{{pending.codeVerifier}}'
+      output: tokenResp
+      outputMode: detailed_response
+      emitErrors: false
+  - conditions:
+      '{{tokenResp.status}} != 200':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message={{tokenResp.body.error}}'
+        - break: {}
+  - set:
+      name: user.salesforceNext.oauth
+      scope: user
+      value:
+        accessToken: '{{tokenResp.body.access_token}}'
+        refreshToken: '{{tokenResp.body.refresh_token}}'
+        instanceUrl: '{{tokenResp.body.instance_url}}'
+        scopes: '{{tokenResp.body.scope}}'
+        connectedAt: '{{run.date}}'
+  - comment: >-
+      Best-effort: persist the refresh token as a workspace secret keyed by user
+      so cron / autonomous automations can resolve this user via
+      buildAppAuth(targetUserId). Requires the connecting user to be a workspace
+      editor/owner (the config app is) — silently skipped (RBAC) otherwise; the
+      interactive user-scope path above still works for everyone.
+  - Custom Code.run:
+      function: makeTokenSecretName
+      parameters:
+        userId: '{{user.id}}'
+      output: tokName
+  - conditions:
+      '!{{tokName.error}} && {{tokenResp.body.refresh_token}}':
+        - run:
+            module: secrets
+            function: set
+            parameters:
+              name: '{{tokName.name}}'
+              scope: workspace
+              value: '{{tokenResp.body.refresh_token}}'
+            output: tokSetResp
+  - delete:
+      name: user.salesforceNext.oauthPending
+      scope: user
+  - set:
+      name: redirectTo
+      value: '{{spaBase}}&status=connected'
+output: |
+  <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={{redirectTo}}"><title>Salesforce</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting… <a href="{{redirectTo}}">continue</a></body></html>
