@@ -72,6 +72,9 @@ do:
             value: '{{spaBase}}&status=error&message={{tokenResp.body.error}}'
         - break: {}
   - set:
+      name: oauthTtlSec
+      value: '{% {{tokenResp.body.expires_in}} || 3600 %}'
+  - set:
       name: user.salesforceNext.oauth
       scope: user
       value:
@@ -80,6 +83,7 @@ do:
         instanceUrl: '{{tokenResp.body.instance_url}}'
         scopes: '{{tokenResp.body.scope}}'
         connectedAt: '{{run.date}}'
+        expiresAt: '{% date({{run.date}}).ts + ({{oauthTtlSec}} * 1000) %}'
   - comment: >-
       Best-effort: persist the refresh token as a workspace secret keyed by user
       so cron / autonomous automations can resolve this user via

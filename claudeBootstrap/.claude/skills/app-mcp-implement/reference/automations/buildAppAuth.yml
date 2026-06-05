@@ -129,8 +129,66 @@ do:
                         value:
                           error: 'Salesforce token refresh failed ({{refResp.status}}) for this user. They must reconnect from the config app.'
                     - break: {}
+        - comment: Interactive — use the cached access token while still valid (120s skew); otherwise refresh it proactively from the stored refresh token and update the user-scope cache.
+        - conditions:
+            '{{user.salesforceNext.oauth.accessToken}} and {{user.salesforceNext.oauth.expiresAt}} > {% date({{run.date}}).ts + 120000 %}':
+              - set:
+                  name: output
+                  value:
+                    accessToken: '{{user.salesforceNext.oauth.accessToken}}'
+                    baseUrl: '{{user.salesforceNext.oauth.instanceUrl}}/services/data/{{effectiveApiVersion}}'
+              - break: {}
+        - conditions:
+            '{{user.salesforceNext.oauth.refreshToken}}':
+              - fetch:
+                  url: '{{normHost}}/services/oauth2/token'
+                  method: POST
+                  headers:
+                    Content-Type: application/x-www-form-urlencoded
+                  body:
+                    grant_type: refresh_token
+                    refresh_token: '{{user.salesforceNext.oauth.refreshToken}}'
+                    client_id: '{{auth.oauthClientId}}'
+                    client_secret: '{{auth.oauthClientSecret}}'
+                  output: userRefResp
+                  outputMode: detailed_response
+                  emitErrors: false
+              - conditions:
+                  '{{userRefResp.status}} == 200':
+                    - comment: Salesforce does not re-issue the refresh token on refresh — keep it. instance_url may change; cache it. No expires_in returned — default TTL.
+                    - set:
+                        name: refInstance
+                        value: '{% {{userRefResp.body.instance_url}} || {{user.salesforceNext.oauth.instanceUrl}} %}'
+                    - set:
+                        name: refTtlSec
+                        value: '{% {{userRefResp.body.expires_in}} || 3600 %}'
+                    - set:
+                        name: user.salesforceNext.oauth.accessToken
+                        scope: user
+                        value: '{{userRefResp.body.access_token}}'
+                    - set:
+                        name: user.salesforceNext.oauth.instanceUrl
+                        scope: user
+                        value: '{{refInstance}}'
+                    - set:
+                        name: user.salesforceNext.oauth.expiresAt
+                        scope: user
+                        value: '{% date({{run.date}}).ts + ({{refTtlSec}} * 1000) %}'
+                    - set:
+                        name: output
+                        value:
+                          accessToken: '{{userRefResp.body.access_token}}'
+                          baseUrl: '{{refInstance}}/services/data/{{effectiveApiVersion}}'
+                    - break: {}
+                  default:
+                    - set:
+                        name: output
+                        value:
+                          error: 'Salesforce token refresh failed ({{userRefResp.status}}). The user must reconnect from the config app (OAuth mode).'
+                    - break: {}
         - conditions:
             '{{user.salesforceNext.oauth.accessToken}}':
+              - comment: No refresh token available (legacy connection) — fall back to the stored token; may be stale.
               - set:
                   name: output
                   value:
