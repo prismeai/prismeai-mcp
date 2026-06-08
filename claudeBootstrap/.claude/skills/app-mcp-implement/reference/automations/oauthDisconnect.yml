@@ -56,10 +56,7 @@ do:
         headers:
           Content-Type: text/html
   - set:
-      name: studioHost
-      value: '{% replace(URL({{global.apiUrl}}).hostname, "api.", "") %}'
-  - set:
       name: redirectTo
-      value: 'https://{{studioHost}}/apps/salesforce-next?view=oauthCallback&status=disconnected'
+      value: '{{global.studioUrl}}/apps/salesforce-next?view=oauthCallback&status=disconnected'
 output: |
   <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={{redirectTo}}"><title>Salesforce</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting… <a href="{{redirectTo}}">continue</a></body></html>

@@ -16,11 +16,8 @@ do:
         headers:
           Content-Type: text/html
   - set:
-      name: studioHost
-      value: '{% replace(URL({{global.apiUrl}}).hostname, "api.", "") %}'
-  - set:
       name: spaBase
-      value: 'https://{{studioHost}}/apps/salesforce-next?view=oauthCallback'
+      value: '{{global.studioUrl}}/apps/salesforce-next?view=oauthCallback'
   - set:
       name: redirectTo
       value: '{{spaBase}}&status=error&message=unknown'

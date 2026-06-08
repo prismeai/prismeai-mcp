@@ -24,11 +24,8 @@ do:
       name: mcpEndpoint
       value: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/webhooks/{{run.appInstanceSlug}}.mcp'
   - set:
-      name: studioHost
-      value: '{% replace(URL({{global.apiUrl}}).hostname, "api.", "") %}'
-  - set:
       name: configAppUrl
-      value: 'https://{{studioHost}}/apps/salesforce-next?workspaceId={{global.workspaceId}}&appInstance={{run.appInstanceSlug}}'
+      value: '{{global.studioUrl}}/apps/salesforce-next?workspaceId={{global.workspaceId}}&appInstance={{run.appInstanceSlug}}'
   - set:
       name: oauthCallbackUrl
       value: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/webhooks/{{run.appInstanceSlug}}.oauthCallback'
