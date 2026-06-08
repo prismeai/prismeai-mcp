@@ -3,8 +3,8 @@ name: MCP/onInstall
 description: >-
   Provision the tenant app-instance on install/configure (tenant-context model,
   NO HMAC key). Sets the MCP endpoint (this instance's own webhook) + the config
-  app link, provisions two tenant secrets — `salesforceNextAuth` (object: auth
-  mode + credentials) and `salesforceNextAuthorizedAgents` (agent allowlist) —
+  app link, provisions two tenant secrets — `salesforceAuth` (object: auth
+  mode + credentials) and `salesforceAuthorizedAgents` (agent allowlist) —
   and writes the two-hop bindings so `config.auth` / `config.authorizedAgents`
   resolve. Idempotent.
 private: true
@@ -16,25 +16,47 @@ do:
   - conditions:
       '!{{run.appInstanceSlug}}':
         - emit:
-            event: salesforceNext.onInstall.skipped
+            event: salesforce.onInstall.skipped
             payload:
               reason: no-app-instance-slug
         - break: {}
-  - set:
-      name: mcpEndpoint
-      value: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/webhooks/{{run.appInstanceSlug}}.mcp'
-  - set:
-      name: configAppUrl
-      value: '{{global.studioUrl}}/apps/salesforce-next?workspaceId={{global.workspaceId}}&appInstance={{run.appInstanceSlug}}'
-  - set:
-      name: oauthCallbackUrl
-      value: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/webhooks/{{run.appInstanceSlug}}.oauthCallback'
   - auth:
       workspace: true
       output: wsJwt
+  - comment: >-
+      Resolve the tenant workspace SLUG so every generated endpoint is
+      id-independent (survives a re-import that changes the workspace id, and
+      client hosts that differ). The platform resolves `slug:<slug>` globally on
+      /workspaces/:id routes (webhooks, /config, /security/secrets). Fall back to
+      the id when the slug can't be read.
+  - fetch:
+      url: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}'
+      method: GET
+      headers:
+        Authorization: Bearer {{wsJwt.jwt}}
+      output: wsInfo
+      outputMode: body
+      emitErrors: false
+  - set:
+      name: wsRef
+      value: '{{global.workspaceId}}'
+  - conditions:
+      '{{wsInfo.slug}}':
+        - set:
+            name: wsRef
+            value: 'slug:{{wsInfo.slug}}'
+  - set:
+      name: mcpEndpoint
+      value: '{{global.apiUrl}}/workspaces/{{wsRef}}/webhooks/{{run.appInstanceSlug}}.mcp'
+  - set:
+      name: configAppUrl
+      value: '{{global.studioUrl}}/apps/salesforce?workspaceId={{wsRef}}&appInstance={{run.appInstanceSlug}}'
+  - set:
+      name: oauthCallbackUrl
+      value: '{{global.apiUrl}}/workspaces/{{wsRef}}/webhooks/{{run.appInstanceSlug}}.oauthCallback'
   - set:
       name: secretsUrl
-      value: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/security/secrets'
+      value: '{{global.apiUrl}}/workspaces/{{wsRef}}/security/secrets'
   - fetch:
       url: '{{secretsUrl}}'
       method: GET
@@ -53,9 +75,9 @@ do:
       name: provisionCount
       value: 0
   - conditions:
-      '!{{existingSecrets.salesforceNextAuth}}':
+      '!{{existingSecrets.salesforceAuth}}':
         - set:
-            name: toProvision.salesforceNextAuth
+            name: toProvision.salesforceAuth
             value:
               value: {}
               description: 'Salesforce auth config (managed by the connector config app): { mode, loginHost, jwtUsername, oauthClientId, oauthClientSecret, jwtPrivateKey, accessToken, instanceUrl }.'
@@ -63,9 +85,9 @@ do:
             name: provisionCount
             value: '{% {{provisionCount}} + 1 %}'
   - conditions:
-      '!{{existingSecrets.salesforceNextAuthorizedAgents}}':
+      '!{{existingSecrets.salesforceAuthorizedAgents}}':
         - set:
-            name: toProvision.salesforceNextAuthorizedAgents
+            name: toProvision.salesforceAuthorizedAgents
             value:
               value: ''
               description: 'Comma-separated agentIds authorized to call this connector''s MCP endpoint. Managed by the config app.'
@@ -85,7 +107,7 @@ do:
             outputMode: detailed_response
             emitErrors: false
         - emit:
-            event: salesforceNext.onInstall.secretsProvisioned
+            event: salesforce.onInstall.secretsProvisioned
             payload:
               status: '{{provisionResp.status}}'
               count: '{{provisionCount}}'
@@ -96,16 +118,16 @@ do:
   - Custom Code.run:
       function: makeSecretRef
       parameters:
-        key: salesforceNextAuth
+        key: salesforceAuth
       output: secretRefAuth
   - Custom Code.run:
       function: makeSecretRef
       parameters:
-        key: salesforceNextAuthorizedAgents
+        key: salesforceAuthorizedAgents
       output: secretRefAllowlist
   - set:
       name: configUrl
-      value: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/config'
+      value: '{{global.apiUrl}}/workspaces/{{wsRef}}/config'
   - fetch:
       url: '{{configUrl}}'
       method: GET
@@ -118,10 +140,10 @@ do:
       name: newWsValue
       value: '{{curWsConfig.value}}'
   - set:
-      name: newWsValue.salesforceNextAuth
+      name: newWsValue.salesforceAuth
       value: '{{secretRefAuth}}'
   - set:
-      name: newWsValue.salesforceNextAuthorizedAgents
+      name: newWsValue.salesforceAuthorizedAgents
       value: '{{secretRefAllowlist}}'
   - fetch:
       url: '{{configUrl}}'
@@ -135,7 +157,7 @@ do:
       outputMode: detailed_response
       emitErrors: false
   - emit:
-      event: salesforceNext.onInstall.completed
+      event: salesforce.onInstall.completed
       payload:
         mcpEndpoint: '{{mcpEndpoint}}'
         secretsProvisioned: '{{provisionCount}}'
@@ -145,12 +167,12 @@ do:
   - Custom Code.run:
       function: makeConfigRef
       parameters:
-        key: salesforceNextAuth
+        key: salesforceAuth
       output: bindingAuth
   - Custom Code.run:
       function: makeConfigRef
       parameters:
-        key: salesforceNextAuthorizedAgents
+        key: salesforceAuthorizedAgents
       output: bindingAllowlist
   - set:
       name: config
