@@ -94,14 +94,30 @@ do:
       output: tokName
   - conditions:
       '!{{tokName.error}} && {{tokenResp.body.refresh_token}}':
-        - run:
-            module: secrets
-            function: set
-            parameters:
-              name: '{{tokName.name}}'
-              scope: workspace
-              value: '{{tokenResp.body.refresh_token}}'
-            output: tokSetResp
+        - try:
+            do:
+              - run:
+                  module: secrets
+                  function: set
+                  parameters:
+                    name: '{{tokName.name}}'
+                    scope: workspace
+                    value: '{{tokenResp.body.refresh_token}}'
+                  output: tokSetResp
+            catch:
+              - comment: >-
+                  Best-effort only: the connecting end-user is usually NOT a
+                  workspace editor/owner, so the workspace-scoped secret write is
+                  denied by RBAC (SecretsError "create on secure_secrets"). This
+                  MUST NOT abort the callback — the user-scope OAuth token above
+                  is already persisted and powers the interactive flow for
+                  everyone. The cron/autonomous resolution via
+                  buildAppAuth(targetUserId) only works when an editor connects.
+              - set:
+                  name: tokSetResp
+                  value:
+                    error: '{{error.error}}'
+                    message: '{{error.message}}'
   - delete:
       name: user.salesforceNext.oauthPending
       scope: user

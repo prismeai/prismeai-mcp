@@ -783,6 +783,7 @@ Phase 7 mostly applies. Additions :
 | 401 from webhook **with** runtime event | DSUL-level (`session.tenantId` empty, ticket invalid, etc.) | Read `payload.output.error` in the event. |
 | Custom HTTP header set by client doesn't appear in runtime `{{headers}}` | api-gateway strip | Move the value into `body.<field>`. [[feedback_api_gateway_strips_headers]] |
 | Bundle "disappears" between sessions (different file ID, build time changed) | User pressed UI "Déployer" in the studio | Re-push your local bundle ; delete orphan embed file. [[feedback_ui_deploy_resets_bundle]] |
+| `[AppRenderer] Failed to load bundle: ModuleLoadError … SyntaxError: Unexpected token '<'` (thrown in `new Function`) | `config.value.bundles[<slug>].bundle` is still the placeholder `<TO_FILL_AT_BUNDLE_UPLOAD>` (or any URL serving HTML/404) → the renderer fetches an HTML page and `new Function("<…")` chokes on `<`. The SPA bundle was never deployed. | `curl .../v2/pages/<slug>/_bundle` — if `.bundles[<slug>].bundle` is `<TO_FILL…>` or not a `/v2/files/...` URL, the bundle was never wired. Fix = redo Phase 7 (build → upload bundle → **PATCH full `config.value`** with the real URL). **NOT** `publish_app` (App/MCP def only, ignores the bundle) nor `push_workspace` (pushes the whole `pages/<name>/` incl. `node_modules`). Trap: the workspace-doc `config.value.bundles` may already show a real URL while `_bundle` still serves the placeholder (stale snapshot) — the PATCH resyncs `_bundle`. [[feedback_app_mcp_spa_bundle_placeholder]] |
 
 ### 9.8 — Smoke tests
 
