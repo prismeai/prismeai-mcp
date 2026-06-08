@@ -24,30 +24,17 @@ do:
       workspace: true
       output: wsJwt
   - comment: >-
-      Resolve the tenant workspace SLUG so every generated endpoint is
-      id-independent (survives a re-import that changes the workspace id, and
-      client hosts that differ). The platform resolves `slug:<slug>` globally on
-      /workspaces/:id routes (webhooks, /config, /security/secrets). Fall back to
-      the id when the slug can't be read.
-  - fetch:
-      url: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}'
-      method: GET
-      headers:
-        Authorization: Bearer {{wsJwt.jwt}}
-      output: wsInfo
-      outputMode: body
-      emitErrors: false
+      Generated endpoints use the raw tenant workspace id (stable for the life of
+      the workspace — survives a slug rename, which a frozen slug-based URL did
+      not). The config app (configAppUrl) is the single entry point exposed in the
+      instance config; it derives the MCP endpoint client-side, so the MCP URL is
+      no longer stored on the instance config. For OAuth connectors, oauthCallbackUrl
+      must stay id-based: Google/OAuth providers do an exact-match on redirect_uri
+      (authorize == token exchange == provider-console registration), so a stable
+      id-based URL avoids breakage on rename.
   - set:
       name: wsRef
       value: '{{global.workspaceId}}'
-  - conditions:
-      '{{wsInfo.slug}}':
-        - set:
-            name: wsRef
-            value: 'slug:{{wsInfo.slug}}'
-  - set:
-      name: mcpEndpoint
-      value: '{{global.apiUrl}}/workspaces/{{wsRef}}/webhooks/{{run.appInstanceSlug}}.mcp'
   - set:
       name: configAppUrl
       value: '{{global.studioUrl}}/apps/salesforce?workspaceId={{wsRef}}&appInstance={{run.appInstanceSlug}}'
@@ -159,7 +146,7 @@ do:
   - emit:
       event: salesforce.onInstall.completed
       payload:
-        mcpEndpoint: '{{mcpEndpoint}}'
+        configAppUrl: '{{configAppUrl}}'
         secretsProvisioned: '{{provisionCount}}'
   - comment: >-
       Binding A (terminal merge) — instance config keys point at the tenant
@@ -178,9 +165,8 @@ do:
       name: config
       type: merge
       value:
-        mcpEndpoint: '{{mcpEndpoint}}'
         configAppUrl: '{{configAppUrl}}'
         oauthCallbackUrl: '{{oauthCallbackUrl}}'
         auth: '{{bindingAuth}}'
         authorizedAgents: '{{bindingAllowlist}}'
-output: '{{mcpEndpoint}}'
+output: '{{configAppUrl}}'

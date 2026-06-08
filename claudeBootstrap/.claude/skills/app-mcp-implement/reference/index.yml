@@ -16,11 +16,6 @@ customDomains: []
 repositories: {}
 config:
   schema:
-    mcpEndpoint:
-      type: string
-      title: MCP Endpoint
-      description: MCP endpoint URL for this app instance (tenant app-instance webhook). Configure this single URL in your agent capability. Auto-generated on install.
-      readOnly: true
     configAppUrl:
       type: string
       title: Configuration app
