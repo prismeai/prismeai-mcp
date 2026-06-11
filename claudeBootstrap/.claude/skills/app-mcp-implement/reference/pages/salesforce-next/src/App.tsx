@@ -149,11 +149,30 @@ function ConfigApp(props: Props) {
   const { sdk, workspace } = props
   const host = resolveHost(sdk)
   const appInstanceSlug = props.appInstanceSlug || readParam('appInstance')
+  // RAW workspace id — used ONLY for /security/secrets: that endpoint does NOT
+  // resolve a `slug:<slug>` ref to the raw id, so a slug-addressed secret is
+  // stored under "slug:<slug>" and the runtime (which reads by raw id) never
+  // finds it. configAppUrl passes the raw id for exactly this.
   const tenantId = readParam('workspaceId') || workspace.id
-  const mcpEndpoint = `${host}/workspaces/${tenantId}/webhooks/${appInstanceSlug}.mcp`
+  // Tenant slug for the third-party-facing URLs. Exposed endpoints use the
+  // slug:<slug> form by DEFAULT — the slug survives a re-import (the workspace id
+  // changes on every re-import while debugging an install; the slug stays stable),
+  // so a slug-form callback stays valid across attempts. NEVER fall back to
+  // `workspace.*`: in an installed-app config page that prop is the app's OWN
+  // service workspace, not the tenant. Init from the configAppUrl `workspaceSlug`
+  // param; if absent, resolve from the raw id in the effect below.
+  const [tenantSlug, setTenantSlug] = useState(readParam('workspaceSlug') || '')
+  const slugRef = tenantSlug ? `slug:${tenantSlug}` : tenantId
+  const mcpEndpoint = `${host}/workspaces/${slugRef}/webhooks/${appInstanceSlug}.mcp`
   const secretsUrl = `${host}/workspaces/${tenantId}/security/secrets`
   const agentFactory = `${host}/workspaces/slug:agent-factory/webhooks/v1`
-  const wh = (slug: string) => `${host}/workspaces/${tenantId}/webhooks/${appInstanceSlug}.${slug}`
+  // Our own webhooks (oauthConnect/Status/Disconnect, testAuth, …) use the
+  // slug:<slug> form — the runtime resolves the slug on /webhooks/, and slug is
+  // re-import stable.
+  const wh = (slug: string) => `${host}/workspaces/${slugRef}/webhooks/${appInstanceSlug}.${slug}`
+  // OAuth callback: slug:<slug> by default (re-import / rename stable). EXCEPTION
+  // — for a MICROSOFT ENTRA connector use `tenantId` (raw id) instead: Entra
+  // rejects the `:` of slug:<slug> in a redirect URI. See the powerbi connector.
   const oauthCallbackUrl = wh('oauthCallback')
 
   const [auth, setAuth] = useState<AuthConfig>({ mode: 'jwt' })
@@ -231,6 +250,23 @@ function ConfigApp(props: Props) {
     }
     void loadAll()
   }, [tenantId, appInstanceSlug, loadAll])
+
+  // Resolve the tenant slug from its RAW id when the configAppUrl didn't carry
+  // `workspaceSlug` (old links / forced URLs). Never derive it from the
+  // `workspace` prop — that's the app's own service workspace, not the tenant.
+  useEffect(() => {
+    if (tenantSlug || !tenantId) return
+    void (async () => {
+      try {
+        const r = await fetch(`${host}/workspaces/${tenantId}`, { headers: apiHeaders(sdk), credentials: 'include' })
+        if (!r.ok) return
+        const w = await r.json().catch(() => null)
+        if (w?.slug) setTenantSlug(w.slug as string)
+      } catch {
+        /* keep the raw-id fallback */
+      }
+    })()
+  }, [tenantId, tenantSlug, host, sdk])
 
   async function patchSecret(name: string, value: unknown) {
     const r = await fetch(secretsUrl, {

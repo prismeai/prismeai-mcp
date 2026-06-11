@@ -6,7 +6,9 @@ description: >-
   app link, provisions two tenant secrets — `salesforceAuth` (object: auth
   mode + credentials) and `salesforceAuthorizedAgents` (agent allowlist) —
   and writes the two-hop bindings so `config.auth` / `config.authorizedAgents`
-  resolve. Idempotent.
+  resolve. Exposed URLs use `slug:<slug>` by default (re-import / rename stable);
+  the raw id is used only for `/config` + `/security/secrets` (don't resolve slug)
+  and — for Microsoft Entra connectors only — the OAuth callback. Idempotent.
 private: true
 when:
   events:
@@ -24,26 +26,45 @@ do:
       workspace: true
       output: wsJwt
   - comment: >-
-      Generated endpoints use the raw tenant workspace id (stable for the life of
-      the workspace — survives a slug rename, which a frozen slug-based URL did
-      not). The config app (configAppUrl) is the single entry point exposed in the
-      instance config; it derives the MCP endpoint client-side, so the MCP URL is
-      no longer stored on the instance config. For OAuth connectors, oauthCallbackUrl
-      must stay id-based: Google/OAuth providers do an exact-match on redirect_uri
-      (authorize == token exchange == provider-console registration), so a stable
-      id-based URL avoids breakage on rename.
+      Resolve BOTH the raw id and the slug of the tenant workspace via one GET
+      (works whether global.workspaceId is the raw id or the slug:<slug> form).
+      Exposed endpoints use slug:<slug> by DEFAULT — the slug survives a re-import
+      (the workspace id changes on every re-import while you debug an install, the
+      slug stays stable), so a slug-form callback stays valid across attempts. Two
+      exceptions are FORCED to the raw id: (1) the OAuth callback ONLY for Microsoft
+      Entra, which rejects the ':' of slug:<slug> in a redirect URI (Google /
+      Salesforce tolerate it → keep slug); (2) /config + /security/secrets, which
+      don't resolve slug:<slug> (404). configAppUrl passes BOTH forms so the SPA has
+      the raw id (for /security/secrets) and the slug (for its slug-form URLs).
+  - fetch:
+      url: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}'
+      method: GET
+      headers:
+        Authorization: Bearer {{wsJwt.jwt}}
+      outputMode: body
+      emitErrors: false
+      output: wsInfo
   - set:
-      name: wsRef
-      value: '{{global.workspaceId}}'
+      name: slugRef
+      value: '{{wsInfo.id}}'
+  - conditions:
+      '{{wsInfo.slug}}':
+        - set:
+            name: slugRef
+            value: 'slug:{{wsInfo.slug}}'
   - set:
       name: configAppUrl
-      value: '{{global.studioUrl}}/apps/salesforce?workspaceId={{wsRef}}&appInstance={{run.appInstanceSlug}}'
+      value: '{{global.studioUrl}}/apps/salesforce?workspaceId={{wsInfo.id}}&workspaceSlug={{wsInfo.slug}}&appInstance={{run.appInstanceSlug}}'
+  - comment: >-
+      oauthCallbackUrl: slug:<slug> by default (re-import / rename stable). For a
+      MICROSOFT ENTRA connector, swap slugRef for {{wsInfo.id}} on this line only —
+      Entra rejects the ':' in the redirect URI. See the powerbi connector.
   - set:
       name: oauthCallbackUrl
-      value: '{{global.apiUrl}}/workspaces/{{wsRef}}/webhooks/{{run.appInstanceSlug}}.oauthCallback'
+      value: '{{global.apiUrl}}/workspaces/{{slugRef}}/webhooks/{{run.appInstanceSlug}}.oauthCallback'
   - set:
       name: secretsUrl
-      value: '{{global.apiUrl}}/workspaces/{{wsRef}}/security/secrets'
+      value: '{{global.apiUrl}}/workspaces/{{wsInfo.id}}/security/secrets'
   - fetch:
       url: '{{secretsUrl}}'
       method: GET
@@ -114,7 +135,7 @@ do:
       output: secretRefAllowlist
   - set:
       name: configUrl
-      value: '{{global.apiUrl}}/workspaces/{{wsRef}}/config'
+      value: '{{global.apiUrl}}/workspaces/{{wsInfo.id}}/config'
   - fetch:
       url: '{{configUrl}}'
       method: GET
