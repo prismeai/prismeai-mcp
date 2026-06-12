@@ -66,6 +66,7 @@ do:
             output: auth
         - conditions:
             '{{auth.error}}':
+              - comment: Pass the buildAppAuth error through verbatim — it already distinguishes "user must reconnect" (dead refresh token), "transient provider outage" and "admin must configure credentials". A generic message here misleads the LLM into blaming the workspace config.
               - set:
                   name: response
                   value:
@@ -74,7 +75,7 @@ do:
                     result:
                       content:
                         - type: text
-                          text: Salesforce is not configured for this workspace. An administrator must set the service credentials (JWT Bearer or OAuth client) in the connector config app.
+                          text: '{{auth.error}}'
                       isError: true
               - break: {}
         - routeToolCall:

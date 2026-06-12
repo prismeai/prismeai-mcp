@@ -124,10 +124,31 @@ do:
                           baseUrl: '{{refResp.body.instance_url}}/services/data/{{effectiveApiVersion}}'
                     - break: {}
                   default:
+                    - conditions:
+                        '{{refResp.status}} >= 400 and {{refResp.status}} < 500':
+                          - comment: Permanent rejection (invalid_grant / revoked) — drop the stored refresh token so this user stops resolving until they reconnect. Best-effort (RBAC may deny from some contexts).
+                          - try:
+                              do:
+                                - run:
+                                    module: secrets
+                                    function: delete
+                                    parameters:
+                                      name: '{{tokName.name}}'
+                                      scope: workspace
+                              catch:
+                                - set:
+                                    name: _tokDeleteErr
+                                    value: '{{error.message}}'
+                          - set:
+                              name: output
+                              value:
+                                error: 'Salesforce token refresh failed ({{refResp.status}} {{refResp.body.error}}) for this user. They must reconnect from the config app.'
+                          - break: {}
                     - set:
                         name: output
                         value:
-                          error: 'Salesforce token refresh failed ({{refResp.status}}) for this user. They must reconnect from the config app.'
+                          error: 'Salesforce token endpoint temporarily unavailable ({{refResp.status}}). Retry shortly — no reconnection needed.'
+                          transient: true
                     - break: {}
         - comment: Interactive — use the cached access token while still valid (120s skew); otherwise refresh it proactively from the stored refresh token and update the user-scope cache.
         - conditions:
@@ -181,10 +202,22 @@ do:
                           baseUrl: '{{refInstance}}/services/data/{{effectiveApiVersion}}'
                     - break: {}
                   default:
+                    - conditions:
+                        '{{userRefResp.status}} >= 400 and {{userRefResp.status}} < 500':
+                          - comment: Permanent rejection (revoked / expired refresh token) — invalidate the user-scope connection so oauthStatus reports connected:false and agent-factory re-proposes the OAuth connect flow instead of silently retrying a dead token.
+                          - delete:
+                              name: user.salesforceNext.oauth
+                              scope: user
+                          - set:
+                              name: output
+                              value:
+                                error: 'Salesforce token refresh failed ({{userRefResp.status}} {{userRefResp.body.error}}). The user must reconnect from the config app (OAuth mode).'
+                          - break: {}
                     - set:
                         name: output
                         value:
-                          error: 'Salesforce token refresh failed ({{userRefResp.status}}). The user must reconnect from the config app (OAuth mode).'
+                          error: 'Salesforce token endpoint temporarily unavailable ({{userRefResp.status}}). Retry shortly — no reconnection needed.'
+                          transient: true
                     - break: {}
         - conditions:
             '{{user.salesforceNext.oauth.accessToken}}':

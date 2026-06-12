@@ -3,6 +3,12 @@ name: OAuth/oauthStatus
 description: >-
   Returns the per-user Salesforce OAuth connection status for the current user.
   Used by the config app and by agent-factory's capability `status_url`.
+  Authoritative: when the cached access token is expired it attempts the
+  refresh via buildAppAuth — a dead refresh token invalidates the stored
+  connection (done by buildAppAuth) and reports connected:false, so
+  agent-factory raises auth_pending and proposes the OAuth connect flow
+  BEFORE any failing tool call. Transient provider errors (5xx) stay
+  connected:true to avoid wrongly gating tools during an outage.
 private: true
 when:
   endpoint: true
@@ -11,8 +17,24 @@ do:
       name: output
       value:
         connected: false
+  - comment: Non-oauth tenants (jwt / clientCredentials / accessToken) have no per-user connection — report connected so a wrongly-wired status_url never gates their tools.
+  - set:
+      name: statusMode
+      value: '{% {{config.auth.mode}} || "jwt" %}'
   - conditions:
-      '{{user.salesforceNext.oauth.accessToken}}':
+      '{{statusMode}} != "oauth"':
+        - set:
+            name: output
+            value:
+              connected: true
+              authMethod: '{{statusMode}}'
+        - break: {}
+  - conditions:
+      '!{{user.salesforceNext.oauth.accessToken}}':
+        - break: {}
+  - comment: Fast path — cached access token still valid (120s skew), no provider round-trip.
+  - conditions:
+      '{{user.salesforceNext.oauth.expiresAt}} > {% date({{run.date}}).ts + 120000 %}':
         - set:
             name: output
             value:
@@ -20,4 +42,23 @@ do:
               instanceUrl: '{{user.salesforceNext.oauth.instanceUrl}}'
               scopes: '{{user.salesforceNext.oauth.scopes}}'
               connectedAt: '{{user.salesforceNext.oauth.connectedAt}}'
+        - break: {}
+  - comment: Token expired — probe the refresh. buildAppAuth re-caches the token on success and deletes the user-scope connection on permanent (4xx) failure.
+  - buildAppAuth:
+      output: probe
+  - conditions:
+      '{{probe.error}} and !{{probe.transient}}':
+        - set:
+            name: output
+            value:
+              connected: false
+              reason: '{{probe.error}}'
+        - break: {}
+  - set:
+      name: output
+      value:
+        connected: true
+        instanceUrl: '{{user.salesforceNext.oauth.instanceUrl}}'
+        scopes: '{{user.salesforceNext.oauth.scopes}}'
+        connectedAt: '{{user.salesforceNext.oauth.connectedAt}}'
 output: '{{output}}'
