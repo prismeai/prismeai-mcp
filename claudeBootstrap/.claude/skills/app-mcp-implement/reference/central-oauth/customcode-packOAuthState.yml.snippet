@@ -1,0 +1,41 @@
+# Custom Code functions to add to imports/Custom Code.yml > config.functions
+# (state packing for the central-client callback proxy)
+    packOAuthState:
+      parameters:
+        state:
+          type: string
+        callbackUrl:
+          type: string
+      code: |
+        // Central-client flow: the Google redirect_uri is the CORE workspace callback,
+        // so the tenant callback URL rides inside the state ("<random>.<b64url(url)>")
+        // for the core to proxy code+state back to the right tenant instance.
+        if (!callbackUrl) return { packed: state || '' };
+        return { packed: (state || '') + '.' + Buffer.from(String(callbackUrl), 'utf8').toString('base64url') };
+    unpackOAuthState:
+      parameters:
+        state:
+          type: string
+        code:
+          type: string
+        apiUrl:
+          type: string
+      code: |
+        // Reverse of packOAuthState. Returns { callbackUrl, redirectUrl } when the
+        // state carries a tenant callback (redirectUrl = ready-to-use proxy target
+        // forwarding code+state verbatim), {} otherwise. Anti open-redirect: the
+        // target must be an oauthCallback webhook on OUR api host (apiUrl prefix).
+        const s = String(state || '');
+        const dot = s.indexOf('.');
+        if (dot < 0) return {};
+        try {
+          const callbackUrl = Buffer.from(s.slice(dot + 1), 'base64url').toString('utf8');
+          const base = String(apiUrl || '').replace(/\/+$/, '');
+          if (!base || !callbackUrl.startsWith(base + '/workspaces/')) return {};
+          if (!/\/webhooks\/[A-Za-z0-9_.-]*oauthCallback$/.test(callbackUrl)) return {};
+          const sep = callbackUrl.includes('?') ? '&' : '?';
+          const redirectUrl = callbackUrl + sep + 'code=' + encodeURIComponent(String(code || '')) + '&state=' + encodeURIComponent(s);
+          return { callbackUrl, redirectUrl };
+        } catch (e) {
+          return {};
+        }

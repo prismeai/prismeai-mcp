@@ -1,0 +1,128 @@
+slug: oauthCallback
+name: OAuth/oauthCallback
+description: 'OAuth2 authorization-code callback — dual role. (1) PROXY (core workspace, central client): when the state carries a packed tenant callback and no local oauthPending matches, redirect code+state verbatim to that tenant callback (validated against our own api host — no open redirect). (2) EXCHANGE (tenant instance, or core for its own connect): validates state, exchanges the code at https://oauth2.googleapis.com/token (client via resolveOAuthClient + stored code_verifier + pending.redirectUri), stores the token in user scope + the refresh token as a workspace secret keyed by userId (for cron), then redirects (meta-refresh, CSP-safe) to the config SPA callback view (?view=oauthCallback&status=…).'
+private: true
+when:
+  endpoint: true
+do:
+  - set:
+      name: $http
+      value:
+        headers:
+          Content-Type: text/html
+  - set:
+      name: spaBase
+      value: '{{global.studioUrl}}/apps/google-workspaces?view=oauthCallback'
+  - set:
+      name: redirectTo
+      value: '{{spaBase}}&status=error&message=unknown'
+  - conditions:
+      '{{query.error}}':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message={{query.error}}'
+        - break: {}
+  - set:
+      name: pending
+      value: '{{user.googleWorkspaces.oauthPending}}'
+  - conditions:
+      '!{{query.code}} || !{{query.state}}':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message=invalid_state'
+        - break: {}
+  - comment: 'PROXY role — no matching local pending + state packs a tenant callback (central-client flow landing on the core): forward code+state verbatim to the tenant instance callback, where the pending (PKCE verifier) lives. unpackOAuthState only returns a redirectUrl for oauthCallback webhooks on our own api host.'
+  - conditions:
+      '{{query.state}} != {{pending.state}}':
+        - Custom Code.run:
+            function: unpackOAuthState
+            parameters:
+              state: '{{query.state}}'
+              code: '{{query.code}}'
+              apiUrl: '{{global.apiUrl}}'
+            output: up
+        - conditions:
+            '{{up.redirectUrl}}':
+              - set:
+                  name: redirectTo
+                  value: '{{up.redirectUrl}}'
+              - break: {}
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message=invalid_state'
+        - break: {}
+  - resolveOAuthClient:
+      output: oc
+  - conditions:
+      '{{oc.error}}':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message=oauth_client_not_configured'
+        - break: {}
+  - comment: 'oc.tokenUrl = Google direct (tenant client / core context) or the core centralTokenExchange proxy (tenant on the central client — the proxy injects the central client_id/secret, the empty creds below are ignored).'
+  - fetch:
+      url: '{{oc.tokenUrl}}'
+      method: POST
+      headers:
+        Content-Type: application/x-www-form-urlencoded
+      body:
+        grant_type: authorization_code
+        code: '{{query.code}}'
+        client_id: '{{oc.oauthClientId}}'
+        client_secret: '{{oc.oauthClientSecret}}'
+        redirect_uri: '{% {{pending.redirectUri}} || {{config.oauthCallbackUrl}} %}'
+        code_verifier: '{{pending.codeVerifier}}'
+      output: tokenResp
+      outputMode: detailed_response
+      emitErrors: false
+  - conditions:
+      '{{tokenResp.status}} != 200':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message={{tokenResp.body.error}}'
+        - break: {}
+  - set:
+      name: oauthTtlSec
+      value: '{% {{tokenResp.body.expires_in}} || 3300 %}'
+  - set:
+      name: user.googleWorkspaces.oauth
+      scope: user
+      value:
+        accessToken: '{{tokenResp.body.access_token}}'
+        refreshToken: '{% {{tokenResp.body.refresh_token}} || {{user.googleWorkspaces.oauth.refreshToken}} %}'
+        scopes: '{{tokenResp.body.scope}}'
+        connectedAt: '{{run.date}}'
+        expiresAt: '{% date({{run.date}}).ts + ({{oauthTtlSec}} * 1000) %}'
+  - comment: 'Best-effort: persist the refresh token as a workspace secret keyed by user so cron / autonomous automations can resolve this user via buildAppAuth(targetUserId). Requires the connecting user to be a workspace editor/owner (the config app is) — silently skipped (RBAC) otherwise; the interactive user-scope path above still works for everyone. Google only returns a refresh_token on first consent / prompt=consent — guarded below.'
+  - Custom Code.run:
+      function: makeTokenSecretName
+      parameters:
+        userId: '{{user.id}}'
+      output: tokName
+  - conditions:
+      '!{{tokName.error}} && {{tokenResp.body.refresh_token}}':
+        - try:
+            do:
+              - run:
+                  module: secrets
+                  function: set
+                  parameters:
+                    name: '{{tokName.name}}'
+                    scope: workspace
+                    value: '{{tokenResp.body.refresh_token}}'
+                  output: tokSetResp
+            catch:
+              - comment: 'Best-effort only: the connecting end-user is usually NOT a workspace editor/owner, so the workspace-scoped secret write is denied by RBAC (SecretsError "create on secure_secrets"). This MUST NOT abort the callback — the user-scope OAuth token above is already persisted and powers the interactive flow for everyone. The cron/autonomous resolution via buildAppAuth(targetUserId) only works when an editor connects.'
+              - set:
+                  name: tokSetResp
+                  value:
+                    error: '{{error.error}}'
+                    message: '{{error.message}}'
+  - delete:
+      name: user.googleWorkspaces.oauthPending
+      scope: user
+  - set:
+      name: redirectTo
+      value: '{{spaBase}}&status=connected'
+output: |
+  <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={{redirectTo}}"><title>Google Workspaces</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting… <a href="{{redirectTo}}">continue</a></body></html>

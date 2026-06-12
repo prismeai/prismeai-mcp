@@ -1,0 +1,24 @@
+slug: getOAuthClientPublic
+name: 00_Maintainer/getOAuthClientPublic
+description: 'CORE webhook — returns the PUBLIC part of the central platform OAuth client ({ configured, clientId, scopes }), never the secret. Called at runtime by resolveOAuthClient from tenant app-instance contexts (the core secret `googleWorkspacesCentralOAuth` only resolves in the core workspace context — secret refs interpolate against the RUNNING workspace''s store, so tenants cannot read it through config inheritance). The client secret stays on the core: token operations go through centralTokenExchange.'
+private: true
+when:
+  endpoint: true
+do:
+  - set:
+      name: c
+      value: '{{config.centralAuth}}'
+  - conditions:
+      '{{c.oauthClientId}} && {{c.oauthClientSecret}}':
+        - set:
+            name: output
+            value:
+              configured: true
+              clientId: '{{c.oauthClientId}}'
+              scopes: '{{c.scopes}}'
+        - break: {}
+  - set:
+      name: output
+      value:
+        configured: false
+output: '{{output}}'

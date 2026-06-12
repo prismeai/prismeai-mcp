@@ -1,0 +1,68 @@
+slug: centralTokenExchange
+name: 00_Maintainer/centralTokenExchange
+description: 'CORE webhook — token endpoint proxy for the central platform OAuth client. Accepts the same form fields as https://oauth2.googleapis.com/token (grant_type=authorization_code: code, code_verifier, redirect_uri | grant_type=refresh_token: refresh_token), injects the central client_id/client_secret (which NEVER leave the core workspace), forwards to Google and passes the response through (status + body). Tenant instances hit this URL as their tokenUrl when running on the central client (resolveOAuthClient). Safe by construction: it returns tokens only to callers presenting a valid one-time code+PKCE verifier or an existing refresh token — the client secret itself is never disclosed.'
+private: true
+when:
+  endpoint: true
+do:
+  - set:
+      name: c
+      value: '{{config.centralAuth}}'
+  - conditions:
+      '!{{c.oauthClientId}} || !{{c.oauthClientSecret}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: output
+            value:
+              error: central_client_not_configured
+        - break: {}
+  - conditions:
+      '{{body.grant_type}} != "authorization_code" && {{body.grant_type}} != "refresh_token"':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: output
+            value:
+              error: unsupported_grant_type
+        - break: {}
+  - conditions:
+      '{{body.grant_type}} == "authorization_code"':
+        - set:
+            name: tokenBody
+            value:
+              grant_type: authorization_code
+              code: '{{body.code}}'
+              code_verifier: '{{body.code_verifier}}'
+              redirect_uri: '{{body.redirect_uri}}'
+              client_id: '{{c.oauthClientId}}'
+              client_secret: '{{c.oauthClientSecret}}'
+      default:
+        - set:
+            name: tokenBody
+            value:
+              grant_type: refresh_token
+              refresh_token: '{{body.refresh_token}}'
+              client_id: '{{c.oauthClientId}}'
+              client_secret: '{{c.oauthClientSecret}}'
+  - fetch:
+      url: https://oauth2.googleapis.com/token
+      method: POST
+      headers:
+        Content-Type: application/x-www-form-urlencoded
+      body: '{{tokenBody}}'
+      output: tokenResp
+      outputMode: detailed_response
+      emitErrors: false
+  - set:
+      name: $http
+      value:
+        status: '{{tokenResp.status}}'
+  - set:
+      name: output
+      value: '{{tokenResp.body}}'
+output: '{{output}}'

@@ -1,0 +1,71 @@
+slug: resolveOAuthClient
+name: /Helpers/resolveOAuthClient
+description: 'Resolve the OAuth client for the per-user flow. Priority: tenant-provided client (config.auth.oauthClientId/Secret — full override, direct Google token endpoint) → central platform client (token-service model: clientId/scopes fetched from the core getOAuthClientPublic webhook, token operations through the core centralTokenExchange proxy so the central client secret NEVER leaves the core workspace — tenant secret stores cannot resolve core secret refs). Returns { oauthClientId, oauthClientSecret, scopes, redirectUri, tokenUrl, central } or { error }. With the central client, redirectUri is the CORE callback (single Authorized redirect URI at Google) — the core oauthCallback proxies code+state back to the tenant callback packed in the state. config.auth.mode == "oauthCentral" skips the tenant override explicitly.'
+private: true
+do:
+  - set:
+      name: a
+      value: '{{config.auth}}'
+  - comment: 'Mode oauthCentral — explicit platform-client choice: ignore any leftover tenant client fields and resolve the central client directly.'
+  - conditions:
+      '{{a.mode}} == "oauthCentral"':
+        - set:
+            name: a
+            value:
+              scopes: '{{a.scopes}}'
+  - conditions:
+      '{{a.oauthClientId}} && {{a.oauthClientSecret}}':
+        - set:
+            name: result
+            value:
+              oauthClientId: '{{a.oauthClientId}}'
+              oauthClientSecret: '{{a.oauthClientSecret}}'
+              scopes: '{{a.scopes}}'
+              redirectUri: '{{config.oauthCallbackUrl}}'
+              tokenUrl: https://oauth2.googleapis.com/token
+              central: false
+        - break: {}
+  - comment: 'Central client. Fast path: config.centralAuth resolves locally on the CORE workspace (its own secret store). Tenant instances inherit only the unresolved literal — fall back to the core public webhook.'
+  - set:
+      name: c
+      value: '{{config.centralAuth}}'
+  - conditions:
+      '!{{c.oauthClientId}}':
+        - fetch:
+            url: '{{global.apiUrl}}/workspaces/slug:google-workspaces/webhooks/getOAuthClientPublic'
+            method: GET
+            output: pub
+            emitErrors: false
+        - conditions:
+            '{{pub.configured}}':
+              - set:
+                  name: c
+                  value:
+                    oauthClientId: '{{pub.clientId}}'
+                    scopes: '{{pub.scopes}}'
+                    viaTokenService: true
+  - conditions:
+      '{{c.oauthClientId}}':
+        - set:
+            name: tokenUrl
+            value: https://oauth2.googleapis.com/token
+        - conditions:
+            '{{c.viaTokenService}}':
+              - set:
+                  name: tokenUrl
+                  value: '{{global.apiUrl}}/workspaces/slug:google-workspaces/webhooks/centralTokenExchange'
+        - set:
+            name: result
+            value:
+              oauthClientId: '{{c.oauthClientId}}'
+              oauthClientSecret: '{{c.oauthClientSecret}}'
+              scopes: '{% {{a.scopes}} || {{c.scopes}} %}'
+              redirectUri: '{{global.apiUrl}}/workspaces/slug:google-workspaces/webhooks/oauthCallback'
+              tokenUrl: '{{tokenUrl}}'
+              central: true
+        - break: {}
+  - set:
+      name: result
+      value:
+        error: Google OAuth is not configured. Either set the OAuth client ID/secret in the connector config app (tenant client), or ask the platform maintainer to provision the central OAuth client from the core workspace.
+output: '{{result}}'

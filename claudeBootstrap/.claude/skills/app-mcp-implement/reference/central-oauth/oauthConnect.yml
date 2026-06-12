@@ -1,0 +1,79 @@
+slug: oauthConnect
+name: OAuth/oauthConnect
+description: Per-user OAuth2 (authorization-code + PKCE) connect endpoint. Opened in the user's browser (Connect button / agent-factory connect_url). Resolves the OAuth client via resolveOAuthClient (tenant config.auth override → central platform client), stores PKCE + state + redirectUri in user scope, and redirects to Google's authorize endpoint with access_type=offline + prompt=consent so a refresh_token is (re)issued. With the central client, the redirect_uri is the CORE workspace callback and the tenant callback URL is packed into the state (the core proxies back). oauthCallback then exchanges the code and stores the token for this user.
+private: true
+when:
+  endpoint: true
+do:
+  - conditions:
+      '!{{user.id}}':
+        - set:
+            name: $http
+            value:
+              status: 401
+        - set:
+            name: output
+            value: Authentication required. Please log in to Prisme.ai first.
+        - break: {}
+  - resolveOAuthClient:
+      output: oc
+  - conditions:
+      '{{oc.error}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: output
+            value: '{{oc.error}}'
+        - break: {}
+  - Custom Code.run:
+      function: generatePkce
+      output: pkce
+  - Custom Code.run:
+      function: generateState
+      output: stateResult
+  - comment: 'Central client — Google redirects to the CORE callback (single registered URI); pack THIS instance''s callback into the state so the core proxies code+state back here. Tenant client — plain state, direct callback.'
+  - set:
+      name: packCallbackUrl
+      value: ''
+  - conditions:
+      '{{oc.central}} && {{config.oauthCallbackUrl}} && {{config.oauthCallbackUrl}} != {{oc.redirectUri}}':
+        - set:
+            name: packCallbackUrl
+            value: '{{config.oauthCallbackUrl}}'
+  - Custom Code.run:
+      function: packOAuthState
+      parameters:
+        state: '{{stateResult.state}}'
+        callbackUrl: '{{packCallbackUrl}}'
+      output: packed
+  - set:
+      name: user.googleWorkspaces.oauthPending
+      scope: user
+      value:
+        codeVerifier: '{{pkce.codeVerifier}}'
+        state: '{{packed.packed}}'
+        redirectUri: '{{oc.redirectUri}}'
+        createdAt: '{{run.date}}'
+  - Custom Code.run:
+      function: buildAuthorizeUrl
+      parameters:
+        authorizeUrl: https://accounts.google.com/o/oauth2/v2/auth
+        clientId: '{{oc.oauthClientId}}'
+        redirectUri: '{{oc.redirectUri}}'
+        scopes: '{% {{oc.scopes}} || "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar openid email" %}'
+        state: '{{packed.packed}}'
+        codeChallenge: '{{pkce.codeChallenge}}'
+        accessType: offline
+        prompt: consent
+      output: urlResult
+  - set:
+      name: $http
+      value:
+        headers:
+          Content-Type: text/html
+  - set:
+      name: output
+      value: <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={{urlResult.url}}"><title>Redirecting to Google…</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting to Google… <a href="{{urlResult.url}}">continue</a></body></html>
+output: '{{output}}'

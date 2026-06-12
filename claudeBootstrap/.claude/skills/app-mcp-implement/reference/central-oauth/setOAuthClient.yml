@@ -1,0 +1,98 @@
+slug: setOAuthClient
+name: 00_Maintainer/setOAuthClient
+description: 'MAINTAINER setup — stores the central platform Google OAuth client, used as fallback by every tenant that does not provide its own client. Reads clientId / clientSecret / scopes from the HTTP body (maintainer view of the config SPA, opened from the core workspace Builder) or top-level args (Studio Test). Writes the whole client object into the declared secret `googleWorkspacesCentralOAuth`; `config.value.centralAuth` (static binding in index.yml) resolves it for resolveOAuthClient. Gated: authenticated user + workspace owner/editor role when exposed by the runtime.'
+private: true
+arguments:
+  clientId:
+    type: string
+  clientSecret:
+    type: string
+  scopes:
+    type: string
+when:
+  endpoint: true
+do:
+  - conditions:
+      '!{{user.id}}':
+        - set:
+            name: $http
+            value:
+              status: 401
+        - set:
+            name: output
+            value:
+              error: Authentication required (workspace editor).
+        - break: {}
+  - comment: 'Role gate — FAIL-CLOSED: the secret PATCH below runs with a privileged workspace JWT (auth: workspace: true), so the caller''s own RBAC is NOT re-checked there. user.role is the caller''s role ON THIS workspace (runtime contexts/factory.ts getLoadedSubjectRole) — absent for non-members, who must be rejected.'
+  - conditions:
+      '{{user.role}} != "owner" && {{user.role}} != "editor" && {{user.role}} != "admin"':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: output
+            value:
+              error: Forbidden — you must be an editor of the core workspace.
+        - break: {}
+  - set:
+      name: cid
+      value: '{% {{body.clientId}} || {{clientId}} %}'
+  - set:
+      name: csec
+      value: '{% {{body.clientSecret}} || {{clientSecret}} %}'
+  - set:
+      name: csco
+      value: '{% {{body.scopes}} || {{scopes}} || "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar openid email" %}'
+  - conditions:
+      '!{{cid}} || !{{csec}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: output
+            value:
+              error: clientId and clientSecret are required.
+        - break: {}
+  - auth:
+      workspace: true
+      output: wsAuth
+  - comment: Whole client object → declared secret; config.value.centralAuth ({{secret.googleWorkspacesCentralOAuth}} binding in index.yml) resolves it. Secrets survive push_workspace, unlike runtime config.value writes.
+  - fetch:
+      url: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/security/secrets'
+      method: PATCH
+      headers:
+        Authorization: Bearer {{wsAuth.jwt}}
+        Content-Type: application/json
+      body:
+        googleWorkspacesCentralOAuth:
+          value:
+            oauthClientId: '{{cid}}'
+            oauthClientSecret: '{{csec}}'
+            scopes: '{{csco}}'
+      output: patchResp
+      outputMode: detailed_response
+      emitErrors: false
+  - conditions:
+      '{{patchResp.status}} >= 300':
+        - set:
+            name: $http
+            value:
+              status: 500
+        - set:
+            name: output
+            value:
+              error: Failed to store the central OAuth client ({{patchResp.status}}).
+        - break: {}
+  - emit:
+      event: googleWorkspaces.maintainer.oauthClientSet
+      payload:
+        scopes: '{{csco}}'
+  - set:
+      name: output
+      value:
+        ok: true
+        message: Central Google OAuth client stored.
+        scopes: '{{csco}}'
+output: '{{output}}'
