@@ -4,12 +4,6 @@ slug: salesforce-next
 description: App + MCP connector for Salesforce CRM (REST API v62.0) — new tenant-context model. The MCP endpoint runs in the tenant app-instance context; agents are authorized via an agentId/agentApiKey registry validated against agent-factory. Service-to-service auth via OAuth2 JWT Bearer (Connected App) for both agent (MCP) and App-mode calls.
 labels:
 - app-mcp
-- importFrom:PvCEGmC
-- app-builder
-- Salesforce
-- MCP
-- App
-- AI
 - production:app
 photo: https://api.sandbox.prisme.ai/v2/files/PvCEGmC/F_WsSaPFE6Inge7jMJHcE.salesforce-next-logo.png
 customDomains: []
