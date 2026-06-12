@@ -209,7 +209,8 @@ output:
 `Loader` is an interactive component that fires its `action` **automatically** — no user click:
 - **Timeout mode**: `timeout` (seconds) → dispatches `action` when elapsed.
 - **Poll mode** (wins if both set): `poll` (URL) + `interval?` (seconds, min 1, default 30) → GETs the URL until the JSON body returns `{done: true}`. Body fields `progress` (0-100) and `message` live-update the display. After **3 consecutive failures** it dispatches `<action>_error` instead.
-- `style`: `spinner` (default) or `progress` (shows a progress bar once a `progress` value arrives), `message?` initial label.
+- `style`: `spinner` (default), `progress` (shows a progress bar once a `progress` value arrives — poll mode only), or `image` (image-shaped placeholder: mosaic of tiles glowing in a diagonal wave + centered picture icon — use when the awaited result is an image). `message?` initial label (shown with a small spinner below the placeholder in `image` style).
+- `aspect` (with `style: image`): `square` (default) | `landscape` | `portrait` — pass it straight from your job metadata; unknown values fall back to `square`.
 - ⚠️ `poll` MUST be a **same-origin relative path** (`^/(?!/)` — single leading `/`). Absolute URLs and `//host` are rejected by the renderer. To poll a workspace webhook, the path must be reachable on the host UI's origin.
 - The final poll response is merged into the returned `data_model` under `__loader_<componentId>` (errors under `__loader_<componentId>_error`).
 - Use `wait_for_action: true` on the surface so the agent pauses until the loader completes.
