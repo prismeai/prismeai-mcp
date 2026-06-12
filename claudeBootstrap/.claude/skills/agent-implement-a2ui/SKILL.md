@@ -1,7 +1,7 @@
 ---
 name: agent-implement-a2ui
 description: Add A2UI (Agent-to-UI) surfaces to a Prisme.ai MCP workspace so that LLM agents can render interactive UI through MCP tool calls. Scaffolds an MCP endpoint (or extends an existing one) with tools whose outputs include a __surface payload (components, data_model, actions) that the host UI renders using the prisme://blocks/v1 catalog. Use when the user says "ajoute des surfaces A2UI", "expose une UI via MCP", "/agent-implement-a2ui <workspace> <surfaces>", or wants the agent to draw cards/forms/tables/buttons inside a chat.
-argument-hint: "[workspace-id-or-folder] [surfaces: card, form, table, action-card, feedback, confirmation, custom...]"
+argument-hint: "[workspace-id-or-folder] [surfaces: card, form, table, action-card, feedback, confirmation, loader, custom...]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent, mcp__prisme-ai-builder__pull_workspace, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__search_workspaces, mcp__prisme-ai-builder__list_automations
 ---
 
@@ -38,6 +38,16 @@ LLM agent ──tools/call──► MCP endpoint ──► tool automation
 
 Key idea: **one tool = one surface**. The `content.text` is the LLM's narration ("Form displayed, waiting…"); the `__surface` is what the human sees. Both ship in the same MCP response.
 
+**What the agent actually sees** (agent-factory `_route-tool.yml`): when a tool result contains `__surface`, the host streams it as an `a2ui.create` part, then replaces the tool result given to the LLM with **`__surface.text`** (not `content[0].text`). If `wait_for_action: true`, the run pauses with a `surface_action` pending approval; when the user acts, the agent resumes with a user message of the form:
+
+```
+[Form submitted: <surfaceId>]
+Action: <action name>
+Data: <JSON of the filled data_model>     ← only if send_data_model: true
+```
+
+The A2UI protocol (v0.9) also defines `a2ui.update` / `a2ui.data` / `a2ui.delete` lifecycle parts in the SSE stream, but **only `a2ui.create` is bridged from MCP tool outputs** today — an MCP tool cannot update or delete an existing surface; it re-creates one (reuse the same `surface_id` for client-side reconciliation).
+
 ---
 
 ## Arguments
@@ -56,11 +66,12 @@ Built-in surface keywords:
 | `action-card` | `templates/show_action_card.yml` | yes (approve/reject) |
 | `feedback` | `templates/show_feedback.yml` | yes (submit/skip) |
 | `confirmation` | `templates/show_confirmation.yml` | yes (yes/no) |
+| `loader` | `templates/show_loader.yml` | auto (fires its action on timeout or poll completion) |
 | `demo` | `templates/show_component_demo.yml` | yes (showcase) |
 
 If $ARGUMENTS is empty, ask the user with `AskUserQuestion`:
 1. **Target** — Existing workspace ID / Existing local folder / New workspace
-2. **Surfaces** — multiSelect: card, table, form, action-card, feedback, confirmation, demo, custom
+2. **Surfaces** — multiSelect: card, table, form, action-card, feedback, confirmation, loader, demo, custom
 
 ---
 
@@ -89,8 +100,9 @@ For each surface keyword:
 1. **Pick a slug** — `show_<name>` (e.g. `show_card`, `show_invoice`). Snake_case, no `-`.
 2. **Decide arguments** — what the LLM will pass in `tools/call.arguments`. Keep it minimal: title, description, rows, items, defaults. Heavy structure (component tree) lives in the automation, not in arguments.
 3. **Decide interactivity**:
-   - `wait_for_action: true` + `send_data_model: true` → agent pauses, gets `{action, data_model}` back when user clicks.
+   - `wait_for_action: true` + `send_data_model: true` → agent pauses, gets the action + filled data_model back when user clicks.
    - `wait_for_action: false` → read-only display; agent continues immediately.
+   - `Loader` surfaces: `wait_for_action: true` + `send_data_model: false` — the action fires automatically on timeout/poll completion, no user click.
 4. **Plan the data_model shape** — what the UI binds to via `{ path: /xxx }`.
 
 For custom surfaces, sketch the component tree before coding. The mental tool is: *list of components, each with an id, referenced by parent's `children: []`*. No imbricated tree.
@@ -148,42 +160,61 @@ output:
 |---|---|---|---|
 | `surface_id` | string | yes | stable per tool; suffix when multiple instances |
 | `catalog_id` | string | yes | always `prisme://blocks/v1` for now |
-| `wait_for_action` | bool | yes | pauses the agent when true |
+| `wait_for_action` | bool | yes | pauses the agent when true (`surface_action` pending approval) |
 | `send_data_model` | bool | no | when true + wait_for_action, returns filled data_model |
-| `text` | string | yes | mirrors `content[0].text` |
+| `text` | string | yes | **this is the tool result the LLM sees** (agent-factory replaces `content[0].text` with it when `__surface` is present) — mirror `content[0].text` |
 | `components` | array | yes | flat list of `{id, component, ...props, children?}` |
 | `data_model` | object | yes-ish | required when any prop uses `{path}` bindings |
 
 ### Component catalog `prisme://blocks/v1`
 
-**Layout**: `Column`, `Row`, `Card`, `Tabs`, `Modal`, `Divider`
-- `Column` / `Row`: `gap`, `justify` (start/center/end/between), `align` (start/center/end), `children`
-- `Card`: `title?`, `className?` (Tailwind-ish: `p-4`, `flex-1`…), `children`
-- `Tabs`: `tabs: [{id, label, children}]`
-- `Modal`: `title?`, `children`
-- `Divider`: no props
+(Authoritative source: `services/platform/src/lib/a2ui/catalog.ts` in the prisme.ai repo — check it when in doubt, the catalog evolves.)
 
-**Display**: `Text`, `Badge`, `Alert`, `Progress`, `Avatar`, `Image`, `List`
-- `Text`: `content` (string or `{path}`), `variant` (heading/body/caption/code), `weight?` (semibold…)
-- `Badge`: `label` (string or `{path}`), `variant` (default/secondary/outline/destructive/warning)
-- `Alert`: `title`, `description` (string or `{path}`), `variant` (default/destructive/warning)
-- `Progress`: `value` (number or `{path}`), `max`
+**Layout**: `Column`, `Row`, `Card`, `Divider`
+- `Column` / `Row`: `gap` (Tailwind scale, default `2`), `justify` (start/center/end/between/around), `align` (start/center/end/stretch), `children`
+- `Card`: `title?`, `variant?` (default/outline/ghost/elevated), `className?` (Tailwind-ish: `p-4`, `flex-1`…), `children`
+- `Divider`: `orientation?` (horizontal/vertical)
+- ⚠️ `Tabs` and `Modal` exist in the catalog but render as a plain `div` (children pass through, no tab/modal behavior) — **avoid them**, use `Card` + `Column` instead.
+
+**Display**: `Text`, `Badge`, `Alert`, `Progress`, `Avatar`, `Image`, `List`, `Loader`
+- `Text`: `content` or `text` (string or `{path}`), `variant` (heading/body/caption/code), `weight?` (normal/medium/semibold/bold)
+- `Badge`: `label` or `text` (string or `{path}`), `variant` (default/secondary/outline/destructive/warning)
+- `Alert`: `title?`, `message` or `content` (string or `{path}` — **NOT `description`**, it is ignored), `variant` (default/destructive/success/warning/info/error)
+- `Progress`: `value` (number or `{path}`), `max` (default 100)
 - `Avatar`: `src?`, `alt`, `fallback?`
 - `Image`: `src`, `alt`, `width?`, `height?`
-- `List`: `variant` (bullet/number/plain), `items: string[]`
+- `List`: `variant` (bullet/number/plain), `items: [{id, label}]` — **objects, NOT plain strings** (strings render as empty bullets)
+- `Loader`: see [Loader](#loader-auto-completing-waits) below
 
-**Inputs**: `TextField`, `TextArea`, `Select`, `CheckBox`, `Switch`, `Slider`
-- `TextField`: `placeholder`, `type?` (text/email/password), `text: {path}` (binding)
-- `TextArea`: `placeholder`, `rows`, `text: {path}`
-- `Select`: `placeholder`, `options: [{value, label}]`, `value: {path}`
-- `CheckBox` / `Switch`: `label`, `value: {path}`
+**Inputs**: `TextField`, `TextArea`, `Select`, `CheckBox`, `Switch`, `Slider` — all accept an optional `label` rendered above/beside the input
+- `TextField`: `label?`, `placeholder`, `type?` (text/email/password), binding via `value: {path}` or `text: {path}`
+- `TextArea`: `label?`, `placeholder`, `rows`, binding via `value: {path}` or `text: {path}`
+- `Select`: `label?`, `placeholder`, `options` (`[{value, label}]` or plain `string[]`), `value: {path}`
+- `CheckBox` / `Switch`: `label`, binding via `value: {path}` or `checked: {path}`
 - `Slider`: `min`, `max`, `step`, `value: {path}` (or literal for read-only demo)
+- Inputs are auto-disabled when the surface is no longer interactive (action already consumed).
 
 **Actions**: `Button`
-- `label`, `variant` (primary/outline/ghost/destructive), `disabled?`, `action: {name, context?}`
+- `label`, `variant` (primary/outline/ghost/destructive — default is `outline`), `size?`, `disabled?`, `action`
+- `action` is a top-level component field accepted as a **string** (`action: submit`) or `{name}` object. ⚠️ `context` is no longer returned to the agent — encode any context in the `action` name or in `data_model`.
 
 **Data**: `DataTable`
-- `columns: [{key, header}]`, `data: {path}` (binding to array)
+- `columns: [{key, header}]`, `data: {path}` (binding to array), `title?`
+- Renders **nothing** when `data` or `columns` is empty — pair with a `Text` fallback if emptiness is possible.
+
+**URL safety**: `Image.src`, `Avatar.src` are sanitized — only `http(s)` and relative URLs render; `data:`, `javascript:` and protocol-relative `//host` URLs are silently dropped.
+
+### Loader (auto-completing waits)
+
+`Loader` is an interactive component that fires its `action` **automatically** — no user click:
+- **Timeout mode**: `timeout` (seconds) → dispatches `action` when elapsed.
+- **Poll mode** (wins if both set): `poll` (URL) + `interval?` (seconds, min 1, default 30) → GETs the URL until the JSON body returns `{done: true}`. Body fields `progress` (0-100) and `message` live-update the display. After **3 consecutive failures** it dispatches `<action>_error` instead.
+- `style`: `spinner` (default) or `progress` (shows a progress bar once a `progress` value arrives), `message?` initial label.
+- ⚠️ `poll` MUST be a **same-origin relative path** (`^/(?!/)` — single leading `/`). Absolute URLs and `//host` are rejected by the renderer. To poll a workspace webhook, the path must be reachable on the host UI's origin.
+- The final poll response is merged into the returned `data_model` under `__loader_<componentId>` (errors under `__loader_<componentId>_error`).
+- Use `wait_for_action: true` on the surface so the agent pauses until the loader completes.
+
+Convention (reference workspace): one `show_loader` automation exposed as **two MCP tools** — `show_loader_with_timeout` and `show_loader_with_polling` — so the LLM picks the mode from the tool name instead of juggling mutually-exclusive args.
 
 ### Bindings
 
@@ -191,6 +222,7 @@ Whenever a prop reads from the data model:
 ```yaml
 value: { path: /form/email }    # → reads/writes data_model.form.email
 content: { path: /project/name }
+content: { path: /project/name, default: "Untitled" }   # optional fallback
 ```
 
 Initial values live in `data_model`:
@@ -204,11 +236,29 @@ JSON pointer rules: `/foo/bar` for nested, `/list/0/key` for array index (rarely
 
 ### Action result contract
 
-When the user triggers a Button with `action.name: submit`:
-- If `send_data_model: true` → agent receives `{ action: "submit", data_model: { …filled… }, context?: {…} }`
-- If `send_data_model: false` → agent receives `{ action: "submit", context?: {…} }`
+When the user triggers a component whose `action` is set (or a `Loader` completes), the client emits:
 
-The agent decides next steps from this payload. Design tool descriptions accordingly ("Pauses until user submits — returns the filled form").
+```json
+{
+  "name": "submit",
+  "surfaceId": "interactive-form",
+  "sourceComponentId": "submit-btn",
+  "timestamp": "…",
+  "dataModel": { "…filled values…" }     // {} when send_data_model: false
+}
+```
+
+Agent-factory then resumes the LLM with a **user message**:
+
+```
+[Form submitted: <surfaceId>]
+Action: <name>
+Data: <JSON dataModel>        ← only when send_data_model: true
+```
+
+⚠️ There is no `context` field anymore — `Button.action.context` is dropped by the renderer. Disambiguate via distinct action names (`approve` / `reject`) or values seeded in `data_model`.
+
+The agent decides next steps from this message. Design tool descriptions accordingly ("Pauses until user submits — returns the filled form").
 
 ---
 
@@ -303,6 +353,7 @@ In `index.yml`, under `config.value.mcpTools`, append an entry per surface:
 - For interactive surfaces, mention pause: "The conversation pauses until user submits."
 - For arrays, give shape hint: `'Custom field definitions. Each: { id, component, placeholder, type? }. Components: TextField, TextArea, Select, CheckBox.'`
 - Per memory [[feedback-mcp-tool-array-items]], any `type: array` MUST have `items: { type: object | string }` — OpenAI rejects otherwise.
+- **One automation may back several tools**: when args are mutually exclusive modes (e.g. `timeout` vs `poll`), declare one tool per mode (`show_loader_with_timeout`, `show_loader_with_polling`) routed to the same automation in `mcp.yml` — the LLM picks by name, no conditional-args confusion.
 
 ---
 
@@ -359,8 +410,15 @@ Spawn a sub-task with `Agent` (subagent_type: code-review or general-purpose) to
 - **Naming a var `output`** inside a `do:` step — collides with the call-site capture variable; rename to `_output` or similar. Memory: [[feedback-dsul-output-variable]].
 - **`type: array` without `items:`** in inputSchema → silent break at LLM call time.
 - **Editing `imports/MCP Core.yml > config.mcpTools` only** — the canonical source for THIS pattern is `index.yml > config.value.mcpTools` (the endpoint reads `{{config.mcpTools}}`). Memory: [[feedback-mcp-core-config-is-source]].
-- **Using `{path}` without initial value in `data_model`** → the host may render empty/`null`. Always seed bound props in `data_model`, even with `""` or `false`.
-- **Forgetting the `text` field inside `__surface`** — host UIs that fall back to text-only mode (no catalog) display this. Mirror `content[0].text`.
+- **Using `{path}` without initial value in `data_model`** → the host may render empty/`null`. Always seed bound props in `data_model`, even with `""` or `false` (or use `{path, default}`).
+- **Forgetting the `text` field inside `__surface`** — it is the tool result the LLM reads (agent-factory swaps it in) AND the text-only fallback. Mirror `content[0].text`.
+- **`List.items` as plain strings** → empty bullets. Items must be `[{id, label}]` objects.
+- **`Alert.description`** is ignored by the renderer — use `message` (or `content`).
+- **Relying on `Button.action.context`** — not returned anymore; use distinct action names or `data_model`.
+- **`Tabs` / `Modal`** render as a bare `div` (no behavior) — don't use them.
+- **`Loader.poll` with an absolute URL** → rejected client-side; only same-origin relative paths (`/...`) are allowed.
+- **`data:` URIs in `Image.src`/`Avatar.src`** → silently dropped by URL sanitization; only http(s)/relative.
+- **Unknown component types** are skipped with a console warning (typos render nothing — check casing: `TextField`, `CheckBox`, `DataTable`).
 
 ---
 

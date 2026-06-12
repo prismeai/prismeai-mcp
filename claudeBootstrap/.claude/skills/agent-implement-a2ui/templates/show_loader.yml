@@ -1,0 +1,92 @@
+slug: show_loader
+name: show_loader
+description: >-
+  Display a Loader component on an A2UI surface. Auto-completes after `timeout`
+  seconds OR polls a same-origin URL until done. Dispatches `action` on
+  completion, `<action>_error` after 3 consecutive poll failures.
+private: true
+arguments:
+  arguments:
+    type: object
+    description: Tool arguments from MCP call
+do:
+  - set:
+      name: _args
+      value: '{{arguments}}'
+  - set:
+      name: _surfaceId
+      value: '{{_args.surfaceId}}'
+  - set:
+      name: _componentId
+      value: '{{_args.componentId}}'
+  - set:
+      name: _action
+      value: '{{_args.action}}'
+  - set:
+      name: _timeout
+      value: '{{_args.timeout}}'
+  - set:
+      name: _poll
+      value: '{{_args.poll}}'
+  - set:
+      name: _interval
+      value: '{{_args.interval}}'
+  - set:
+      name: _style
+      value: '{{_args.style}}'
+  - set:
+      name: _message
+      value: '{{_args.message}}'
+  - conditions:
+      '!{{_style}}':
+        - set:
+            name: _style
+            value: spinner
+  - conditions:
+      '!{{_interval}}':
+        - set:
+            name: _interval
+            value: 30
+  - set:
+      name: _loader
+      value:
+        id: '{{_componentId}}'
+        component: Loader
+        action: '{{_action}}'
+        style: '{{_style}}'
+  - conditions:
+      '{{_message}}':
+        - set:
+            name: _loader.message
+            value: '{{_message}}'
+  - conditions:
+      '{{_poll}}':
+        - set:
+            name: _loader.poll
+            value: '{{_poll}}'
+        - set:
+            name: _loader.interval
+            value: '{{_interval}}'
+        - set:
+            name: _modeText
+            value: 'polling {{_poll}} every {{_interval}}s'
+      '{{_timeout}}':
+        - set:
+            name: _loader.timeout
+            value: '{{_timeout}}'
+        - set:
+            name: _modeText
+            value: 'auto-completing in {{_timeout}}s'
+output:
+  content:
+    - type: text
+      text: 'Loader "{{_componentId}}" displayed on surface "{{_surfaceId}}" ({{_modeText}}). Awaiting action "{{_action}}".'
+  isError: false
+  __surface:
+    surface_id: '{{_surfaceId}}'
+    catalog_id: prisme://blocks/v1
+    send_data_model: false
+    wait_for_action: true
+    text: 'Loader "{{_componentId}}" displayed on surface "{{_surfaceId}}" ({{_modeText}}). Awaiting action "{{_action}}".'
+    components:
+      - '{{_loader}}'
