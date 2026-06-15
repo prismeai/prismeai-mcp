@@ -1,8 +1,10 @@
 # Dependencies
 node_modules/
 
-# Build output
-build/
+# Build output (plugin/build/index.js is the committed plugin bundle — see scripts/bundle.mjs)
+/build/
+plugin/build/*
+!plugin/build/index.js
 dist/
 
 # Environment variables

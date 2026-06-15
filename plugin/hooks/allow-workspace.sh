@@ -1,4 +1,8 @@
-# #!/bin/bash
+#!/bin/bash
+# Workspace allowlist template for execute_automation / push_workspace.
+# Disabled by default (everything below is commented out, so the hook exits 0
+# and the normal permission flow applies). To enforce an allowlist, uncomment
+# the body and set ALLOWED_WORKSPACE_IDS.
 
 # ALLOWED_WORKSPACE_IDS=("wMezY17" "UjnlJlU")
 

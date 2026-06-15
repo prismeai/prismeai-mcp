@@ -6,6 +6,12 @@ import axios from "axios";
 import yaml from "js-yaml";
 import { PrismeApiClient, AIKnowledgeQueryParams, AIKnowledgeCompletionParams, AIKnowledgeDocumentParams, AIKnowledgeProjectParams, AIKnowledgeAuth, AppInstance } from "../api-client.js";
 import { resolveWorkspaceAndEnvironment, environmentsConfig, PRISME_API_BASE_URL } from "../config.js";
+import {
+  persistToken,
+  persistTopology,
+  deriveTokenUrl,
+  type StoredTopology,
+} from "../auth/persist.js";
 import { enforceReadonlyMode, truncateJsonOutput } from "../utils.js";
 import { lintAutomation, type AutomationLintResult } from "../../linter/dist/index.js";
 
@@ -842,8 +848,14 @@ export async function handleToolCall(
           };
         }
 
-        // Go up two levels from tools/ to get to the project root, then into llmDoc
-        const docPath = join(__dirname, "..", "..", "llmDoc", fileName);
+        // llmDoc ships inside plugin/. From the bundled layout
+        // (plugin/build/index.js) it is one level up; from the tsc layout
+        // (build/tools/) it is at <repo>/plugin/llmDoc.
+        const docCandidates = [
+          join(__dirname, "..", "llmDoc", fileName),
+          join(__dirname, "..", "..", "plugin", "llmDoc", fileName),
+        ];
+        const docPath = docCandidates.find((p) => existsSync(p)) ?? docCandidates[0];
         const documentation = readFileSync(docPath, "utf-8");
         return {
           content: [
@@ -2102,66 +2114,69 @@ export async function handleToolCall(
       };
     }
 
-    case "refresh_auth_token": {
-      const { environment, timeoutSeconds } = args as {
+    case "set_token": {
+      const { environment, token, apiUrl, studioUrl } = args as {
         environment: string;
-        timeoutSeconds?: number;
+        token: string;
+        apiUrl?: string;
+        studioUrl?: string;
       };
 
       if (!environment) {
         throw new Error("`environment` is required");
       }
-      const envCfg = environmentsConfig[environment];
-      if (!envCfg) {
+      if (!token) {
+        throw new Error("`token` is required");
+      }
+
+      const existing = environmentsConfig[environment];
+      if (!existing && !apiUrl) {
         const available = Object.keys(environmentsConfig).join(", ") || "(none)";
         throw new Error(
-          `Unknown environment "${environment}". Available: ${available}`
-        );
-      }
-      if (!envCfg.studioUrl) {
-        throw new Error(
-          `Environment "${environment}" has no \`studioUrl\` configured. ` +
-            `Add it to PRISME_ENVIRONMENTS, e.g.: ` +
-            `{"${environment}":{"apiUrl":"...","apiKey":"...","studioUrl":"https://studio.prisme.ai"}}`
+          `Unknown environment "${environment}" (available: ${available}). ` +
+            `Pass \`apiUrl\` (e.g. https://api.sandbox.prisme.ai/v2) to register it as a new environment.`
         );
       }
 
-      const { captureAccessToken } = await import("../auth/browser.js");
-      const { persistApiKey } = await import("../auth/persist.js");
+      const envCfg = {
+        ...(existing ?? {}),
+        apiUrl: apiUrl ?? existing!.apiUrl,
+        ...(studioUrl ? { studioUrl } : {}),
+      };
 
-      const timeoutMs = Math.min(
-        Math.max((timeoutSeconds ?? 300) * 1000, 30_000),
-        900_000
-      );
-      const { token, expiresAt } = await captureAccessToken({
-        studioUrl: envCfg.studioUrl,
-        env: environment,
-        timeoutMs,
-      });
-
-      apiClient.updateEnvironmentApiKey(environment, token);
-      environmentsConfig[environment].apiKey = token;
-
-      let persistedTo: string;
+      // Probe-validate the token before persisting anything: an invalid token
+      // must fail here and persist nothing.
+      let me: any;
       try {
-        const persistResult = await persistApiKey(
-          environment,
-          token,
-          process.cwd()
+        me = await apiClient.probeToken(envCfg.apiUrl, token);
+      } catch (err: any) {
+        const status = err?.response?.status;
+        const tokenUrl = deriveTokenUrl(envCfg);
+        throw new Error(
+          `Token validation failed against ${envCfg.apiUrl}` +
+            (status ? ` (HTTP ${status})` : "") +
+            `. Nothing was persisted. Create a valid token at ${tokenUrl ?? "<studio>/settings/tokens"} and try again.`
         );
-        persistedTo =
-          persistResult.scope === "user"
-            ? `${persistResult.path} (user scope)`
-            : `${persistResult.path} (project ${persistResult.projectKey})`;
-      } catch (err) {
-        persistedTo = `NOT PERSISTED — ${err instanceof Error ? err.message : String(err)}`;
       }
+
+      // Update in-memory state
+      environmentsConfig[environment] = { ...envCfg, apiKey: token };
+      apiClient.upsertEnvironment(environment, { ...envCfg, apiKey: token });
+
+      // Persist: token to credentials.json (600), topology (no tokens) to config.json
+      const credentialsPath = await persistToken(environment, token);
+      const topology: StoredTopology = { environments: {} };
+      for (const [envName, env] of Object.entries(environmentsConfig)) {
+        const { apiKey: _omit, ...rest } = env;
+        topology.environments[envName] = rest;
+      }
+      await persistTopology(topology);
 
       const summary = {
         environment,
-        expiresAt: expiresAt?.toISOString(),
-        persistedTo,
-        inMemoryRefreshed: true,
+        apiUrl: envCfg.apiUrl,
+        validatedAs: me?.email ?? me?.id ?? "(authenticated)",
+        persistedTo: credentialsPath,
       };
       return {
         content: [

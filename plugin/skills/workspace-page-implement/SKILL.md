@@ -2,7 +2,7 @@
 name: workspace-page-implement
 description: Edit a React app embedded in a Prisme.ai workspace (starter-spa pattern). Bootstraps from github.com/prismeai/starter-spa if the workspace has no app yet, then modifies src/ (React) and/or automations/ (DSUL), builds the CJS bundle if needed, and pushes to the workspace via the prisme-ai-builder MCP (automations) + direct fetch (bundle/files/config). Use when the user says "edit the X app", "modifier l'app de <workspace>", "/workspace-page-implement <workspace> <change>", or when src/App.tsx + scripts/deploy.mjs are detected in a workspace folder.
 argument-hint: "[workspace-folder] <description of the change>"
-allowed-tools: Read, Grep, Glob, Edit, Write, Bash, AskUserQuestion, Task, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__lint_doc, mcp__prisme-ai-builder__create_automation, mcp__prisme-ai-builder__update_automation, mcp__prisme-ai-builder__delete_automation, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__pull_workspace, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__search_workspaces
+allowed-tools: Read, Grep, Glob, Edit, Write, Bash, AskUserQuestion, Task, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__create_automation, mcp__prisme-ai-builder__update_automation, mcp__prisme-ai-builder__delete_automation, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__pull_workspace, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__search_workspaces
 ---
 
 # Skill `/workspace-page-implement` — Prisme.ai workspace-embedded React app editor
@@ -383,7 +383,7 @@ These come straight from `pptx-generator/AGENTS.md`. They MUST be respected.
 |---|---|---|
 | Type check | If `src/` was touched | `cd <appDir> && npm run typecheck` |
 | Automation validation | Each YAML touched in `automations/` | `mcp__prisme-ai-builder__validate_automation` |
-| Lint reference | When unsure on DSUL syntax | `mcp__prisme-ai-builder__lint_doc` |
+| Lint reference | When unsure on DSUL syntax | `mcp__prisme-ai-builder__validate_automation` |
 | Build | If `src/` was touched | `cd <appDir> && npm run build` (skip if only YAML changed) |
 | Code review (optional) | On the full diff before push | `Task(subagent_type: "code-review", ...)` |
 

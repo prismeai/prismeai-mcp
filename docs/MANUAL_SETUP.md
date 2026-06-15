@@ -13,27 +13,26 @@ For the automated setup with Claude Code CLI, see [README.md](../README.md).
    npm install
    ```
 
-2. Build the project:
+2. Build the project (or use the committed `plugin/build/index.js` bundle directly — no build needed):
    ```bash
    npm run build
    ```
 
-## Getting Your JWT Token
+## Getting Your API Token
 
-1. Open your Prisme.ai instance in a browser
-2. Open DevTools (F12 or right-click > Inspect)
-3. Go to **Application** > **Cookies**
-4. Find the `access-token` cookie
-5. Copy the value (starts with `ey...`)
+Create a token in the studio of your environment: `https://<studio-domain>/settings/tokens` (e.g. <https://sandbox.prisme.ai/settings/tokens>).
+
+You can either register it at runtime with the `set_token` MCP tool (recommended — it is validated and persisted in `PRISME_CONFIG_DIR`), or pass it statically via the environment variables below.
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `PRISME_API_KEY` | Yes | JWT token for authentication (from browser cookies) |
-| `PRISME_API_BASE_URL` | Yes | API base URL (e.g., `https://api.sandbox.prisme.ai/v2`) |
+| `PRISME_CONFIG_DIR` | No | Directory for `config.json` (environments) and `credentials.json` (tokens). Defaults to `~/.prisme-ai-mcp` |
+| `PRISME_API_KEY` | No | Static API token for single-environment setups (prefer `set_token`) |
+| `PRISME_API_BASE_URL` | No | API base URL (e.g., `https://api.sandbox.prisme.ai/v2`) |
 | `PRISME_WORKSPACE_ID` | No | Default workspace ID (can be empty) |
-| `PRISME_ENVIRONMENTS` | No | JSON object for multi-environment configuration |
+| `PRISME_ENVIRONMENTS` | No | Legacy JSON object for multi-environment configuration — imported into `PRISME_CONFIG_DIR` on first start |
 | `PRISME_DEFAULT_ENVIRONMENT` | No | Default environment name |
 | `PRISME_WORKSPACES` | No | Legacy workspace name mappings (JSON) |
 | `PRISME_FORCE_READONLY` | No | Block all write operations when `true` |
@@ -52,7 +51,7 @@ Config file location:
   "mcpServers": {
     "prisme-ai-builder": {
       "command": "node",
-      "args": ["/absolute/path/to/mcp-prisme.ai/build/index.js"],
+      "args": ["/absolute/path/to/mcp-prisme.ai/plugin/build/index.js"],
       "env": {
         "PRISME_API_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
         "PRISME_API_BASE_URL": "https://api.sandbox.prisme.ai/v2",
@@ -70,7 +69,7 @@ Config file location:
   "mcpServers": {
     "prisme-ai-builder": {
       "command": "node",
-      "args": ["/absolute/path/to/mcp-prisme.ai/build/index.js"],
+      "args": ["/absolute/path/to/mcp-prisme.ai/plugin/build/index.js"],
       "env": {
         "PRISME_API_KEY": "your_jwt_token_here",
         "PRISME_API_BASE_URL": "https://api.sandbox.prisme.ai/v2",
@@ -92,7 +91,7 @@ For single API URL setups:
   "mcpServers": {
     "prisme-ai-builder": {
       "command": "node",
-      "args": ["/absolute/path/to/mcp-prisme.ai/build/index.js"],
+      "args": ["/absolute/path/to/mcp-prisme.ai/plugin/build/index.js"],
       "env": {
         "PRISME_API_KEY": "your_bearer_token_here",
         "PRISME_WORKSPACE_ID": "your_default_workspace_id",
@@ -251,7 +250,7 @@ When enabled, these tools are hidden and blocked:
   "mcpServers": {
     "prisme-ai-builder": {
       "command": "node",
-      "args": ["/absolute/path/to/mcp-prisme.ai/build/index.js"],
+      "args": ["/absolute/path/to/mcp-prisme.ai/plugin/build/index.js"],
       "env": {
         "PRISME_API_KEY": "your_bearer_token_here",
         "PRISME_WORKSPACE_ID": "your_workspace_id_here",
