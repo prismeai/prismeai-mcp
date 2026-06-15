@@ -364,21 +364,22 @@ function ConfigApp(props: Props) {
     }
   }
 
-  function toggleAgent(id: string) {
-    setAuthorized((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-  async function saveAuthorized() {
+  // Tick/untick an agent and persist the allowlist immediately — same live-save
+  // UX as the "allow all" toggle (no separate save button). Optimistic update
+  // with rollback if the PATCH fails.
+  async function toggleAgent(id: string) {
+    const prev = authorized
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setAuthorized(next)
     setBusy(true)
     setMsg(null)
     try {
-      await patchSecret(ALLOWLIST_SECRET, Array.from(authorized).join(','))
-      setMsg({ where: 'agents', kind: 'ok', text: t('msg.allowlistSaved', { n: authorized.size }) })
+      await patchSecret(ALLOWLIST_SECRET, Array.from(next).join(','))
+      setMsg({ where: 'agents', kind: 'ok', text: t('msg.allowlistSaved', { n: next.size }) })
     } catch (e: any) {
+      setAuthorized(prev)
       setMsg({ where: 'agents', kind: 'err', text: e?.message || String(e) })
     } finally {
       setBusy(false)
@@ -673,6 +674,7 @@ function ConfigApp(props: Props) {
                                     type="checkbox"
                                     className="shrink-0 accent-primary"
                                     checked={authorized.has(a.id)}
+                                    disabled={busy}
                                     onChange={() => toggleAgent(a.id)}
                                   />
                                   <Tooltip>
@@ -699,11 +701,6 @@ function ConfigApp(props: Props) {
                         </div>
                       </>
                     ))}
-                  {!allowAll && (
-                    <Button variant="outline" disabled={busy} onClick={saveAuthorized}>
-                      {t('btn.saveAllowlist')}
-                    </Button>
-                  )}
                   {banner('agents')}
                 </section>
               </>

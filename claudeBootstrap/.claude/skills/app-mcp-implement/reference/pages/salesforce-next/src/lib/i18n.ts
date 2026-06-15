@@ -50,7 +50,6 @@ const dict: Record<Lang, Record<string, string>> = {
     'btn.installing': 'Installing…',
     'btn.reinstall': 'Reinstall',
     'btn.install': 'Install capability',
-    'btn.saveAllowlist': 'Save allowlist',
     'btn.closeNow': 'Close now',
 
     'msg.authSaved': 'Authentication saved.',
@@ -131,7 +130,6 @@ const dict: Record<Lang, Record<string, string>> = {
     'btn.installing': 'Installation…',
     'btn.reinstall': 'Réinstaller',
     'btn.install': 'Installer la capacité',
-    'btn.saveAllowlist': "Enregistrer l'allowlist",
     'btn.closeNow': 'Fermer',
 
     'msg.authSaved': 'Authentification enregistrée.',
