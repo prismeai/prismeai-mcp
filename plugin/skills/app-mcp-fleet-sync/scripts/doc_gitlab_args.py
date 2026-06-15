@@ -114,11 +114,15 @@ ARG_DESC = {
   "with_counts": "If true, include issue counts per label (boolean).",
 }
 
-HELPERS = {"method-restOp","method-graphqlOp","tool-restOp","tool-graphqlOp","mcp","onInstall",
+HELPERS = {"methodRestOp","methodGraphqlOp","toolRestOp","toolGraphqlOp","mcp","onInstall",
   "generateKey","getConfig","buildAppAuth","executeApiCall","handleApiError","formatToolOutput",
   "routeToolCall","ensureAuthentication","connect","disconnect","initiateOAuth","oauthCallback",
-  "checkAuthStatus","refreshOAuthToken","disconnectOAuth","method-connect","method-disconnect",
-  "tool-connect","tool-disconnect"}
+  "checkAuthStatus","refreshOAuthToken","disconnectOAuth","methodConnect","methodDisconnect",
+  "toolConnect","toolDisconnect",
+  # Legacy internal names kept here only so this helper does not document
+  # dispatcher args before the fleet is migrated to camelCase automation slugs.
+  "method-restOp","method-graphqlOp","tool-restOp","tool-graphqlOp",
+  "method-connect","method-disconnect","tool-connect","tool-disconnect"}
 
 def id_desc(op):
     o = op.lower()
