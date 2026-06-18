@@ -19,6 +19,15 @@ export interface PrismeConfig {
     baseUrl: string;
     environments?: EnvironmentsConfig;
     defaultEnvironment?: string;
+    // Absolute path to the running server script (process.argv[1]); used to
+    // print a copy-pasteable `set-token` CLI command in auth-failure errors.
+    serverScriptPath?: string;
+    // Config dir where credentials.json lives; surfaced in the CLI hint.
+    configDir?: string;
+    // Lazily re-read a token from credentials.json (set by the out-of-band CLI
+    // `set-token` command) so a freshly-registered token is picked up without
+    // restarting the session. Returns the token if found.
+    reloadTokens?: (environment: string) => string | undefined;
 }
 
 export interface Automation {
@@ -243,6 +252,9 @@ export class PrismeApiClient {
     private apiKey: string;
     private environments: EnvironmentsConfig;
     private defaultEnvironment?: string;
+    private serverScriptPath?: string;
+    private configDir?: string;
+    private reloadTokens?: (environment: string) => string | undefined;
 
     constructor(config: PrismeConfig) {
         this.workspaceId = config.workspaceId;
@@ -250,6 +262,9 @@ export class PrismeApiClient {
         this.apiKey = config.apiKey;
         this.environments = config.environments || {};
         this.defaultEnvironment = config.defaultEnvironment;
+        this.serverScriptPath = config.serverScriptPath;
+        this.configDir = config.configDir;
+        this.reloadTokens = config.reloadTokens;
         this.client = axios.create({
             baseURL: config.baseUrl,
             headers: {
@@ -259,27 +274,61 @@ export class PrismeApiClient {
         });
     }
 
+    /**
+     * Build the actionable "no credentials" error. It recommends the out-of-band
+     * CLI command (which keeps the token out of the chat / off the wire to the
+     * LLM provider) and mentions the `set_token` tool as a fallback with the
+     * network-exposure caveat.
+     */
     private missingTokenError(environment?: string): Error {
         const envName = environment || this.defaultEnvironment;
         const envConfig = envName ? this.environments[envName] : undefined;
         const tokenUrl = tokenCreationUrl(envConfig ?? { apiUrl: this.baseUrl });
+        const createLine = tokenUrl
+            ? `Create a token at ${tokenUrl}`
+            : `Create a token in the Prisme.ai studio (Settings > Access Tokens)`;
+
+        const envArg = envName ?? '<environment>';
+        const scriptPath = this.serverScriptPath ?? '<plugin>/build/index.js';
+        const dirFlag = this.configDir ? ` --config-dir "${this.configDir}"` : '';
+        const cliCommand = `node "${scriptPath}" set-token ${envArg}${dirFlag}`;
+
         return new Error(
-            `No credentials for environment \`${envName ?? 'default'}\`. ` +
-                (tokenUrl
-                    ? `Create a token at ${tokenUrl}, then register it with the \`set_token\` tool.`
-                    : `Create a token in the Prisme.ai studio (Settings > Access Tokens), then register it with the \`set_token\` tool.`)
+            `No credentials for environment \`${envName ?? 'default'}\`.\n\n` +
+                `Recommended (keeps your token private — it never enters this chat or reaches the LLM provider):\n` +
+                `1. ${createLine}\n` +
+                `2. Run this in your OWN terminal (it prompts for the token with hidden input, validates it, then saves it):\n\n` +
+                `   ${cliCommand}\n\n` +
+                `3. Re-run your request.\n\n` +
+                `Alternative: paste the token to me and I will call the \`set_token\` tool — but be aware the token would then be sent over the network to the LLM provider as part of this conversation.`
         );
     }
 
     // Get API key for a specific environment; throws an actionable error when
-    // no token is stored for it (the user must create one and call set_token).
+    // no token is stored for it. Before failing, attempt a lazy reload from
+    // credentials.json so a token just registered via the CLI is picked up
+    // without restarting the session.
     private getApiKeyForEnvironment(environment?: string): string {
         if (environment && this.environments[environment]) {
-            const key = this.environments[environment].apiKey;
+            let key = this.environments[environment].apiKey;
+            if (!key) {
+                const reloaded = this.reloadTokens?.(environment);
+                if (reloaded) {
+                    this.environments[environment].apiKey = reloaded;
+                    key = reloaded;
+                }
+            }
             if (key) return key;
             throw this.missingTokenError(environment);
         }
         if (this.apiKey) return this.apiKey;
+        if (this.defaultEnvironment) {
+            const reloaded = this.reloadTokens?.(this.defaultEnvironment);
+            if (reloaded) {
+                this.apiKey = reloaded;
+                return reloaded;
+            }
+        }
         throw this.missingTokenError(environment);
     }
 

@@ -38,9 +38,17 @@ No clone, no `npm install`, no build: the plugin ships a prebuilt, self-containe
 
 ## Authenticate
 
+The recommended path keeps your token out of the chat (it is never sent to the LLM provider):
+
 1. Create an API token in the studio of your environment: `https://<studio-domain>/settings/tokens` (e.g. <https://sandbox.prisme.ai/settings/tokens>).
-2. Register it with the `set_token` tool (just ask: *"register this token for sandbox: …"*). The token is validated against the API, then persisted to the plugin data dir.
-3. Repeat per environment; re-run `set_token` to rotate an expired token.
+2. Run `set-token` in your own terminal — the exact command (with path + config dir) is printed in the "no credentials" error when you first call a tool:
+   ```bash
+   node "<plugin>/build/index.js" set-token sandbox --config-dir "<config-dir>"
+   ```
+   It prompts for the token with hidden input, validates it, and saves it.
+3. Re-run your request — the token is picked up automatically (no restart). Repeat per environment; re-run to rotate.
+
+You can instead ask the agent to register a pasted token via the `set_token` tool, but that sends the token to the LLM provider — prefer the CLI above.
 
 ## After Install
 

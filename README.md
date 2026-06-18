@@ -42,22 +42,21 @@ The plugin source is `./plugin` inside this repository. Both marketplaces point 
 
 ## Authenticate
 
-Authentication uses user-created Prisme.ai API tokens.
+Credentials are user-created API tokens, registered per environment. The recommended path keeps the token **out of the chat** (it is never sent to the LLM provider):
 
-1. Create a token in the target studio: `https://<studio-domain>/settings/tokens`
-   Example: <https://sandbox.prisme.ai/settings/tokens>
-2. Ask the agent to register the token for the environment, or call the MCP tool directly:
+1. Create a token in the studio of the target environment: `https://<studio-domain>/settings/tokens` (e.g. <https://sandbox.prisme.ai/settings/tokens>).
+2. Run the `set-token` command in your own terminal — the exact path + config dir are printed in the "no credentials" error:
 
-```json
-{
-  "environment": "sandbox",
-  "token": "<your token>"
-}
-```
+   ```bash
+   node "<plugin>/build/index.js" set-token sandbox --config-dir "<config-dir>"
+   ```
 
-`set_token` validates the token with the API before persisting it. Valid tokens are stored in the plugin data directory as `credentials.json` with file mode `600`; invalid tokens persist nothing.
+   It prompts for the token with hidden input, probe-validates it against the API, then saves it to the plugin data dir (`credentials.json`, mode 600). An invalid token saves nothing.
+3. Re-run your request — the server picks up the new token automatically (no restart). Run `set-token` again anytime to rotate.
 
-Run `set_token` again any time you need to rotate a token.
+When a tool call has no token (or hits a 401), the error message contains the exact command to run. You can instead let the agent register a pasted token via the `set_token` tool, but that token is sent to the LLM provider as part of the conversation — prefer the CLI.
+
+Users migrating from the old `setup.sh` install are imported automatically on first start (from `PRISME_ENVIRONMENTS` or `~/.claude.json`).
 
 ## First Use
 

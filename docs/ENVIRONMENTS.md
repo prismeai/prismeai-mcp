@@ -104,31 +104,36 @@ Tokens are **not** stored in `config.json` — they live in `credentials.json`, 
 
 ## Authentication: API tokens
 
-Authentication uses **user-created API tokens** (no browser automation):
+Authentication uses **user-created API tokens** (no browser automation).
+
+### Recommended: the `set-token` CLI (keeps the token private)
+
+This path never exposes the token to the chat / LLM provider:
 
 1. Create a token in the studio of the target environment: `https://<studio-domain>/settings/tokens` (e.g. <https://sandbox.prisme.ai/settings/tokens>).
-2. Register it with the `set_token` tool:
+2. Run the server binary's `set-token` command in your own terminal (the exact path + config dir are printed in the "no credentials" error):
 
-```typescript
-{
-  "environment": "sandbox",
-  "token": "your-api-token"
-}
-```
+   ```bash
+   node "<plugin>/build/index.js" set-token sandbox --config-dir "<config-dir>"
+   ```
 
-The token is validated with a probe call to the API before being persisted; an invalid token persists nothing. To register a brand-new environment, also pass `apiUrl` (and optionally `studioUrl`):
+   It prompts for the token with **hidden input** (or reads `PRISME_TOKEN` from the env), validates it against the API, and saves it to `credentials.json` (mode 600). An invalid token saves nothing.
 
-```typescript
-{
-  "environment": "custom",
-  "token": "your-api-token",
-  "apiUrl": "https://api.custom.prisme.ai/v2"
-}
-```
+   For a brand-new environment, add `--api-url` (and optionally `--studio-url`):
+
+   ```bash
+   node "<plugin>/build/index.js" set-token custom --api-url https://api.custom.prisme.ai/v2 --config-dir "<config-dir>"
+   ```
+
+3. Re-run your request. The server re-reads `credentials.json` on the next call, so **no restart is needed**.
+
+### Fallback: the `set_token` MCP tool
+
+If you prefer, you can have the agent register the token with the `set_token` tool (`environment` + `token`, plus `apiUrl` for a new environment). The token is probe-validated before persisting, exactly like the CLI. **Caveat:** passing the token to the tool means it travels through the conversation and is sent to the LLM provider — use the CLI above to avoid that.
 
 ### Rotation / expiry
 
-Re-run `set_token` with a fresh token whenever the current one expires or is revoked. Calls failing with HTTP 401 include a reminder of this flow; calls targeting an environment with no stored token return the exact token-creation URL.
+Re-run `set-token` (CLI or tool) with a fresh token whenever the current one expires or is revoked. Calls failing with HTTP 401 include a reminder with the CLI command; calls targeting an environment with no stored token return the exact CLI command and token-creation URL.
 
 ### Migration from setup.sh
 

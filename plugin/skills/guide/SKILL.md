@@ -72,7 +72,17 @@ The connector workflow: scaffold a new SaaS connector, test it, consolidate test
 
 ## Authentication
 
-The MCP authenticates with user-created API tokens. If a tool call fails with "No credentials for environment …", create a token in the studio at `<studio-origin>/settings/tokens` (e.g. https://sandbox.prisme.ai/settings/tokens) and register it with the `set_token` tool. Re-run `set_token` to rotate an expired token.
+The MCP authenticates with user-created API tokens. When a tool call fails with "No credentials for environment …" (or a 401), **do not ask the user to paste their token into the chat** — that would send it to the LLM provider.
+
+Instead, relay the CLI command from the error message and ask the user to run it in **their own terminal**:
+
+```
+node "<plugin>/build/index.js" set-token <environment> --config-dir "<config-dir>"
+```
+
+The error message already contains the exact path and config dir, and the command prompts for the token with hidden input, validates it, and saves it. After it succeeds, just retry the request — the server picks up the new token automatically (no restart). To create the token, the studio page is `<studio-origin>/settings/tokens` (e.g. https://sandbox.prisme.ai/settings/tokens).
+
+Only if the user explicitly insists on pasting the token in the conversation should you fall back to the `set_token` tool — and first warn them the token will be transmitted to the LLM provider as part of the chat.
 
 ## Environment configuration
 

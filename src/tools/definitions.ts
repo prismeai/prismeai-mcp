@@ -1870,7 +1870,7 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
   {
     name: "set_token",
     description:
-      "Register (or rotate) a user-created Prisme.ai API token for an environment. The user creates the token in the studio at <studio-origin>/settings/tokens (e.g. https://sandbox.prisme.ai/settings/tokens), then provides it here. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
+      "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead — tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error); it prompts for the token with hidden input and never exposes it to the chat. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
     inputSchema: {
       type: "object",
       properties: {
