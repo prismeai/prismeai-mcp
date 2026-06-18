@@ -9,145 +9,107 @@ description: '<<ONE_LINE_DESCRIPTION>>'
 
 <<FEATURE_CARDS>>
 
+## Who is this for?
+
+This connector is used by three different roles. Jump to the section that matches yours — each one is self-contained.
+
+<CardGroup cols={3}>
+  <Card title="Agent builder" icon="robot">
+    You build agents in **Agent Factory** and want them to use <<SERVICE_NAME>>. → *Agent builder* tab.
+  </Card>
+  <Card title="Platform admin" icon="shield-halved">
+    You run the platform and set up <<SERVICE_NAME>> once for everyone. → *Platform admin setup* accordion below.
+  </Card>
+  <Card title="Workspace builder" icon="puzzle-piece">
+    You write Builder automations (DSUL) that call <<SERVICE_NAME>> operations directly. → *Workspace builder* tab.
+  </Card>
+</CardGroup>
+
 ## Prerequisites
 
 <<PREREQUISITES>>
 
+<Accordion title="Platform admin (Governance) — one-time platform setup" icon="shield-halved">
+  <<PLATFORM_ADMIN_SECTION>>
+  {/* Closed by default — most readers (agent / workspace builders) skip it; platform operators expand it once.
+      Split into two `## ` sub-sections when both apply:
+      `## 1. Configure the connector` and `## 2. Declare the capability in AI Governance`.
+
+      Static-credential archetype: a <Note> — "No platform-level setup. Each workspace pastes its own credential in the app config." (no section 2 unless a shared capability is offered).
+      Central-OAuth via Governance: §1 register OAuth app → store secrets in core ws; §2 attach the Governance auth-config JSON (status/connect/disconnect webhooks) → grant roles → smoke-test.
+      Tenant-context + config SPA (generic connector, e.g. google-workspaces): §1 register OAuth app → enter creds via the CORE workspace's config app (`<studio>/apps/<slug>`, NOT raw Studio Secrets) → tell tenants to pick `oauthCentral`. §2 (generic connectors only) declare the named capability in AI Governance: MCP endpoint URL + Scope `context_id,agent_id,user_id` → it then appears in the agent builders' capability picker (catalog access follows org RBAC; there is NO per-capability role grant for tenant-context connectors — do not write a "grant the capability to roles" step here, that gate only exists for Central-OAuth) + smoke-test. End with a <Warning>: declaring the capability ≠ authorizing an agent — per-agent gating is the config-app allowlist; no OAuth auth-config JSON here.
+      Webhook bridge: <Steps> to register the bot/webhook at the provider. */}
+</Accordion>
+
 ---
 
 <Tabs>
-  <Tab title="Usage as App">
+  <Tab title="Agent builder (Agent Factory)">
+    ## Agent builder
+    {/* This `##` is intentional: Mintlify excludes tab *labels* from the "On this
+        page" TOC but includes headings inside the active tab. Opening each tab with
+        its audience heading is what surfaces "Agent builder" / "Workspace builder"
+        in the right-hand TOC. Keep it short (not the full parenthetical label). */}
+
+    **Goal:** let an agent you build in Agent Factory use <<SERVICE_NAME>> through MCP tools.
+
+    <Note>
+      Before an agent can call the connector, a *Workspace builder* must have installed and configured the <<SERVICE_NAME>> app (see the *Workspace builder* tab)<<ADMIN_DEPENDENCY_CLAUSE>>.
+    </Note>
+
+    <<AGENT_BUILDER_WIRING>>
+    {/* If a catalog capability exists (generic connector — Platform admin §2 declared one), split into two `## ` sub-sections:
+        `## Option A — Enable the shared capability from the catalog` (easy: pick it from the catalog, pre-wired endpoint+Scope, NO allowlist step — the shared instance accepts every agent granted the capability; <Note> it's a shared platform-managed instance whose Google credentials are owned by someone else), and
+        `## Option B — Run it from your own workspace (recommended)` (install the connector in YOUR workspace, point the agent at YOUR MCP endpoint + Scope `context_id,agent_id,user_id` + allowlist). Lead Option B with a <Warning> that this is the SECURITY-preferred mode: credentials/tokens/allowlist scoped to your workspace, least-privilege isolation vs the broad shared surface.
+        If NO catalog capability: a single <Steps> — add the capability pointing at the MCP endpoint with Scope `context_id,agent_id,user_id` (+ allowlist for tenant-context). Never document `mcp-api-key` (deprecated); mention it only as a one-line legacy note if the connector strictly still requires it.
+        Always finish with a shared `## Brief the agent in its system prompt` block. */}
+
+    <Note>
+      **Legacy AI Knowledge agents** (no native MCP picker): add the connector under **Advanced > Tools > MCP**, paste the **MCP Endpoint** URL<<LEGACY_KEY_CLAUSE>>.
+    </Note>
+
+    ## Available Tools
+
+    <<MCP_TOOLS_TABLES>>
+
+    ## Output Formats
+
+    <<OUTPUT_FORMATS>>
+
+    ## Tool Details
+
+    <<TOOL_DETAILS>>
+  </Tab>
+
+  <Tab title="Workspace builder (DSUL)">
+    ## Workspace builder
+
     ## Installation
 
     1. Go to **Apps** in your workspace
     2. Search for **<<SERVICE_NAME>>** and install it
-    3. Open the app instance configuration and fill in the required fields
+    3. <<INSTALL_CONFIG_STEP>>
 
     ## Configuration
 
     <<CONFIG_TABLE>>
-
-    <Note>
-      `MCP Endpoint` and `MCP API Key` are generated automatically by the `onInstall` flow and are only needed to expose this instance as an MCP server (see the next tab).
-    </Note>
 
     ## Available Instructions
 
     Every instruction resolves credentials from the workspace configuration.
 
     <<INSTRUCTIONS_TABLES>>
+    {/* One `### Category` + table per resource group, columns: Instruction | Description | Returns.
+        Description = what the op does, folding the key/required inputs inline (e.g. "…by `fileId`", "`body` = {…}") — do NOT dump a bare arg-name list, it is low-value.
+        Returns = the output shape (the underlying provider resource), e.g. `{ files: [{ id, name }], nextPageToken }` or "Empty (HTTP 204)". */}
 
     <Note>
-      Arguments flagged with `*` are required.
+      `Returns` shows the shape of the operation output.
     </Note>
 
     ## DSUL Examples
 
     <<DSUL_EXAMPLES>>
-  </Tab>
-
-  <Tab title="Usage as MCP">
-    The <<SERVICE_NAME>> app ships with a built-in MCP server. Each app instance gets its own signed `mcp-api-key` that encodes the workspace ID and a credentials lookup URL — the <<SERVICE_NAME>> API key itself is never passed through headers and is resolved server-side from the app configuration.
-
-    ## Plug into an Agent Creator capability
-
-    Agents consume MCP servers directly through **Agent Creator** capabilities. This is the preferred way to expose <<SERVICE_NAME>> to an agent.
-
-    <Steps>
-      <Step title="Create or open a workspace">
-        From the Prisme.ai console, create a new workspace (or open the one that will host the connector).
-      </Step>
-      <Step title="Install the <<SERVICE_NAME>> app">
-        Open the workspace **Imports** panel, search for **<<SERVICE_NAME>>** and install it.
-      </Step>
-      <Step title="Configure the credentials">
-        Open the freshly installed app instance settings and fill in the required fields (see the *Usage as App* tab for the field-by-field reference).
-      </Step>
-      <Step title="Copy the MCP endpoint and API key">
-        Still on the app instance configuration page, copy the values of **MCP Endpoint** and **MCP API Key** — both are generated automatically on install.
-      </Step>
-      <Step title="Open Agent Creator">
-        Switch to **Agent Creator** and open the agent you want to extend.
-      </Step>
-      <Step title="Add a capability">
-        Add a new capability to the agent:
-
-        - **If a dedicated <<SERVICE_NAME>> capability exists** — select it and paste the **MCP API Key** into the `mcp-api-key` field. The server URL is already wired.
-        - **Otherwise** — select the generic **`custom_mcp`** capability, paste the **MCP Endpoint** into the *Server URL* field, then open the *Headers* field and add an `mcp-api-key` entry whose value is the **MCP API Key** copied earlier:
-
-          ```json
-          {
-            "mcp-api-key": "your-mcp-api-key"
-          }
-          ```
-      </Step>
-      <Step title="Save">
-        The agent now has access to every <<SERVICE_NAME>> tool exposed by the MCP server.
-      </Step>
-      <Step title="Brief the agent in its system prompt">
-        Wiring the capability is not enough — the agent also needs to know the MCP exists and when to reach for it. Add a short paragraph to the agent's system prompt. Copy-pasteable starter:
-
-        ```text
-        You have access to the <<SERVICE_NAME>> MCP server. Use it whenever the user asks something that maps to <<SERVICE_NAME>> data — listing, searching, reading, creating or updating <<SERVICE_NAME>> resources. Always prefer calling an MCP tool over guessing from prior context, and confirm with the user before any destructive action (delete, overwrite, bulk update).
-        ```
-
-        Refine the trigger keywords (resource names, business domains, typical user phrasings) so the agent reliably picks up the right intent in your context.
-      </Step>
-    </Steps>
-
-    ## Legacy MCP Install (Advanced > Tools)
-
-    Use this flow to plug the <<SERVICE_NAME>> MCP into an AI Knowledge agent that does not yet support the native MCP picker.
-
-    <Steps>
-      <Step title="Install the <<SERVICE_NAME>> app">
-        Install and configure the app in the same workspace as your agent (see the *Usage as App* tab). Once configured, `mcpEndpoint` and `mcpApiKey` are auto-populated.
-      </Step>
-      <Step title="Copy the MCP credentials">
-        Open the app instance config and copy the values of **MCP Endpoint** and **MCP API Key**.
-      </Step>
-      <Step title="Open your AI Knowledge project">
-        Navigate to **Advanced > Tools**.
-      </Step>
-      <Step title="Add an MCP tool">
-        Click **Add** and select the **MCP** tab.
-      </Step>
-      <Step title="Fill in the endpoint">
-        Paste the **MCP Endpoint** URL copied from the app instance.
-      </Step>
-      <Step title="Add the auth header">
-        In the **Headers** field, add the signed API key:
-
-        ```json
-        {
-          "mcp-api-key": "your-mcp-api-key"
-        }
-        ```
-      </Step>
-      <Step title="Save">
-        The agent can now list and call <<SERVICE_NAME>> tools through the MCP endpoint.
-      </Step>
-    </Steps>
-
-    <Note>
-      The signed `mcp-api-key` encodes the workspace ID and the `getConfig` webhook URL. The MCP server validates the signature using the central app secret and transparently fetches the <<SERVICE_NAME>> API key and base URL from the installed app. Credentials are cached per tenant for 10 minutes.
-    </Note>
-
-    ## Output Formats
-
-    Every tool accepts an `outputFormat` parameter that controls the MCP response shape:
-
-    - **`verbose`** (default) — human-readable text for LLM consumption
-    - **`structured`** — machine-readable JSON in `structuredContent`
-    - **`both`** — both text and structured content
-
-    ## Available Tools
-
-    <<MCP_TOOLS_TABLES>>
-
-    ## Tool Details
-
-    <<TOOL_DETAILS>>
   </Tab>
 </Tabs>
 
@@ -159,13 +121,10 @@ description: '<<ONE_LINE_DESCRIPTION>>'
 
 ### Common Issues
 
-**"Not configured"** — The app instance has no API key. Generate one at the provider and paste it in the app configuration.
-
-**"Invalid API key" (MCP)** — The `mcp-api-key` header does not match the central app secret. Reinstall the app instance to regenerate a signed key.
-
-**"Credentials lookup failed"** — The MCP endpoint could not reach the `getConfig` webhook of the installed app. Verify that the app instance is still installed in the expected workspace.
-
-<<SERVICE_SPECIFIC_ISSUES>>
+<<COMMON_ISSUES>>
+{/* Tailor to the archetype (see SKILL.md): tenant-context → allowlist / missing agent_id scope / not-connected / dead refresh token / OAuth not configured;
+    central-Governance → auth required / central OAuth config missing / capability not granted; static-credential → Not configured / Invalid credentials.
+    Never use `mcp-api-key` wording (deprecated). Always end with one service-specific gotcha. */}
 
 ## External Resources
 

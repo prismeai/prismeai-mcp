@@ -7,7 +7,7 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent
 
 # App + MCP documentation writer
 
-You are producing the **public, user-facing documentation** for a connector that already exists as a local Prisme.ai App+MCP workspace. The output is an MDX page in the `prismeai/docs` repo (Mintlify-flavoured) matching the layout of existing connector pages like `gryzzly.mdx`, `data-galaxy.mdx`, `monday.mdx`.
+You are producing the **public, user-facing documentation** for a connector that already exists as a local Prisme.ai App+MCP workspace. The output is an MDX page in the `prismeai/docs` repo (Mintlify-flavoured) following the **audience-driven model** described below. Canonical references: `google-workspaces.mdx` (Tenant-context + config SPA archetype) and `gitlab.mdx` (Central-OAuth via Governance archetype). Older pages (`gryzzly.mdx`, `data-galaxy.mdx`, `monday.mdx`) predate this model — use them for prose tone only, not for structure.
 
 **Three deliverables**, all under `<docs-repo>/`:
 - **`apps-store/marketplace/connectors/<slug>.mdx`** — the full connector page
@@ -16,42 +16,52 @@ You are producing the **public, user-facing documentation** for a connector that
 
 ---
 
-## Output layout (reference)
+## Output layout — audience-driven
 
-Every connector page is built from this skeleton:
+A connector page is read by **three distinct roles**, and the page must answer each one's question head-on instead of mixing them under "App vs MCP". Two of the roles get a `<Tab>` in the body `<Tabs>` block; the **Platform admin** content lives in a **closed `<Accordion>` placed right under *Prerequisites*** (above the tabs) — it is one-time setup most readers skip, so it is collapsed by default rather than occupying a permanent tab. Order:
+
+| Section | Placement | Role | Answers |
+|---------|-----------|------|---------|
+| `Agent builder (Agent Factory)` | first `<Tab>` | end-user building an agent | "how do I plug this connector into my agent in **Agent Factory**?" |
+| `Platform admin (Governance)` | **closed `<Accordion>` under *Prerequisites*** (NOT a tab) | platform operator | "how do I set this up once for everyone?" |
+| `Workspace builder (DSUL)` | second `<Tab>` | Builder developer | "how do I call this from my workspace automations?" |
+
+> **Terminology — Agent Factory, not AI Knowledge.** The agent-building product is **Agent Factory**. Never write "AI Knowledge", "Knowledges", "AIK" or "Agent Creator" in a connector page. The only allowed mention of AI Knowledge is a short *legacy* note (for old agents without the native MCP picker), framed explicitly as legacy.
+>
+> **`mcp-api-key` is deprecated — do NOT document it.** The signed `mcp-api-key` / HMAC header is an obsolete wiring mechanism. Never feature it as the auth path, and **do not even mention its absence** ("there is no mcp-api-key" is noise). Describe authorization positively: agents are identified by the capability **Scope `context_id,agent_id,user_id`** and the connector resolves credentials server-side; tenant-context connectors additionally gate via the config-app allowlist. Only if a connector *strictly still requires* the header today, relegate it to a one-line legacy note — never a Step.
 
 ```
 ---
 title: '<Service>'
-description: '<One-line description for SEO>'
+description: '<One-line, Agent-Factory-framed SEO description>'
 ---
 
-<Intro paragraph>             — what the connector exposes, usable as App or MCP
-<CardGroup cols={3}>          — 3 top-level feature categories
-  <Card icon="..." title="...">...</Card> × 3
+<lettrine img>               — Phase 4.5 brand icon, float-left
+<Intro paragraph>            — what it exposes; consumed by Agent Factory agents (MCP) or Builder (App); auth modes
+<CardGroup cols={3}>         — 3 feature cards
+## Who is this for?          — 3 orientation cards (Agent builder / Platform admin / Workspace builder)
+## Prerequisites             — provider-side account, APIs to enable, credentials
 
-## Prerequisites              — account, credentials, base URL (two blocks if central OAuth)
-
-## Setup (one-time, platform admin)   — central OAuth connectors only:
-                                       OAuth Application + workspace secrets
-                                       + Governance capability + smoke-test
+<Accordion title="Platform admin (Governance) — one-time platform setup" icon="shield-halved">
+  — closed by default; <Steps or Warning depending on archetype — see below>
+</Accordion>
 
 <Tabs>
-  <Tab title="Usage as App">
-    ## Installation
-    ## Configuration          — config.schema table (PAT-only for central OAuth)
-    ## Available Instructions — one table per resource category
-    ## DSUL Examples          — 3-5 realistic snippets
-  </Tab>
-
-  <Tab title="Usage as MCP">
-    <intro>
-    ## Plug into an Agent Creator capability (central OAuth)  — when applicable
-    ## Tenant PAT                                              — shared token path
-    ## Legacy MCP Install (Advanced > Tools)                   — older agents
+  <Tab title="Agent builder (Agent Factory)">
+    ## Agent builder        — REQUIRED first heading (see rule below); surfaces the tab in the TOC
+    <Note> dependency on the Workspace builder tab + the Platform admin accordion </Note>
+    <Steps> get endpoint → add capability (+ Scope) → connect/authorize → brief the agent </Steps>
+    <Note> legacy AI Knowledge (Advanced > Tools) — one paragraph, framed as legacy </Note>
+    ## Available Tools        — MCP tool table(s)
     ## Output Formats
-    ## Available Tools        — one table per resource category
-    ## Tool Details           — deep-dive on 4-6 flagship tools
+    ## Tool Details           — 4-6 flagship tools
+  </Tab>
+  <Tab title="Workspace builder (DSUL)">
+    ## Workspace builder      — REQUIRED first heading (see rule below); surfaces the tab in the TOC
+    ## Installation
+    ## Configuration          — config table + auth-mode table
+    ## Available Instructions — one table per resource category
+    ## DSUL Examples          — 3-5 snippets
   </Tab>
 </Tabs>
 
@@ -59,9 +69,20 @@ description: '<One-line description for SEO>'
 ## External Resources         — API docs + Tool Agents cards
 ```
 
-Read `./templates/reference-example.mdx` (bundled with this skill) once before writing anything. It's a verbatim snapshot of the `Gryzzly` connector page and the canonical reference for tone, table layout, and section ordering — **except** for the `Usage as MCP` tab, which now opens with the *Plug into an Agent Creator capability* steps before falling back to the legacy *Advanced > Tools* flow. Always render that Agent Creator section first; use `./templates/connector.mdx` as the authoritative skeleton when the reference page diverges. **Do not append "(2026, …)" or any year/recency qualifier to the section heading** — the docs always describe the current product, so dating the new flow is redundant.
+### Each connector archetype gets a personalized page
 
-**For central OAuth connectors**, the canonical reference is `apps-store/marketplace/connectors/gitlab.mdx` in the docs repo — it shows the new shape: dual-mode intro paragraph, *Setup (one-time, platform admin)* `<Steps>` block, two MCP sub-tabs (central OAuth + tenant PAT), and the updated *Common Issues* entries (auth required / OAuth config missing / capability not granted / invalid mcp-api-key). Read it once before writing a new central-OAuth connector page.
+The two tabs + the Platform admin accordion share the skeleton, but their content MUST match the connector's actual architecture. Detect the archetype in Phase 2 (from `buildAppAuth.yml` + `index.yml`) and fill them accordingly (the *Platform admin* column below renders inside the closed accordion under *Prerequisites*, not a tab):
+
+| Archetype | Detect by | Agent builder tab | Platform admin accordion | Workspace builder tab |
+|-----------|-----------|-------------------|--------------------|-----------------------|
+| **Static-credential** (API key / PAT / Basic / client-credentials) | `config.schema` has the token field; no `initiateOAuth.yml` | capability pointing at the MCP endpoint (credential resolved server-side from the app config). *Legacy note only if the connector still requires a signed header — never a Step.* | **N/A** — say "No platform-level setup. Each workspace pastes its own credential." | install app + paste token |
+| **Central-OAuth via Governance** | `<slug>OauthClient*` in `secrets.schema`; `mcp.yml` has a central + tenant dispatch | enable the Governance capability + *Connect* (per-user OAuth) | full `<Steps>`: register OAuth app → store secrets in core ws → **Governance auth-config JSON** (status/connect/disconnect webhooks) → grant roles → smoke-test (reference `gitlab.mdx`) | install app + optional shared-credential path |
+| **Tenant-context + config SPA** | `config.schema` ≈ `configAppUrl` only; `mcp.yml` runs in tenant context, **no `mcp-api-key`**; agent allowlist + `validateAgent` | if a catalog capability exists (admin §2), split into **Option A** (enable the shared catalog capability — easy, NO allowlist step since the shared instance accepts every agent) + **Option B** (run it from your own workspace — recommended, lead with a `<Warning>` on security/least-privilege isolation; allowlist your agent here); else single flow: capability **Scope `context_id,agent_id,user_id`** (no key) + **allowlist the agent** in the config app | two `## ` sub-sections — **§1 Configure the connector** (provision the central OAuth client by opening the **core workspace's config app** `<studio>/apps/<slug>` and following its instructions — it writes the secrets, never hand-edit Studio Secrets) + **§2 Declare the capability in AI Governance** (generic connectors only: name the capability, point it at the MCP endpoint, Scope `context_id,agent_id,user_id` — it then shows up in the agent builders' capability picker; catalog access follows org RBAC, there is **NO per-capability "grant to roles" step for tenant-context** connectors, that gate only exists for Central-OAuth). **`<Warning>`: declaring the capability ≠ authorizing an agent — per-agent gating is the config-app allowlist; no OAuth auth-config JSON here**; skip if every ws uses its own creds | config app drives auth-mode + allowlist; auth-mode table; instructions tables |
+| **Webhook bridge** (inbound bot → agent) | endpoint automations bridge a provider bot; no entity tools | N/A (the agent IS the target) | register the bot/webhook at the provider | configure the bridge target agent |
+
+`google-workspaces.mdx` is the canonical reference for the **tenant-context + config SPA** archetype; `gitlab.mdx` for **central-OAuth via Governance**. Read the one matching your connector before writing. `./templates/connector.mdx` is the authoritative skeleton. **Never** date a section heading ("(2026, …)").
+
+Read `./templates/reference-example.mdx` once for tone, table layout and prose density (it predates the audience-driven structure, so use it for *style*, not section ordering).
 
 ---
 
@@ -101,8 +122,8 @@ Read `<workspace>/index.yml` and collect:
 
 Also introspect:
 - `automations/buildAppAuth.yml` → identify the auth mode (static token / Basic / OAuth2 client-credentials / OAuth2 AC) — affects wording of the Prerequisites + Configuration tables.
-- `automations/initiateOAuth.yml` (optional) → if present, the connector supports OAuth2 authorization-code. **Since the OAuth-central migration (gitlab pilot, 2026-05-28)** the credentials are NOT tenant-facing anymore: check `secrets.schema` in `index.yml` for `<<SERVICE_SLUG>>OauthClientId` / `<<SERVICE_SLUG>>OauthClientSecret`. If both are declared at the workspace level (and absent from `config.schema`), the connector runs in **central mode** — document it with a dedicated *Setup (one-time, platform admin)* section + a *Plug into an Agent Creator capability (central OAuth)* sub-tab (see the gitlab.mdx reference). If `oauthClientId` is still in `config.schema`, the connector is on the legacy per-tenant model — document it the old way and flag it as a candidate for `/app-mcp-fleet-sync` migration.
-- `automations/mcp.yml` → inspect the two-mode dispatch (`authMode: central` default + `conditions: '{{headers["mcp-api-key"]}}' → authMode: tenant`). Its presence confirms the central model and dictates the *Usage as MCP* structure: two sub-flows (central OAuth without `mcp-api-key`; tenant PAT with the header). Connectors stuck on the legacy single-mode `mcp.yml` get the one-flow MCP tab as before.
+- `automations/initiateOAuth.yml` (optional) → if present, the connector supports OAuth2 authorization-code. **Since the OAuth-central migration (gitlab pilot, 2026-05-28)** the credentials are NOT tenant-facing anymore: check `secrets.schema` in `index.yml` for `<<SERVICE_SLUG>>OauthClientId` / `<<SERVICE_SLUG>>OauthClientSecret`. If both are declared at the workspace level (and absent from `config.schema`), the connector is in the **Central-OAuth via Governance** archetype — fill the *Platform admin (Governance)* accordion with the full `<Steps>` block (see the gitlab.mdx reference). If `oauthClientId` is still in `config.schema`, the connector is on the legacy per-tenant model — flag it as a candidate for `/app-mcp-fleet-sync` migration.
+- `automations/mcp.yml` → inspect the dispatch to pin the archetype (see the archetype table above). `authMode: central` default + `conditions: '{{headers["mcp-api-key"]}}' → authMode: tenant` ⇒ **Central-OAuth via Governance**. A single tenant-context flow with `validateAgent` + an agent allowlist and **no `mcp-api-key`** ⇒ **Tenant-context + config SPA** (e.g. `google-workspaces`). A bare static-token resolution ⇒ **Static-credential**.
 
 ### Phase 3 — Categorize the tools
 
@@ -112,7 +133,7 @@ Default algorithm (Python, inline via Bash):
 1. For each tool `name`, strip the leading verb (`list|get|search|create|update|delete|add|remove|close|reopen|approve|unapprove|merge|cancel|retry|revert|cherryPick|archive|unarchive|fork|stop|invite`).
 2. Map the remaining noun to a category label. Singularize trivially (e.g. `Projects` → `Project`). Multi-word nouns split on camelCase (`IssueNote` → `Issue Note`).
 3. Group related resources together when it feels natural: `Issue` + `IssueNote` → "Issues"; `MergeRequest` + `MergeRequestNote` → "Merge Requests"; `Tag` + `Tagset`.
-4. OAuth-only tools (`connect`, `disconnect`) go at the bottom as an "OAuth Session" sub-section. **In central mode**, mention that they only show up in `tools/list` when no `mcp-api-key` is passed — the tenant PAT path doesn't expose them.
+4. OAuth-only tools (`connect`, `disconnect`), when the connector exposes them as tools, go at the bottom as an "OAuth Session" sub-section. Tenant-context connectors (e.g. `google-workspaces`) do NOT expose them as tools — the connect flow is the config-app **Connect** button / the agent-factory `connect_url`; in that case omit the OAuth Session sub-section entirely.
 
 Print the proposed categorization to the user and ask for confirmation before rendering. Example output:
 
@@ -151,17 +172,14 @@ The user can override by saying "merge X and Y" or "split X into A + B".
      When Phase 4.5 fell back to `iconFallback` (no asset), substitute the empty string — the page renders without a lettrine, and the Font Awesome glyph from the overview card carries the brand. Do NOT inline `<Icon icon="..." />` from Mintlify here: the lettrine is meant as a *visual brand mark*, not a hint glyph. NEVER use a hotlinked URL in the `src=` (same rule as Phase 5.1).
 3. **Auto-generate** the dynamic sections:
    - **Feature cards** (`<<FEATURE_CARDS>>`) — 3 cards. Infer from the top categories; icon is a Mintlify Font Awesome name (e.g. `book`, `diagram-project`, `users`, `clock`, `plug`). Ask the user to review before locking.
-   - **Configuration table** (`<<CONFIG_TABLE>>`) — rendered from `config.schema` non-readOnly fields + the two standard readOnly `MCP Endpoint` / `MCP API Key` rows. **In central OAuth mode**, the schema is intentionally minimal (`baseUrl` + `token` PAT + the two readOnly MCP rows) — do NOT list OAuth client id/secret/urls here. Add a `<Note>` right below the table saying the OAuth credentials live in the central workspace secrets (linked to the *Setup* section). On legacy per-tenant connectors, OAuth fields get their own section below the main table when present.
-   - **Instructions tables** (`<<INSTRUCTIONS_TABLES>>`) — one `### CategoryName` + table per category (columns: Instruction, Arguments). Arguments list comes from `inputSchema.properties` minus `outputFormat`. Required args get a `*` suffix.
+   - **Configuration table** (`<<CONFIG_TABLE>>`) — rendered from `config.schema` non-readOnly fields + the readOnly `MCP Endpoint` row. Do NOT add an `MCP API Key` row (deprecated). For **tenant-context + config SPA** connectors the schema is just `configAppUrl` — render the single `Configuration app` row and an auth-mode table (which auth mode → what you provide → best for), since the config app drives everything. For **static-credential** connectors, list the token/baseUrl fields. Never list OAuth client id/secret/urls here — they live in the central workspace secrets (provisioned via the config app, see the *Platform admin* tab).
+   - **Instructions tables** (`<<INSTRUCTIONS_TABLES>>`) — one `### CategoryName` + table per category, columns **Instruction | Description | Returns**. A bare argument-name list is low-value — do NOT use it. *Description* = what the op does, folding the key/required inputs inline (e.g. "…by `fileId`", "`body` = `{role,type,emailAddress}`"). *Returns* = the output shape (the underlying provider resource), e.g. `{ files: [{ id, name }], nextPageToken }` or "Empty (HTTP 204)". The op automations' own `description` is usually boilerplate ("App-mode wrapper for…") and dispatch is registry-driven (no literal URL), so author the description + output shape from the provider's API reference (`swagger.yml` `servers[0].url` per op gives the endpoint) rather than copying the automation.
    - **MCP tools tables** (`<<MCP_TOOLS_TABLES>>`) — same grouping, columns (Tool, Description). Description is the mcpTool's own description, truncated if >100 chars.
 4. **Assisted-generate** the remaining sections — present a draft to the user, let them refine:
-   - **Prerequisites** (`<<PREREQUISITES>>`) — bullet list with account type, credentials source (UI path at the provider), base URL.
-     - **Central OAuth connectors** — describe TWO prerequisites blocks (central OAuth and tenant PAT) and the trade-off between them; reference `<<SERVICE_SLUG>>OauthClient*` secrets + the `<api-url>/workspaces/slug:<<SERVICE_SLUG>>/webhooks/oauthCallback` redirect URI. Pull the provider's OAuth-app management page URL from the secret description (captured at scaffold time in `/app-mcp-implement` Phase 1).
-     - **Legacy per-tenant connectors** — infer from `config.schema` descriptions + the `oauthClientId` description (which already contains the provider app URL).
-   - **Setup (one-time, platform admin)** — new section for central OAuth connectors only. A `<Steps>` block covering, in order:
-     1. **Register the OAuth Application at the provider** with the unique redirect URI `<api-url>/workspaces/slug:<<SERVICE_SLUG>>/webhooks/oauthCallback` and the right scopes.
-     2. **Store the `Client ID` + `Client Secret` in the central workspace's Secrets** (`<<SERVICE_SLUG>>OauthClientId` / `<<SERVICE_SLUG>>OauthClientSecret`).
-     3. **Declare the OAuth authentication in Governance** — under the connector's Capability, attach an auth-config JSON with the three central webhooks:
+   - **Prerequisites** (`<<PREREQUISITES>>`) — a SINGLE provider-side block: account type, which provider APIs to enable, credentials source (UI path at the provider), OAuth scopes, base URL. Keep auth-mode and platform specifics OUT of here — they belong elsewhere (the *Platform admin* accordion, placed right after this Prerequisites block, for central setup; the *Workspace builder* tab for the per-mode credential table). Pull the provider's OAuth-app management page URL from the `<<SERVICE_SLUG>>OauthClient*` secret description (captured at scaffold time in `/app-mcp-implement` Phase 1) or, for legacy per-tenant connectors, from the `oauthClientId` description in `config.schema`.
+   - **Platform setup** lives INSIDE the *Platform admin (Governance)* **closed `<Accordion>`** placed right under *Prerequisites* (see the archetype table), NOT as a tab and NOT as a standalone top-level section. The redirect URI is `<api-url>/workspaces/slug:<<SERVICE_SLUG>>/webhooks/oauthCallback`; document `<api-url>` as a placeholder for the production API URL (`https://api.studio.prisme.ai/v2`) — never enumerate non-production environments.
+     - **Tenant-context + config SPA** (e.g. `google-workspaces`): the central OAuth client is entered through the **core workspace's config app** (`<studio>/apps/<<SERVICE_SLUG>>`), which writes the secrets — never instruct hand-editing Studio Secrets. There is **no auth-config JSON** in Governance; the §2 capability just points at the MCP endpoint with Scope `context_id,agent_id,user_id`.
+     - **Central-OAuth via Governance** (e.g. `gitlab`): the admin stores `<<SERVICE_SLUG>>OauthClientId/Secret` in the core workspace and attaches an auth-config JSON to the Governance capability:
 
         ````
         ```json
@@ -174,15 +192,15 @@ The user can override by saying "merge X and Y" or "split X into A + B".
         ```
         ````
 
-        These three URLs come from the matching `automations/{checkAuthStatus,initiateOAuth,disconnectOAuth}.yml` (all `when: endpoint: true`). Document `<api-url>` as a placeholder for the production API URL (`https://api.studio.prisme.ai/v2`); do not enumerate non-production environments in the public docs.
-     4. **Grant the capability to the right roles** in Governance — without this, central-mode callers get `401 Authentication required`.
-     5. **Smoke-test** — call any data tool from an agent that has the capability; expect a `connect_url` on the first call, then transparent reuse.
-
-     Place this section between *Prerequisites* and the `<Tabs>` block so it's visible before the App / MCP split. Skip entirely for legacy per-tenant connectors.
+        These URLs come from the matching `automations/{checkAuthStatus,initiateOAuth,disconnectOAuth}.yml`. Without the capability grant, callers get `401 Authentication required`.
    - **DSUL examples** (`<<DSUL_EXAMPLES>>`) — 3-4 realistic snippets covering a read, a create, a compound flow, and a flagship action. Use real tool names and plausible argument values (`'{{var}}'` placeholders allowed).
    - **Tool Details** (`<<TOOL_DETAILS>>`) — deep-dive on 4-6 flagship MCP tools (usually the creates + a signature search/list). For each: JSON call example + a parameters table (Required / Description). Pull required/description from `inputSchema`.
-   - **Error Handling table** (`<<ERROR_HANDLING_TABLE>>`) — HTTP codes typical for the API (401 / 403 / 404 / 422 / 429 / 500 usually suffice) + 2-4 "Common Issues" paragraphs. For **central OAuth connectors**, include four canonical entries: `"Authentication required: please sign in to Prisme.ai before calling the <Service> MCP without an mcp-api-key header"` (anonymous call to central), `"Central OAuth config missing"` (secrets not set by the admin), `"<Service> capability not granted"` (Governance not configured for this user), `"Invalid mcp-api-key"` (tenant mode signature mismatch). For **legacy per-tenant** connectors keep the older entries (`Not configured` / `Invalid API key` / `Credentials lookup failed`). Always add one service-specific gotcha at the end.
-5. **External Resources** (`<<EXTERNAL_RESOURCES>>`) — two cards: API docs (link is `<<API_DOCS_URL>>` from phase 1) and "Tool Agents" (constant link `/create-agents/tool-agents/overview`).
+   - **Error Handling table** (`<<ERROR_HANDLING_TABLE>>`) — HTTP codes typical for the API (401 / 403 / 404 / 422 / 429 / 500 usually suffice) + 2-4 "Common Issues" paragraphs, tailored to the archetype:
+     - **Tenant-context + config SPA**: `"This agent is not authorized to use this connector"` (not allowlisted), `"The calling agent could not be identified"` (capability *Scope* missing `agent_id`), `"<Service> is not connected for this user"` (no OAuth token), `"token refresh failed … must reconnect"` (dead refresh token), `"OAuth is not configured"` (no tenant client and no central client).
+     - **Central-OAuth via Governance**: `"Authentication required"` (caller not signed in / capability not granted), `"Central OAuth config missing"` (admin secrets unset), `"<Service> capability not granted"` (Governance grant missing).
+     - **Static-credential**: `"Not configured"` (no credential in the app config), `"Invalid credentials"` (provider rejected the key).
+     - Never use `mcp-api-key` wording (deprecated). Always add one service-specific gotcha at the end.
+5. **External Resources** (`<<EXTERNAL_RESOURCES>>`) — two cards: API docs (link is `<<API_DOCS_URL>>` from phase 1) and "Tool Agents" (constant link `/products/agent-factory/capabilities`). **This and every other internal link you place will be checked in Phase 5.3 — do not invent paths.** The old `/create-agents/tool-agents/overview` path is dead (404); never emit it.
 
 Write to `<docs-repo>/apps-store/marketplace/connectors/<slug>.mdx`. **Never** overwrite an existing file silently — if it exists, `AskUserQuestion`: overwrite / merge / abort.
 
@@ -264,6 +282,38 @@ The Mintlify sidebar is driven by `<docs-repo>/docs.json`. The connector pages l
 2. Use this via `Bash` inline — don't hand-edit `docs.json`, a single misplaced comma breaks the whole site navigation.
 3. Run a quick validation after write: `python3 -c "import json; json.load(open('<docs-repo>/docs.json'))"` should exit 0.
 
+#### 5.3 Validate every internal link resolves (no 404s)
+
+**Goal**: never ship a dead internal link. Mintlify routes have no file extension, so a typo or a stale path (like the retired `/create-agents/tool-agents/overview`) renders a silent 404. Check every link you placed against the actual docs repo *before* reporting.
+
+1. Extract every link target from the page you just wrote **and** the `<Card>` you inserted in `overview.mdx`. Cover both syntaxes: `href="..."` (JSX cards) and `](...)` (markdown links).
+2. Split internal vs external:
+   - **Internal** = starts with `/` (a Mintlify route) — these are the ones that 404 silently and MUST be resolved against the repo.
+   - **External** = `http(s)://` — leave provider/API links as confirmed in Phase 1; do not network-poll them here (flaky), but do sanity-check they are well-formed.
+3. For each **internal** link, strip any `#anchor`/`?query`, then confirm it resolves to a real page or asset in `<docs-repo>`. A route `/a/b/c` is valid if any of these exists: `<docs-repo>/a/b/c.mdx`, `<docs-repo>/a/b/c/index.mdx`, or — for asset routes like `/images/...` — the literal file `<docs-repo>/a/b/c`. Belt-and-braces: also accept it if the exact string appears as a page entry in `docs.json`.
+4. Run this inline via `Bash` (point `PAGE` at the new `.mdx`):
+
+   ```python
+   import re, os, json
+   DOCS = "<docs-repo>"
+   PAGE = "<docs-repo>/apps-store/marketplace/connectors/<slug>.mdx"
+   text = open(PAGE).read()
+   links = set(re.findall(r'href="([^"]+)"', text)) | set(re.findall(r'\]\((/[^)\s]+)\)', text))
+   nav = json.load(open(os.path.join(DOCS, "docs.json")))
+   nav_pages = set(re.findall(r'"([^"]+)"', json.dumps(nav)))
+   def ok(route):
+       r = route.split("#")[0].split("?")[0].strip("/")
+       if not r: return True
+       return (os.path.exists(os.path.join(DOCS, r+".mdx")) or
+               os.path.exists(os.path.join(DOCS, r, "index.mdx")) or
+               os.path.exists(os.path.join(DOCS, r)) or
+               r in nav_pages)
+   broken = [l for l in links if l.startswith("/") and not ok(l)]
+   print("BROKEN:", broken or "none")
+   ```
+5. For each broken internal link, **find the correct replacement** instead of deleting the card: list the candidate pages (`grep`/`find` the docs repo, or scan `docs.json` nav) for the closest topic, pick the canonical one, and fix the `href`. The standard "Tool Agents" card → `/products/agent-factory/capabilities` (the page describing how Agent Factory agents consume MCP tools/capabilities). If no sensible target exists, leave a `<!-- REVIEW: dead link <route> — no replacement found -->` and surface it to the user in Phase 6 rather than shipping the 404.
+6. Re-run the check until `BROKEN: none`. Apply the same fix to any **other** connector pages that still carry the dead link if you happen to touch them (the retired path lived in several pages).
+
 ### Phase 6 — Report
 
 Print to the user:
@@ -272,6 +322,7 @@ Print to the user:
 - A deep-link preview URL (`https://docs.prisme.ai/apps-store/marketplace/connectors/<slug>` if the repo publishes to that domain — otherwise just the file path)
 - Any sections flagged for human review (`<!-- REVIEW: ... -->` comments in the generated MDX)
 - A reminder that `docs.json` validation passed (`json.load` succeeded)
+- A reminder that the internal-link check (Phase 5.3) passed (`BROKEN: none`), and any link that had to be re-pointed
 - The next recommended step: run `/app-mcp-test <workspace-slug> <environment>` to test the App+MCP workspace with real credentials before publishing or announcing the connector.
 
 ### Phase 7 — Guide the user to run the local preview
@@ -316,8 +367,9 @@ This avoids the architecture mismatch entirely and keeps the user in control of 
 - **Don't fabricate categories** — if the API clearly has 6 resources, don't invent a 7th. If unsure, ask the user.
 - **Don't paraphrase tool descriptions** that already read well in `index.yml`. Copy them verbatim (truncate only if exceedingly long).
 - **Don't over-detail the Tool Details section** — 4-6 tools is the sweet spot. More and the page becomes a dumping ground.
-- **`<Tabs>` / `<Tab>` are Mintlify components** — keep the exact casing and make sure the two tabs are named "Usage as App" and "Usage as MCP" (verbatim).
-- **Mintlify headings inside `<Tab>`** — use `##` for top-level within the tab (e.g. `## Installation`), `###` for sub-categories. Do not skip levels.
+- **`<Tabs>` / `<Tab>` / `<Accordion>` are Mintlify components** — keep the exact casing. The body has **two tabs**, in order: `Agent builder (Agent Factory)`, `Workspace builder (DSUL)`. The **Platform admin (Governance)** content is a **closed `<Accordion>`** placed right under *Prerequisites* (above the `<Tabs>`), NOT a third tab. An `<Accordion>` with no `defaultOpen` is collapsed by default — that is the intended state (one-time setup, most readers skip it). Do not wrap a single accordion in an `<AccordionGroup>`.
+- **Mintlify headings inside `<Tab>` / `<Accordion>`** — use `##` for top-level within the container (e.g. `## Installation`, `## 1. Configure the connector`), `###` for sub-categories. Do not skip levels.
+- **Each tab MUST open with its audience `##` heading** — `## Agent builder` as the first line inside the *Agent builder* tab, `## Workspace builder` inside the *Workspace builder* tab. Mintlify excludes tab *labels* from the "On this page" TOC but DOES include headings inside the active tab, so this opener is the only way the audience title appears in the right-hand TOC. Keep it short (`Agent builder`, not the full `Agent builder (Agent Factory)` label) to avoid visual redundancy with the tab button. Confirmed working on `google-search.mdx`.
 - **The overview card order is alphabetical** — insert at the right position. Hunt for an adjacent card whose title comes just before/after and anchor the `Edit` there.
 - **Never hotlink the workspace `photo:` URL** in the MDX. Those `uploads.prisme.ai` / `api.<env>.prisme.ai` URLs are env-specific (a sandbox file URL breaks once published to prod docs), rotate on workspace re-creation, hit the platform CDN instead of the docs CDN, and leak a request to a third-party host on every page render. Phase 4.5 copies the binary into `<docs-repo>/images/connectors/<slug>.<ext>` for that reason — use that relative path.
 - **Don't skip the `<<HEADER_ICON>>` lettrine.** Phase 4 substitutes a float-left `<img width="96">` at the very top of the body so the connector page opens on the service's brand mark (the same asset that drives the overview card icon). It is what makes a connector page recognizable in a tab of 20 docs. Only omit it when Phase 4.5 had no asset to copy. Keep the exact JSX shape from the SKILL — the `float: left` + `marginRight` + `marginBottom` combo is what wraps the intro paragraph around the icon; changing it to `<Frame>` or centering it breaks the lettrine effect.
