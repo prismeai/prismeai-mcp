@@ -742,6 +742,49 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "call_api",
+    description:
+      "Call any Prisme.ai REST API endpoint, authenticated server-side with the configured environment token (the token is NEVER exposed to the model). Use for endpoints not covered by a dedicated tool — e.g. list organizations ('/orgs'), the current IAM context ('/me'), org members, API keys, etc. `path` is relative to the environment apiUrl base, which already includes '/v2' (so pass '/orgs', not '/v2/orgs').",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Endpoint path relative to the environment apiUrl base (which already ends in /v2). Examples: '/orgs', '/me', '/workspaces/<id>'. A leading slash is optional.",
+        },
+        method: {
+          type: "string",
+          description:
+            "HTTP method (GET, POST, PATCH, PUT, DELETE). Default: GET.",
+        },
+        query: {
+          type: "object",
+          description: "Optional query-string parameters, e.g. { limit: 200 }.",
+        },
+        body: {
+          type: "object",
+          description: "Optional JSON request body for POST/PATCH/PUT.",
+        },
+        environment: {
+          type: "string",
+          description:
+            "Environment name (from PRISME_ENVIRONMENTS), e.g. 'sandbox' or 'prod'. Defaults to the default environment.",
+        },
+        pick: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional field projection to keep responses small. Each named top-level key is kept; for list responses the projection is applied to every entry of `results`/`items` (or of a top-level array). E.g. ['slug','name'] on '/orgs'.",
+        },
+      },
+      required: ["path"],
+    },
+    annotations: {
+      readOnlyHint: false,
+    },
+  },
+  {
     name: "execute_automation",
     description:
       "Execute/test an automation already existing in the Prisme.ai workspace with optional payload",

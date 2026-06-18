@@ -291,6 +291,57 @@ export class PrismeApiClient {
         });
     }
 
+    /**
+     * Generic authenticated call to any Prisme.ai REST endpoint.
+     * The Bearer token is injected server-side per environment and is NEVER
+     * exposed to the caller. `path` is relative to the environment's apiUrl base
+     * (which already includes /v2), e.g. "/orgs", "/me", "/workspaces/<id>".
+     */
+    async callApi(params: {
+        method?: string;
+        path: string;
+        query?: Record<string, any>;
+        body?: any;
+        environment?: string;
+        pick?: string[];
+    }): Promise<{ status: number; data: any }> {
+        // Resolve the environment's base URL so the token and URL stay consistent.
+        const apiUrl =
+            params.environment && this.environments[params.environment]?.apiUrl
+                ? this.environments[params.environment].apiUrl
+                : undefined;
+        const client = this.getClient(apiUrl, params.environment);
+        const method = (params.method || 'GET').toUpperCase();
+        const url = params.path.startsWith('/') ? params.path : `/${params.path}`;
+        const response = await client.request({
+            url,
+            method: method as any,
+            params: params.query,
+            data: params.body,
+        });
+        let data = response.data;
+        // Optional field projection — keeps large list endpoints usable by trimming
+        // each item (or each entry of a `results`/`items` array) to the picked keys.
+        if (params.pick && params.pick.length) {
+            const proj = (o: any) =>
+                o && typeof o === 'object' && !Array.isArray(o)
+                    ? Object.fromEntries(
+                          params.pick!.filter((k) => k in o).map((k) => [k, o[k]])
+                      )
+                    : o;
+            if (Array.isArray(data)) {
+                data = data.map(proj);
+            } else if (data && Array.isArray(data.results)) {
+                data = { ...data, results: data.results.map(proj) };
+            } else if (data && Array.isArray(data.items)) {
+                data = { ...data, items: data.items.map(proj) };
+            } else {
+                data = proj(data);
+            }
+        }
+        return { status: response.status, data };
+    }
+
     // Automation CRUD operations
     async createAutomation(automation: Automation, workspaceId?: string, apiUrl?: string, environment?: string): Promise<Automation> {
         const wsId = workspaceId || this.workspaceId;

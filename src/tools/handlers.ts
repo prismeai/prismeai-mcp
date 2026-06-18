@@ -5,7 +5,7 @@ import AdmZip from "adm-zip";
 import axios from "axios";
 import yaml from "js-yaml";
 import { PrismeApiClient, AIKnowledgeQueryParams, AIKnowledgeCompletionParams, AIKnowledgeDocumentParams, AIKnowledgeProjectParams, AIKnowledgeAuth, AppInstance } from "../api-client.js";
-import { resolveWorkspaceAndEnvironment, environmentsConfig, PRISME_API_BASE_URL } from "../config.js";
+import { resolveWorkspaceAndEnvironment, environmentsConfig, PRISME_API_BASE_URL, PRISME_FORCE_READONLY } from "../config.js";
 import { enforceReadonlyMode, truncateJsonOutput } from "../utils.js";
 import { lintAutomation, type AutomationLintResult } from "../../linter/dist/index.js";
 
@@ -154,6 +154,35 @@ export async function handleToolCall(
   isError?: boolean;
 }> {
   switch (name) {
+    case "call_api": {
+      const { path, method, query, body, environment, pick } = args as {
+        path: string;
+        method?: string;
+        query?: Record<string, any>;
+        body?: any;
+        environment?: string;
+        pick?: string[];
+      };
+      const httpMethod = (method || "GET").toUpperCase();
+      if (
+        PRISME_FORCE_READONLY &&
+        !["GET", "HEAD", "OPTIONS"].includes(httpMethod)
+      ) {
+        throw new Error(
+          `call_api with method ${httpMethod} is not available in readonly mode (PRISME_FORCE_READONLY=true).`
+        );
+      }
+      const apiResult = await apiClient.callApi({
+        path,
+        method: httpMethod,
+        query,
+        body,
+        environment,
+        pick,
+      });
+      return truncateJsonOutput(apiResult, `call_api ${httpMethod} ${path}`);
+    }
+
     case "create_automation": {
       enforceReadonlyMode("create_automation");
       const { automation, workspaceId, workspaceName, environment } = args as {
