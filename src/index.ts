@@ -13,7 +13,6 @@ import {
   PRISME_API_BASE_URL,
   PRISME_DISABLE_FEEDBACK_TOOLS,
   environmentsConfig,
-  defaultEnvironmentName,
 } from "./config.js";
 import { tools } from "./tools/definitions.js";
 import { handleToolCall } from "./tools/handlers.js";
@@ -24,7 +23,6 @@ const apiClient = new PrismeApiClient({
   workspaceId: PRISME_WORKSPACE_ID || "",
   baseUrl: PRISME_API_BASE_URL,
   environments: environmentsConfig,
-  defaultEnvironment: defaultEnvironmentName,
 });
 
 // Create MCP server
@@ -111,10 +109,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // Include API error details if available
     if (axiosError.response) {
-      const expiredHint =
-        axiosError.response.status === 401
-          ? "\n\nThe stored token was rejected (expired or revoked). Create a new token in the Prisme.ai studio (Settings > Access Tokens, /settings/tokens) and register it with the `set_token` tool."
-          : "";
       return {
         content: [
           {
@@ -123,7 +117,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               axiosError.response.data,
               null,
               2
-            )}${expiredHint}`,
+            )}`,
           },
         ],
         isError: true,

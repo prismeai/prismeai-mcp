@@ -1,49 +1,78 @@
-# Moved: install as a plugin
+# Claude Code + Prisme.ai Setup
 
-`setup.sh` is retired. The MCP server, skills, agents, and hooks are now distributed as a **plugin** consumable by both Claude Code and Codex, straight from this repository.
+## Quick Start
 
-## Install
-
-**Claude Code**
-
-```
-/plugin marketplace add prismeai/prismeai-mcp
-/plugin install prisme-ai@prismeai-mcp
+```bash
+./claudeBootstrap/setup.sh
 ```
 
-**Codex**
+Requires: Node.js 18+, Claude Code CLI (`npm i -g @anthropic-ai/claude-code`)
 
-```
-codex plugin marketplace add prismeai/prismeai-mcp
-codex plugin add prisme-ai@prismeai-mcp
-```
+## Project Setup
 
-No `npm install`, no build: the plugin ships a prebuilt, self-contained `plugin/build/index.js` (Node-only, no Playwright).
+Copy the `.claude` folder to the root of your project where Claude Code will be executed:
 
-## Authenticate
-
-1. Create an API token in the studio of your environment: `https://<studio-domain>/settings/tokens` (e.g. <https://sandbox.prisme.ai/settings/tokens>).
-2. Ask the agent to register it, or call the `set_token` tool directly with `environment` + `token`. The token is validated against the API, then persisted in the plugin data dir (`credentials.json`, mode 600).
-3. Repeat per environment. Re-run `set_token` to rotate an expired token.
-
-If a tool call targets an environment with no stored token, the error message contains the exact token-creation URL for that environment.
-
-## Migrating from setup.sh
-
-If you previously ran `setup.sh`, the server automatically imports your existing `PRISME_ENVIRONMENTS` (from the env var or `~/.claude.json`) into the new config dir on first start. You can then remove the old registrations:
-
-```
-claude mcp remove prisme-ai-builder
-codex mcp remove prisme-ai-builder
+```bash
+cp -r ./claudeBootstrap/.claude /path/to/your/project/
 ```
 
-The `~/.claude/settings.json` `apiKeyHelper` written by old setup.sh versions is no longer used; remove it if you authenticate with your own `claude` login.
+This folder contains Prisme.ai-specific instructions, agents, and skills for Claude Code.
 
-## What the plugin contains
+**Getting started**: Once in your project, run `/guide` to learn the full Prisme.ai development workflow.
 
-- **MCP server** (`prisme-ai-builder`): workspaces, automations, apps, events, files, AI Knowledge, DSUL linter (`validate_automation`)
-- **Skills** (`/prisme-ai:<name>`): run `/prisme-ai:guide` for the catalog — includes `prisme-assistant` and `ticket-validator`
-- **Agents** (Claude only): `code-review`, `prisme-assistant`
-- **Hooks**: `allow-workspace.sh` workspace allowlist template for `execute_automation` / `push_workspace`
+## Manual Setup
 
-See the root [README](../README.md) for full documentation.
+If you prefer not to run the script:
+
+```bash
+# 1. Configure Anthropic API key (creates helper script + settings)
+mkdir -p ~/.claude
+echo '#!/bin/sh
+echo "your-anthropic-api-key"' > ~/.claude/anthropic-api-key.sh
+chmod 700 ~/.claude/anthropic-api-key.sh
+# Add apiKeyHelper to settings.json
+echo '{"apiKeyHelper": "~/.claude/anthropic-api-key.sh"}' > ~/.claude/settings.json
+# Or merge into existing: jq '. + {apiKeyHelper: "~/.claude/anthropic-api-key.sh"}' ~/.claude/settings.json
+
+# 2. Build
+npm install && npm run build
+
+# 3. Add MCP server (sandbox)
+claude mcp add prisme-ai-builder \
+  -e PRISME_API_KEY="your-jwt-token" \
+  -e PRISME_API_BASE_URL="https://api.sandbox.prisme.ai/v2" \
+  -e PRISME_WORKSPACE_ID="gQxyd2S" \
+  -e PRISME_ENVIRONMENTS='{"sandbox":{"apiUrl":"https://api.sandbox.prisme.ai/v2","workspaces":{"ai-knowledge":"gQxyd2S","ai-store":"K5boVst"}}}' \
+  -- node "$(pwd)/build/index.js"
+
+# 4. Install agent
+cp claudeBootstrap/prisme-assistant.yml ~/.claude/agents/
+```
+
+## Usage
+
+```bash
+claude                          # Start, type '@' to see prisme tools
+claude --agent prisme-assistant # Use Prisme-specific agent
+```
+
+## Workspaces
+
+Use `workspaceName` parameter in tools to target specific workspaces:
+- `ai-knowledge` - AI Knowledge product
+- `ai-store` - AI Store product
+
+## Troubleshooting
+
+```bash
+claude mcp list                 # Check server is registered
+claude mcp remove prisme-ai-builder  # Remove and re-add if issues
+```
+
+## Changelog
+
+### 2026-01-21
+- Renamed `dot_claude` folder to `.claude`
+- Added `/guide` skill for onboarding new users
+- Added skills: `/design`, `/gitlab-ticket`, `/workspace-edit`
+- Added agents: `code-review`, `prisme-assistant`, `ticket-validator`

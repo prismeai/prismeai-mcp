@@ -1,30 +1,17 @@
 import dotenv from "dotenv";
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
-import {
-  getConfigDir,
-  loadTopologySync,
-  loadCredentialsSync,
-  importLegacyEnvironments,
-  persistTopologySync,
-  CREDENTIALS_FILE,
-  type StoredTopology,
-} from "./auth/persist.js";
 
 // Load environment variables
 dotenv.config();
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Environment variable exports
 export const PRISME_FORCE_READONLY = process.env.PRISME_FORCE_READONLY === "true";
 // Disable feedback/reporting tools (these communicate with Prisme.ai servers)
 export const PRISME_DISABLE_FEEDBACK_TOOLS = process.env.PRISME_DISABLE_FEEDBACK_TOOLS === "true";
 const PRISME_WORKSPACES = process.env.PRISME_WORKSPACES;
+const PRISME_ENVIRONMENTS = process.env.PRISME_ENVIRONMENTS;
 const PRISME_DEFAULT_ENVIRONMENT = process.env.PRISME_DEFAULT_ENVIRONMENT;
 
-// Legacy environment variables (deprecated, use the config dir instead)
+// Legacy environment variables (deprecated, use PRISME_ENVIRONMENTS instead)
 const LEGACY_PRISME_API_KEY = process.env.PRISME_API_KEY;
 const LEGACY_PRISME_WORKSPACE_ID = process.env.PRISME_WORKSPACE_ID;
 const LEGACY_PRISME_API_BASE_URL = process.env.PRISME_API_BASE_URL;
@@ -44,7 +31,7 @@ export interface EnvironmentConfig {
   apiKey?: string;
   workspaces?: WorkspaceMapping;
   default?: boolean;
-  // Studio origin, used to derive the token-creation URL (<studio>/settings/tokens).
+  // Required only when the `refresh_auth_token` tool is invoked.
   studioUrl?: string;
 }
 
@@ -72,216 +59,137 @@ export let environmentsConfig: EnvironmentsConfig = {};
 // Track the resolved default environment name
 let defaultEnvironmentName: string | undefined;
 
-function validateEnvironments(parsed: any): EnvironmentsConfig {
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("Environments config must be a JSON object");
-  }
+// Parse PRISME_ENVIRONMENTS (new nested structure)
+if (PRISME_ENVIRONMENTS) {
+  try {
+    const parsed = JSON.parse(PRISME_ENVIRONMENTS);
 
-  for (const [envName, envConfig] of Object.entries(parsed)) {
-    const config = envConfig as any;
-
-    if (typeof config !== "object" || config === null) {
-      throw new Error(`Environment "${envName}" must be an object`);
+    // Validate format: object with environment configs
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      throw new Error("Must be a JSON object");
     }
 
-    if (typeof config.apiUrl !== "string") {
-      throw new Error(`Environment "${envName}" must have an "apiUrl" string`);
-    }
+    for (const [envName, envConfig] of Object.entries(parsed)) {
+      const config = envConfig as any;
 
-    if (config.apiKey !== undefined && typeof config.apiKey !== "string") {
-      throw new Error(`Environment "${envName}" apiKey must be a string if provided`);
-    }
+      // Validate environment config structure
+      if (typeof config !== "object" || config === null) {
+        throw new Error(`Environment "${envName}" must be an object`);
+      }
 
-    if (config.studioUrl !== undefined && typeof config.studioUrl !== "string") {
-      throw new Error(`Environment "${envName}" studioUrl must be a string if provided`);
-    }
+      if (typeof config.apiUrl !== "string") {
+        throw new Error(
+          `Environment "${envName}" must have an "apiUrl" string`
+        );
+      }
 
-    // workspaces is optional
-    if (config.workspaces !== undefined) {
+      if (config.apiKey !== undefined && typeof config.apiKey !== "string") {
+        throw new Error(
+          `Environment "${envName}" apiKey must be a string if provided`
+        );
+      }
+
       if (
-        typeof config.workspaces !== "object" ||
-        config.workspaces === null ||
-        Array.isArray(config.workspaces)
+        config.studioUrl !== undefined &&
+        typeof config.studioUrl !== "string"
       ) {
-        throw new Error(`Environment "${envName}" workspaces must be an object if provided`);
-      }
-
-      for (const [wsName, wsId] of Object.entries(config.workspaces)) {
-        if (typeof wsId !== "string") {
-          throw new Error(`Workspace ID for "${envName}.${wsName}" must be a string`);
-        }
-      }
-    }
-  }
-
-  return parsed as EnvironmentsConfig;
-}
-
-/**
- * Load the environment topology, in priority order:
- *   1. <PRISME_CONFIG_DIR>/config.json (the plugin data dir)
- *   2. Legacy PRISME_ENVIRONMENTS (env var or ~/.claude.json registration),
- *      imported once into the config dir
- *   3. The default topology shipped with the plugin (config/default-environments.json)
- */
-function loadEnvironments(): { environments: EnvironmentsConfig; defaultName?: string } {
-  // 1. Config dir
-  try {
-    const topology = loadTopologySync();
-    if (topology) {
-      return {
-        environments: validateEnvironments(topology.environments),
-        defaultName: topology.defaultEnvironment,
-      };
-    }
-  } catch (error) {
-    console.error(
-      `Warning: invalid config.json in ${getConfigDir()}: ${
-        error instanceof Error ? error.message : "Unknown error"
-      }`
-    );
-  }
-
-  // 2. Legacy PRISME_ENVIRONMENTS (one-time import into the config dir)
-  const legacy = importLegacyEnvironments();
-  if (legacy && Object.keys(legacy).length > 0) {
-    try {
-      const environments = validateEnvironments(legacy);
-
-      // Split into topology (config.json) + tokens (credentials.json)
-      const topology: StoredTopology = { environments: {} };
-      const creds: Record<string, { token: string; updatedAt?: string }> = {};
-      for (const [envName, env] of Object.entries(environments)) {
-        const { apiKey, ...rest } = env;
-        topology.environments[envName] = rest;
-        if (apiKey) {
-          creds[envName] = { token: apiKey, updatedAt: new Date().toISOString() };
-        }
-      }
-
-      try {
-        persistTopologySync(topology);
-        if (Object.keys(creds).length > 0) {
-          const credsPath = join(getConfigDir(), CREDENTIALS_FILE);
-          const tmpPath = `${credsPath}.tmp-${process.pid}-${Date.now()}`;
-          mkdirSync(getConfigDir(), { recursive: true });
-          writeFileSync(tmpPath, JSON.stringify(creds, null, 2) + "\n", { mode: 0o600 });
-          renameSync(tmpPath, credsPath);
-        }
-        console.error(
-          `Imported legacy PRISME_ENVIRONMENTS into ${getConfigDir()}`
-        );
-      } catch (err) {
-        console.error(
-          `Warning: could not write imported config to ${getConfigDir()}: ${
-            err instanceof Error ? err.message : String(err)
-          }`
+        throw new Error(
+          `Environment "${envName}" studioUrl must be a string if provided`
         );
       }
 
-      return { environments };
-    } catch (error) {
-      console.error(
-        `Warning: legacy PRISME_ENVIRONMENTS is invalid: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
-      );
-    }
-  }
+      // workspaces is optional
+      if (config.workspaces !== undefined) {
+        if (
+          typeof config.workspaces !== "object" ||
+          config.workspaces === null ||
+          Array.isArray(config.workspaces)
+        ) {
+          throw new Error(
+            `Environment "${envName}" workspaces must be an object if provided`
+          );
+        }
 
-  // 3. Default topology shipped with the plugin. From the bundled layout
-  // (plugin/build/index.js) it is at ../config; from the tsc/tsx layouts
-  // (build/config.js, src/config.ts) it is at <repo>/plugin/config.
-  const shippedDefault =
-    [
-      join(__dirname, "..", "config", "default-environments.json"),
-      join(__dirname, "..", "plugin", "config", "default-environments.json"),
-    ].find((p) => existsSync(p)) ?? "";
-  try {
-    if (shippedDefault && existsSync(shippedDefault)) {
-      const parsed = JSON.parse(readFileSync(shippedDefault, "utf-8")) as StoredTopology;
-      return {
-        environments: validateEnvironments(parsed.environments),
-        defaultName: parsed.defaultEnvironment,
-      };
+        // Validate workspace IDs are strings
+        for (const [wsName, wsId] of Object.entries(config.workspaces)) {
+          if (typeof wsId !== "string") {
+            throw new Error(
+              `Workspace ID for "${envName}.${wsName}" must be a string`
+            );
+          }
+        }
+      }
+
+      // Track environment with default: true
+      if (config.default === true) {
+        if (defaultEnvironmentName) {
+          console.error(
+            `Warning: Multiple environments marked as default. Using "${envName}" instead of "${defaultEnvironmentName}"`
+          );
+        }
+        defaultEnvironmentName = envName;
+      }
     }
+
+    environmentsConfig = parsed;
+
+    // Determine default environment: explicit default field > PRISME_DEFAULT_ENVIRONMENT > first environment
+    if (!defaultEnvironmentName && PRISME_DEFAULT_ENVIRONMENT) {
+      if (environmentsConfig[PRISME_DEFAULT_ENVIRONMENT]) {
+        defaultEnvironmentName = PRISME_DEFAULT_ENVIRONMENT;
+      }
+    }
+    if (!defaultEnvironmentName && Object.keys(environmentsConfig).length > 0) {
+      defaultEnvironmentName = Object.keys(environmentsConfig)[0];
+    }
+
+    // Set exports from default environment
+    if (defaultEnvironmentName && environmentsConfig[defaultEnvironmentName]) {
+      const defaultEnv = environmentsConfig[defaultEnvironmentName];
+      PRISME_API_KEY = defaultEnv.apiKey;
+      PRISME_API_BASE_URL = defaultEnv.apiUrl;
+      if (defaultEnv.workspaces) {
+        workspaceMappings = defaultEnv.workspaces;
+        // Use first workspace as default if available
+        const firstWorkspace = Object.values(defaultEnv.workspaces)[0];
+        if (firstWorkspace) {
+          PRISME_WORKSPACE_ID = firstWorkspace;
+        }
+      }
+    }
+
+    console.error(
+      `Loaded ${Object.keys(environmentsConfig).length} environments: ${Object.keys(environmentsConfig).join(", ")}` +
+        (defaultEnvironmentName ? ` (default: ${defaultEnvironmentName})` : "")
+    );
   } catch (error) {
     console.error(
-      `Warning: invalid default-environments.json: ${
-        error instanceof Error ? error.message : "Unknown error"
-      }`
+      "Error: PRISME_ENVIRONMENTS must be valid JSON with environment configs"
     );
-  }
-
-  return { environments: {} };
-}
-
-const loaded = loadEnvironments();
-environmentsConfig = loaded.environments;
-
-// Merge stored tokens (credentials.json) into the in-memory environments
-const storedCredentials = loadCredentialsSync();
-for (const [envName, cred] of Object.entries(storedCredentials)) {
-  if (environmentsConfig[envName] && cred?.token) {
-    environmentsConfig[envName].apiKey = cred.token;
+    console.error(
+      'Example: {"sandbox":{"apiUrl":"https://api.sandbox.prisme.ai/v2","apiKey":"ey...","default":true}}'
+    );
+    console.error(
+      `Details: ${error instanceof Error ? error.message : "Unknown error"}`
+    );
+    process.exit(1);
   }
 }
-
-// Determine default environment:
-// explicit default field > config.json defaultEnvironment > PRISME_DEFAULT_ENVIRONMENT > first
-for (const [envName, env] of Object.entries(environmentsConfig)) {
-  if (env.default === true) {
-    if (defaultEnvironmentName) {
-      console.error(
-        `Warning: Multiple environments marked as default. Using "${envName}" instead of "${defaultEnvironmentName}"`
-      );
-    }
-    defaultEnvironmentName = envName;
-  }
-}
-if (!defaultEnvironmentName && loaded.defaultName && environmentsConfig[loaded.defaultName]) {
-  defaultEnvironmentName = loaded.defaultName;
-}
-if (
-  !defaultEnvironmentName &&
-  PRISME_DEFAULT_ENVIRONMENT &&
-  environmentsConfig[PRISME_DEFAULT_ENVIRONMENT]
-) {
-  defaultEnvironmentName = PRISME_DEFAULT_ENVIRONMENT;
-}
-if (!defaultEnvironmentName && Object.keys(environmentsConfig).length > 0) {
-  defaultEnvironmentName = Object.keys(environmentsConfig)[0];
-}
-
-// Set exports from default environment
-if (defaultEnvironmentName && environmentsConfig[defaultEnvironmentName]) {
-  const defaultEnv = environmentsConfig[defaultEnvironmentName];
-  PRISME_API_KEY = defaultEnv.apiKey;
-  PRISME_API_BASE_URL = defaultEnv.apiUrl;
-  if (defaultEnv.workspaces) {
-    workspaceMappings = defaultEnv.workspaces;
-    // Use first workspace as default if available
-    const firstWorkspace = Object.values(defaultEnv.workspaces)[0];
-    if (firstWorkspace) {
-      PRISME_WORKSPACE_ID = firstWorkspace;
-    }
-  }
-}
-
-if (Object.keys(environmentsConfig).length > 0) {
-  console.error(
-    `Loaded ${Object.keys(environmentsConfig).length} environments: ${Object.keys(environmentsConfig).join(", ")}` +
-      (defaultEnvironmentName ? ` (default: ${defaultEnvironmentName})` : "")
-  );
-}
-
 // Parse legacy PRISME_WORKSPACES (flat structure for backward compatibility)
-if (Object.keys(environmentsConfig).length === 0 && PRISME_WORKSPACES) {
+else if (PRISME_WORKSPACES) {
   try {
     const parsed = JSON.parse(PRISME_WORKSPACES);
 
     // Validate format: object with string keys and values
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       throw new Error("Must be a JSON object");
     }
 
@@ -305,10 +213,11 @@ if (Object.keys(environmentsConfig).length === 0 && PRISME_WORKSPACES) {
     console.error(
       `Details: ${error instanceof Error ? error.message : "Unknown error"}`
     );
+    process.exit(1);
   }
 }
 
-// Fallback to legacy environment variables if not set from environments config
+// Fallback to legacy environment variables if not set from PRISME_ENVIRONMENTS
 if (!PRISME_API_KEY && LEGACY_PRISME_API_KEY) {
   PRISME_API_KEY = LEGACY_PRISME_API_KEY;
 }
@@ -319,13 +228,15 @@ if (LEGACY_PRISME_API_BASE_URL && PRISME_API_BASE_URL === "https://api.staging.p
   PRISME_API_BASE_URL = LEGACY_PRISME_API_BASE_URL;
 }
 
-// The server intentionally starts even with no environments/tokens configured:
-// the `set_token` tool is the supported way to register credentials at runtime.
+// Validate that we have at least environments configured or legacy fallback
 if (Object.keys(environmentsConfig).length === 0 && !PRISME_API_KEY) {
   console.error(
-    `Warning: no environments configured. Register one with the set_token tool ` +
-      `(config dir: ${getConfigDir()}).`
+    "Error: PRISME_ENVIRONMENTS must be configured with at least one environment"
   );
+  console.error(
+    'Example: {"sandbox":{"apiUrl":"https://api.sandbox.prisme.ai/v2","apiKey":"ey...","default":true}}'
+  );
+  process.exit(1);
 }
 
 // Export the resolved default environment name
@@ -353,7 +264,7 @@ export function resolveWorkspaceAndEnvironment(
     };
   }
 
-  // 2. Environment + workspaceName (from environments config)
+  // 2. Environment + workspaceName (from PRISME_ENVIRONMENTS)
   if (params.environment && params.workspaceName) {
     const envConfig = environmentsConfig[params.environment];
     if (!envConfig) {

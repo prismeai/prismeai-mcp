@@ -1,27 +1,15 @@
 # Environment Configuration
 
-The MCP server supports multiple Prisme.ai environments with custom API URLs and per-environment API tokens.
-
-## Where configuration lives
-
-The server reads and writes its configuration in `PRISME_CONFIG_DIR` (set by the plugin to `${CLAUDE_PLUGIN_DATA}`; defaults to `~/.prisme-ai-mcp` when unset):
-
-| File | Contents |
-|------|----------|
-| `config.json` | Environment topology: `{ "environments": { name: { apiUrl, studioUrl?, workspaces? } }, "defaultEnvironment"? }` — no secrets |
-| `credentials.json` | Per-environment API tokens (`{ name: { token, updatedAt } }`), file mode 600 |
-
-A default topology (sandbox, staging, prod) ships with the plugin in `config/default-environments.json` and is used until you register your own environments.
+The MCP server supports multiple Prisme.ai environments with custom API URLs and JWT tokens.
 
 ## Dynamic Environments
 
-You can add any number of custom environments with any name. Registering a token for an unknown environment via `set_token` (passing `apiUrl`) creates it.
+Environments are configured during setup. You can add any number of custom environments with any name.
 
 ### Common Environment Examples
 
 | Environment | API URL |
 |-------------|---------|
-| `sandbox` | `https://api.sandbox.prisme.ai/v2` |
 | `prod` | `https://api.studio.prisme.ai/v2` |
 | `custom` | `https://api.your-instance.prisme.ai/v2` |
 
@@ -60,79 +48,112 @@ When resolving workspace and API URL:
 
 ## Environment Structure
 
-Each environment in `config.json` contains:
+Each environment contains:
 
 ```json
 {
-  "environments": {
-    "sandbox": {
-      "apiUrl": "https://api.sandbox.prisme.ai/v2",
-      "studioUrl": "https://sandbox.prisme.ai"
-    },
-    "prod": {
-      "apiUrl": "https://api.studio.prisme.ai/v2"
-    }
+  "sandbox": {
+    "apiUrl": "https://api.sandbox.prisme.ai/v2",
+    "apiKey": "your_jwt_token_here"
   },
-  "defaultEnvironment": "sandbox"
+  "prod": {
+    "apiUrl": "https://api.studio.prisme.ai/v2",
+    "apiKey": "another_jwt_token"
+  }
 }
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `apiUrl` | Yes | Base API URL for this environment |
-| `studioUrl` | No | Studio origin, used to build the token-creation URL. Derived from `apiUrl` when absent. |
+| `apiKey` | Yes | JWT token (from browser cookies) |
 | `workspaces` | No | Optional name-to-ID mappings |
-| `default` | No | Marks the default environment |
-
-Tokens are **not** stored in `config.json` — they live in `credentials.json`, written by the `set_token` tool.
+| `studioUrl` | No* | Studio UI URL. *Required to use the `refresh_auth_token` tool.* |
 
 ### With Workspace Mappings (Optional)
 
 ```json
 {
-  "environments": {
-    "sandbox": {
-      "apiUrl": "https://api.sandbox.prisme.ai/v2",
-      "workspaces": {
-        "ai-knowledge": "gQxyd2S",
-        "ai-store": "K5boVst"
-      }
+  "sandbox": {
+    "apiUrl": "https://api.sandbox.prisme.ai/v2",
+    "apiKey": "your_jwt_token",
+    "workspaces": {
+      "ai-knowledge": "gQxyd2S",
+      "ai-store": "K5boVst"
     }
   }
 }
 ```
 
-## Authentication: API tokens
+## Adding Environments
 
-Authentication uses **user-created API tokens** (no browser automation):
+### Via Setup Script (Fresh Install)
 
-1. Create a token in the studio of the target environment: `https://<studio-domain>/settings/tokens` (e.g. <https://sandbox.prisme.ai/settings/tokens>).
-2. Register it with the `set_token` tool:
+```bash
+./claudeBootstrap/setup.sh
+# Choose "Fresh install" mode
+# Answer "y" to "Do you want to add a Prisme.ai environment?"
+# Provide: environment name, API URL, JWT token
+# Repeat for additional environments
+```
+
+### Via Setup Script (Update Existing)
+
+```bash
+./claudeBootstrap/setup.sh
+# Choose "Update API key" mode
+# Choose "Add a new environment"
+# Provide: environment name, API URL, JWT token
+```
+
+### Getting Your JWT Token
+
+**Recommended:** use the `refresh_auth_token` MCP tool — it opens a browser to the studio and captures the cookie automatically (see "Refreshing JWTs Automatically" below).
+
+Manual fallback:
+
+1. Open your Prisme.ai instance in a browser
+2. Open DevTools (F12 or Inspect)
+3. Go to **Application** > **Cookies**
+4. Find the `access-token` cookie
+5. Copy the value (starts with `ey...`)
+
+## Refreshing JWTs Automatically
+
+The `refresh_auth_token` tool opens a Chromium window pointed at the studio for the given environment, waits for you to authenticate (or detects an existing session), captures the `access-token` cookie, and updates both the in-memory JWT and `~/.claude.json`.
+
+### Prerequisites
+
+1. `studioUrl` field set on the environment in `PRISME_ENVIRONMENTS` (see "Environment Structure" above).
+2. Playwright Chromium installed once: `npx playwright install chromium`.
+
+### Behavior
+
+- A persistent browser profile is created under `~/.prisme-ai-mcp/browser-profile-<env>/`. After the first login, subsequent calls reuse the session and return instantly.
+- The tool is available in readonly mode (`PRISME_FORCE_READONLY=true`) — it does not modify any server-side resource.
+- The captured JWT is never echoed back; the tool returns only the first 12 characters (`tokenPrefix`) for confirmation.
+
+### Usage
 
 ```typescript
 {
   "environment": "sandbox",
-  "token": "your-api-token"
+  "timeoutSeconds": 300   // optional, default 300, min 30, max 900
 }
 ```
 
-The token is validated with a probe call to the API before being persisted; an invalid token persists nothing. To register a brand-new environment, also pass `apiUrl` (and optionally `studioUrl`):
+### Manual Configuration
 
-```typescript
+Set the `PRISME_ENVIRONMENTS` environment variable:
+
+```json
 {
-  "environment": "custom",
-  "token": "your-api-token",
-  "apiUrl": "https://api.custom.prisme.ai/v2"
+  "custom-env": {
+    "apiUrl": "https://api.custom.prisme.ai/v2",
+    "apiKey": "your_jwt_token"
+  }
 }
 ```
-
-### Rotation / expiry
-
-Re-run `set_token` with a fresh token whenever the current one expires or is revoked. Calls failing with HTTP 401 include a reminder of this flow; calls targeting an environment with no stored token return the exact token-creation URL.
-
-### Migration from setup.sh
-
-On first start, if the config dir is empty, the server imports any legacy `PRISME_ENVIRONMENTS` configuration (from the environment variable or from the old `~/.claude.json` registration) into `config.json` + `credentials.json` automatically.
 
 ## Readonly Mode
 
@@ -168,8 +189,7 @@ PRISME_FORCE_READONLY=true
 - `search_events`
 - `search_workspaces`
 - `get_prisme_documentation`
-- `validate_automation`
-- `set_token`
+- `lint_doc`
 
 ## Feedback Tools
 
@@ -186,6 +206,15 @@ If you prefer not to have any data sent to Prisme.ai servers, you can disable th
 ```bash
 PRISME_DISABLE_FEEDBACK_TOOLS=true
 ```
+
+### Via Setup Script
+
+```bash
+./claudeBootstrap/setup.sh
+# Choose option 4) Toggle feedback tools
+```
+
+During fresh install, you'll be asked whether to enable or disable feedback tools with a clear explanation of what they do.
 
 ### Privacy Implications
 

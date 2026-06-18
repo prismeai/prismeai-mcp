@@ -10,7 +10,7 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent, mcp_
 You are running a **smoke test** of every tool exposed by a Prisme.ai App + MCP workspace.
 The goal is: for a given workspace + environment, invoke each `tool-<op>` automation with realistic arguments and the user's real credentials, and keep fixing until every tool returns a non-error result.
 
-The workspace layout you are testing follows the scaffold produced by the `/app-mcp-implement` skill. Re-read `${CLAUDE_PLUGIN_ROOT}/skills/app-mcp-implement/SKILL.md` if you need a refresher on the conventions (especially `tool-*` and `method-*`).
+The workspace layout you are testing follows the scaffold produced by the `/app-mcp-implement` skill. Re-read `.claude/skills/app-mcp-implement/SKILL.md` if you need a refresher on the conventions (especially `tool-*` and `method-*`).
 
 **Scope guardrails**:
 - Supported credential models: static tokens (PAT / Bearer), Basic (email + token), OAuth2 `client_credentials`, AND OAuth2 authorization-code / PKCE **via the tenant-injection pattern** — see Phase 2 + Phase 5 below. The only thing still out of scope is OAuth-AC when no pre-configured tenant exists (i.e. you'd need to drive a real browser flow yourself).

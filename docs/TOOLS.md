@@ -47,7 +47,7 @@ All tools are prefixed with `mcp__prisme-ai-builder__` when used in Claude.
 
 | Tool | Description |
 |------|-------------|
-| `set_token` | Register (or rotate) a user-created API token for an environment. Create the token at `<studio>/settings/tokens`, then call with `environment` + `token` (plus `apiUrl` for a new environment). Probe-validated before persisting to the config dir. See [ENVIRONMENTS.md](./ENVIRONMENTS.md#authentication-api-tokens). |
+| `refresh_auth_token` | Open a browser to the studio and capture the access-token cookie. Updates the JWT in memory and in `~/.claude.json`. Requires `studioUrl` in env config and `npx playwright install chromium`. See [ENVIRONMENTS.md](./ENVIRONMENTS.md#refreshing-jwts-automatically). |
 
 ## AI Knowledge
 

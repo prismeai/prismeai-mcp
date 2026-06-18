@@ -24,20 +24,11 @@ mcp-prisme.ai/
 │   ├── index.ts          # Main MCP server
 │   ├── api-client.ts     # Prisme.ai API client
 │   └── config.ts         # Configuration handling
-├── plugin/               # The plugin shipped to Claude Code + Codex
-│   ├── .claude-plugin/   # Claude plugin manifest
-│   ├── .codex-plugin/    # Codex plugin manifest
-│   ├── .mcp.json         # MCP server registration
-│   ├── skills/           # Plugin skills (/prisme-ai:*)
-│   ├── agents/           # Claude agents (code-review, prisme-assistant)
-│   ├── hooks/            # Plugin hooks (allow-workspace.sh)
-│   ├── llmDoc/           # Documentation served by get_prisme_documentation
-│   ├── config/           # Default environment topology
-│   └── build/index.js    # Committed self-contained bundle (npm run build:bundle)
-├── .claude-plugin/       # Claude marketplace (source: ./plugin)
-├── .agents/plugins/      # Codex marketplace (source: ./plugin)
+├── claudeBootstrap/
+│   ├── setup.sh          # Automated setup script
+│   └── prisme-assistant.md   # Claude agent definition
 ├── docs/                 # Documentation
-├── build/                # tsc output (gitignored, dev only)
+├── build/                # Compiled JavaScript
 └── README.md
 ```
 
