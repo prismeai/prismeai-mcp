@@ -1,170 +1,74 @@
-# Prisme.ai MCP Plugin
+# Prisme.ai Builder MCP Server
 
-Prisme.ai MCP is distributed as a plugin for **Claude Code** and **Codex**. The plugin bundles the MCP server, Prisme.ai skills, Claude agents, hooks, documentation, and the DSUL linter in one repository.
+A Model Context Protocol (MCP) server for interacting with the Prisme.ai AI Builder API, distributed as a plugin for **Claude Code** and **Codex** (one repo, both manifests).
 
-Legacy direct MCP registration, `setup.sh`, local `build/index.js` registration, Playwright token capture, and manual `.claude` copying are retired. Install and use the plugin only.
+## Features
 
-## What You Get
+| Feature | Description |
+|---------|-------------|
+| **Workspaces** | Pull/push workspaces, search across workspaces, edit, search activity |
+| **Automations** | CRUD, execution, authoritative DSUL linting (`validate_automation`) |
+| **AI Knowledge** | RAG queries, document management, project management |
+| **Documentation** | Access Prisme.ai docs directly |
+| **Skills & agents** | `/prisme-ai:*` skills (connector scaffolding, testing, docs, A2UI…), `code-review` + `prisme-assistant` agents |
 
-| Component | Description |
-|-----------|-------------|
-| MCP server | `prisme-ai-builder` tools for workspaces, automations, apps, events, files, AI Knowledge, and Prisme.ai documentation |
-| DSUL validation | `validate_automation`, backed by the bundled linter |
-| Skills | `/prisme-ai:*` skills for connector scaffolding, testing, documentation, fleet sync, A2UI, workspace pages, assistant workflows, and ticket validation |
-| Claude agents | `code-review` and `prisme-assistant` for Claude Code |
-| Hooks | Workspace allowlist hook for sensitive Prisme.ai write/execution tools |
+## Install
 
-## Install From GitHub
+**Claude Code**
 
-Repository: [prismeai/prismeai-mcp](https://github.com/prismeai/prismeai-mcp)
-
-### Claude Code
-
-In Claude Code:
-
-```text
+```
 /plugin marketplace add prismeai/prismeai-mcp
 /plugin install prisme-ai@prismeai-mcp
 ```
 
-Then reload plugins or restart the session if the tools are not visible immediately.
+**Codex**
 
-### Codex
-
-From a terminal:
-
-```bash
+```
 codex plugin marketplace add prismeai/prismeai-mcp
 codex plugin add prisme-ai@prismeai-mcp
 ```
 
-The plugin source is `./plugin` inside this repository. Both marketplaces point there, so the same GitHub repo installs cleanly in Claude Code and Codex.
+The plugin ships a prebuilt, self-contained `plugin/build/index.js`: the only runtime requirement is `node` (already required by both tools). No `npm install`, no build step, no SessionStart cost.
 
 ## Authenticate
 
-Authentication uses user-created Prisme.ai API tokens.
+Credentials are user-created API tokens, registered per environment:
 
-1. Create a token in the target studio: `https://<studio-domain>/settings/tokens`
-   Example: <https://sandbox.prisme.ai/settings/tokens>
-2. Ask the agent to register the token for the environment, or call the MCP tool directly:
+1. Create a token in the studio of the target environment: `https://<studio-domain>/settings/tokens` (e.g. <https://sandbox.prisme.ai/settings/tokens>).
+2. Register it with the `set_token` tool (`environment` + `token`). The token is probe-validated against the API, then persisted to the plugin data dir (`credentials.json`, mode 600) — an invalid token persists nothing.
+3. Re-run `set_token` anytime to rotate an expired token.
 
-```json
-{
-  "environment": "sandbox",
-  "token": "<your token>"
-}
-```
+If a tool call targets an environment with no stored token, the error contains the exact token-creation URL for that environment. Users migrating from the old `setup.sh` install are imported automatically on first start (from `PRISME_ENVIRONMENTS` or `~/.claude.json`).
 
-`set_token` validates the token with the API before persisting it. Valid tokens are stored in the plugin data directory as `credentials.json` with file mode `600`; invalid tokens persist nothing.
+## Getting started
 
-Run `set_token` again any time you need to rotate a token.
-
-## First Use
-
-After installation, run:
-
-```text
-/prisme-ai:guide
-```
-
-The guide lists every bundled skill and includes the Prisme.ai environment rules, workspace parameter rules, event-search patterns, and recommended workflow.
-
-Typical requests:
-
-```text
-List automations in ai-knowledge on sandbox
-```
-
-```text
-Trace this correlationId in sandbox: <id>
-```
-
-```text
-/prisme-ai:app-mcp-implement Salesforce connector
-```
+Run `/prisme-ai:guide` for the skills catalog and the Prisme.ai environment context (environments, workspace parameters, event schema, recommended workflow).
 
 ## Updating
 
-Pull plugin updates from the marketplace:
+Releases bump the plugin `version` and refresh the committed bundle (see `.github/workflows/release.yml`). Pull the update with:
 
-### Claude Code
-
-```text
+```
 /plugin marketplace update prismeai-mcp
 ```
 
-### Codex
+## Development
 
 ```bash
-codex plugin marketplace upgrade prismeai-mcp
+npm install           # also installs linter/ deps
+npm run dev           # run from TypeScript sources (tsx)
+npm run build         # tsc build (build/ tree)
+npm run build:bundle  # self-contained single-file bundle -> plugin/build/index.js
 ```
 
-Release tags rebuild and commit the self-contained bundle at `plugin/build/index.js`.
+`plugin/build/index.js` is a committed artifact rebuilt by CI on each release tag.
 
-## Legacy Cleanup
-
-This section is only for machines that used the retired installer or manual MCP registration.
-
-Remove old MCP registrations after installing the plugin:
-
-```bash
-claude mcp remove prisme-ai-builder
-codex mcp remove prisme-ai-builder
-```
-
-The plugin automatically imports legacy `PRISME_ENVIRONMENTS` from the old environment variable or `~/.claude.json` on first start when its config directory is empty.
-
-Do not run `claudeBootstrap/setup.sh`; it is retired. Do not register `build/index.js` manually. Do not copy `claudeBootstrap/.claude` into projects.
-
-## Runtime Model
-
-The plugin starts the committed bundle:
-
-```text
-plugin/build/index.js
-```
-
-Runtime requirements:
-
-- Node.js, provided by the host environment
-- No `npm install`
-- No local build
-- No Playwright
-- No browser token capture
-
-## Maintainer Development
-
-Only plugin maintainers need local development commands:
-
-```bash
-npm install
-npm run dev
-npm run build
-npm run build:bundle
-```
-
-`npm run build:bundle` rebuilds the committed runtime artifact at `plugin/build/index.js`.
-
-## Plugin Layout
-
-| Path | Purpose |
-|------|---------|
-| `.claude-plugin/marketplace.json` | Claude marketplace entry, pointing to `./plugin` |
-| `.agents/plugins/marketplace.json` | Codex marketplace entry, pointing to `./plugin` |
-| `plugin/.claude-plugin/plugin.json` | Claude plugin manifest |
-| `plugin/.codex-plugin/plugin.json` | Codex plugin manifest |
-| `plugin/.mcp.json` | MCP server definition |
-| `plugin/build/index.js` | Self-contained MCP server bundle |
-| `plugin/skills/` | Bundled Prisme.ai skills |
-| `plugin/agents/` | Claude Code agents |
-| `plugin/hooks/` | Hook configuration and scripts |
-| `plugin/llmDoc/` | Prisme.ai documentation exposed to tools |
-
-## Reference Docs
+## Documentation
 
 | Guide | Description |
 |-------|-------------|
-| [Quick Start](./docs/QUICK_START.md) | Plugin install and first token setup |
-| [Tools Reference](./docs/TOOLS.md) | MCP tools exposed by the plugin |
-| [Environments](./docs/ENVIRONMENTS.md) | Plugin environment and token persistence |
-| [Development](./docs/DEVELOPMENT.md) | Maintainer development and release flow |
+| [Quick Start](./docs/QUICK_START.md) | Installation and setup |
+| [Tools Reference](./docs/TOOLS.md) | All available MCP tools |
+| [Environments](./docs/ENVIRONMENTS.md) | Multi-environment configuration |
+| [Development](./docs/DEVELOPMENT.md) | Contributing and development |
+| [Manual Setup](./docs/MANUAL_SETUP.md) | Claude Desktop, Cursor, other clients |

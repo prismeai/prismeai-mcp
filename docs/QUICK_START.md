@@ -1,26 +1,26 @@
 # Quick Start
 
-Install the Prisme.ai plugin from GitHub and start using the bundled MCP server, skills, agents, hooks, and DSUL linter in Claude Code or Codex.
+Get the Prisme.ai MCP server running with Claude Code or Codex in minutes.
+
+> **Not using Claude Code or Codex?** See [MANUAL_SETUP.md](./MANUAL_SETUP.md) for Claude Desktop, Cursor, or other MCP clients.
 
 ## Prerequisites
 
-- Claude Code and/or Codex
-- Node.js v18+ available to the host runtime
+- [Node.js](https://nodejs.org) v18+
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`) and/or Codex
 
 ## Installation
 
-Repository: [prismeai/prismeai-mcp](https://github.com/prismeai/prismeai-mcp)
-
 **Claude Code**
 
-```text
+```
 /plugin marketplace add prismeai/prismeai-mcp
 /plugin install prisme-ai@prismeai-mcp
 ```
 
 **Codex**
 
-```bash
+```
 codex plugin marketplace add prismeai/prismeai-mcp
 codex plugin add prisme-ai@prismeai-mcp
 ```
@@ -42,9 +42,11 @@ No clone, no `npm install`, no build: the plugin ships a prebuilt, self-containe
 2. Register it with the `set_token` tool (just ask: *"register this token for sandbox: …"*). The token is validated against the API, then persisted to the plugin data dir.
 3. Repeat per environment; re-run `set_token` to rotate an expired token.
 
+If you previously installed via `setup.sh`, the server imports your existing environment configuration automatically on first start.
+
 ## After Install
 
-Run `/prisme-ai:guide` for the skills catalog and Prisme.ai context. In Claude Code, type `@` to see available `mcp__prisme-ai-builder__*` tools.
+Type `@` in Claude to see available `mcp__prisme-ai-builder__*` tools, and run `/prisme-ai:guide` for the skills catalog and Prisme.ai context.
 
 ## Verify Installation
 
@@ -58,16 +60,8 @@ If no token is registered yet, the error message gives you the exact token-creat
 
 ## Updating
 
-**Claude Code**
-
-```text
-/plugin marketplace update prismeai-mcp
 ```
-
-**Codex**
-
-```bash
-codex plugin marketplace upgrade prismeai-mcp
+/plugin marketplace update prismeai-mcp
 ```
 
 ---

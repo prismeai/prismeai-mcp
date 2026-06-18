@@ -196,4 +196,4 @@ PRISME_DISABLE_FEEDBACK_TOOLS=true
 
 ---
 
-**Next:** [Development Guide](./DEVELOPMENT.md)
+**Next:** [Development Guide](./DEVELOPMENT.md) | [Manual Setup](./MANUAL_SETUP.md)
