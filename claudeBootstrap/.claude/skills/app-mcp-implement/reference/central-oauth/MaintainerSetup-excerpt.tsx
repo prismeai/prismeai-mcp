@@ -73,7 +73,8 @@ function MaintainerSetup(props: Props) {
     void (async () => {
       try {
         // Authoritative maintainer gate (mirrors setOAuthClient): the server checks
-        // user.role (owner/editor/admin) and returns { allowed }. We CANNOT infer this
+        // user.role (owner/editor/admin) OR user.platformRole === "superadmin" and
+        // returns { allowed }. We CANNOT infer this
         // from GET /security/secrets — accessManager.findAll returns an empty 200 {}
         // for non-privileged users (not a 403), indistinguishable from a not-yet-set
         // maintainer. A non-maintainer gets the access-denied screen, never the form.

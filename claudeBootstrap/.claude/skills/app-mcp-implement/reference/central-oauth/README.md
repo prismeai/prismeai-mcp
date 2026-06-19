@@ -21,9 +21,12 @@ So the core serves it **operationally**:
   fetch is MANDATORY (else the secret leaks into `runtime.fetch.failed` events).
 - `setOAuthClient` — maintainer webhook writing the core declared secret
   `<camel>CentralOAuth = {oauthClientId, oauthClientSecret, scopes}`.
-  **Fail-closed role gate** (`user.role` ∈ owner/editor/admin, absent = 403):
-  the PATCH below runs with a privileged `auth: workspace: true` JWT, so the
-  caller's RBAC is NOT re-checked by the platform.
+  **Fail-closed role gate** (`user.role` ∈ owner/editor/admin **OR
+  `user.platformRole = "superadmin"`**, absent = 403): the PATCH below runs with a
+  privileged `auth: workspace: true` JWT, so the caller's RBAC is NOT re-checked by
+  the platform. `user.role` is only the *workspace-direct* role, so the
+  `platformRole` clause lets platform SuperAdmins (and org-inherited owners are a
+  separate gap) operate the view without a direct per-workspace grant.
 - `maintainerStatus` — read webhook the SPA calls FIRST to decide whether to
   show the maintainer form. Returns `{allowed}` from the SAME `user.role` gate as
   `setOAuthClient`, plus the public `clientId`/`scopes` for prefill (NEVER the

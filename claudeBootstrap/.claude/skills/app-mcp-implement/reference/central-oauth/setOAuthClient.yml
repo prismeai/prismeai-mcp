@@ -25,7 +25,7 @@ do:
         - break: {}
   - comment: 'Role gate — FAIL-CLOSED: the secret PATCH below runs with a privileged workspace JWT (auth: workspace: true), so the caller''s own RBAC is NOT re-checked there. user.role is the caller''s role ON THIS workspace (runtime contexts/factory.ts getLoadedSubjectRole) — absent for non-members, who must be rejected.'
   - conditions:
-      '{{user.role}} != "owner" && {{user.role}} != "editor" && {{user.role}} != "admin"':
+      '{{user.role}} != "owner" && {{user.role}} != "editor" && {{user.role}} != "admin" && {{user.platformRole}} != "superadmin"':
         - set:
             name: $http
             value:

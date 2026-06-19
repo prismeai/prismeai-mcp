@@ -9,7 +9,7 @@ do:
       name: allowed
       value: false
   - conditions:
-      '{{user.id}} && ({{user.role}} = "owner" || {{user.role}} = "editor" || {{user.role}} = "admin")':
+      '{{user.id}} && ({{user.role}} = "owner" || {{user.role}} = "editor" || {{user.role}} = "admin" || {{user.platformRole}} = "superadmin")':
         - set:
             name: allowed
             value: true
