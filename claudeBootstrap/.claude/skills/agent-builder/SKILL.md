@@ -87,6 +87,10 @@ model: gpt-4o-mini            # llm-gateway model id — ASK the user, do not as
 temperature: 0.2
 profile: agent_light          # simple|workflow|agent_light|agent_full|orchestrator
 visibility: restricted        # publish visibility: restricted|public|private
+# --- Per-agent budget overrides (optional; omit to inherit the profile defaults) ---
+token_budget: null            # per-task token budget; agent_light default = 20000
+tool_call_budget: null        # max tool calls per task; agent_light default = 15
+max_turns: null               # max ReAct turns per task; agent_light default = 10
 capabilities: []              # tools other than App+MCP (see Tool types below)
 appMcp: []                    # installed App+MCP connectors wired as mcp tools
 tests: []                     # inline test battery
@@ -104,6 +108,37 @@ An agent that uses tools/MCP needs **`agent_light` or higher**.
 **Native system tools** (`todo_write`, `knowledge_search`, `planning_create_plan`,
 `memory_*`, `human_*`, `agent_delegate`, …) are injected automatically by the
 profile. Never list them in `capabilities`.
+
+## Per-agent budget (`token_budget` / `tool_call_budget` / `max_turns`)
+
+Each profile caps every task by a **token budget**, a **tool-call budget**, and a **max
+turns** (agent-factory `_init-defaults` reads the agent record first, then falls back to
+`config.profiles[<profile>].limits`). The `agent_light` defaults are **`token_budget: 20000`,
+`tool_calls: 15`, `max_turns: 10`** — low for tool-heavy agents (big MCP tool schemas +
+verbose tool results blow 20000 fast). The symptom is a truncated reply: *"Réponse
+incomplète — le traitement a été interrompu … limite de budget."* and `usage.tool_calls`/
+`tokens` well under what the flow needed.
+
+Override **per agent** (don't touch the shared `agent_light` profile — it's a protected
+`one-product` core workspace and affects every agent): set `token_budget` /
+`tool_call_budget` / `max_turns` in `agent.yml`. `_init-defaults` uses the agent's value
+when present.
+
+⚠️ **Deploy gotcha — these do NOT survive a normal `deploy`.** The `Agents` app's
+`createAgent`/`updateAgent` does **not** carry `token_budget`/`tool_call_budget`/`max_turns`
+(they're outside its schema), so an Agents-app deploy leaves them unset → the agent reverts
+to the profile default (e.g. 20000). **Set them with a direct PATCH** to the agent record,
+NOT through the `Agents` app:
+
+```
+call_api { path: "/workspaces/slug:agent-factory/webhooks/v1/agents/<agentId>", method: "PATCH",
+           apiKey: "<iak_org_key>", withUserBearer: true,
+           body: { token_budget, tool_call_budget, max_turns } }
+```
+
+So after every `deploy` that changes the agent, re-PATCH the budget (or PATCH it standalone).
+`deploy.yml` forwards these args too, but until the `Agents` app supports them the direct
+PATCH is authoritative. Read them back with `getAgent` (the record exposes the three fields).
 
 ## Tool types
 
@@ -396,6 +431,11 @@ installed App+MCP connectors run.
    or wrong), which `deploy.yml` returns as a non-empty `error` — if present, surface
    it and stop (do not write an id). Then run `whoAmI` with the new id to confirm the
    org and write `deployedIds.<env>.org = { slug, name }` (reconcile `knownOrgs`).
+6b. **If `agent.yml` sets any budget override** (`token_budget`/`tool_call_budget`/
+   `max_turns`), **PATCH them onto the agent now** — the Agents-app deploy did NOT persist
+   them (see "Per-agent budget"): `call_api PATCH /workspaces/slug:agent-factory/webhooks/
+   v1/agents/<agentId>` (apiKey + withUserBearer) `{ token_budget, tool_call_budget,
+   max_turns }`. Re-do this after EVERY deploy that re-runs createAgent/updateAgent.
 7. Give the user the SecureChat URL for that env to test the agent (the chat
    frontend, e.g. `https://<env-host>/c/<agentId>`). Confirm the exact host with the
    user rather than guessing, so you never hand over a dead link.

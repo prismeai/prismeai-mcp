@@ -20,11 +20,21 @@ arguments:
     type: string
   visibility:
     type: string
+  token_budget:
+    type: number
+  tool_call_budget:
+    type: number
+  max_turns:
+    type: number
 do:
   - comment: >-
       Always invoked through execute_automation, so the arguments arrive at the
       top level (not under body.*). The skill passes the FULL desired state, so
       deploy is declarative: the remote agent ends up matching the manifest.
+  - comment: >-
+      NOTE: the Agents app does NOT currently persist token_budget/tool_call_budget/
+      max_turns (outside its schema) — they are forwarded here for forward-compat, but
+      the skill MUST also PATCH /v1/agents/<id> with these after deploy (authoritative).
   - conditions:
       '{{agentId}}':
         - Agents.updateAgent:
@@ -36,6 +46,9 @@ do:
               temperature: '{{temperature}}'
               profile: '{{profile}}'
               tools: '{{tools}}'
+              token_budget: '{{token_budget}}'
+              tool_call_budget: '{{tool_call_budget}}'
+              max_turns: '{{max_turns}}'
             output: agent
       default:
         - Agents.createAgent:
@@ -45,6 +58,9 @@ do:
             temperature: '{{temperature}}'
             profile: '{{profile}}'
             tools: '{{tools}}'
+            token_budget: '{{token_budget}}'
+            tool_call_budget: '{{tool_call_budget}}'
+            max_turns: '{{max_turns}}'
             output: agent
   - conditions:
       '{% !{{agent.error}} and {{agent.id}} %}':

@@ -13,6 +13,19 @@ profile: agent_light          # simple | workflow | agent_light | agent_full | o
                               # tools/MCP require agent_light or higher
 visibility: restricted        # publish visibility: restricted | public | private
 
+# --- Per-agent budget overrides (optional; omit/null to inherit the profile) ---
+# Override the profile's per-task caps. agent_light defaults: token_budget 20000 /
+# tool_calls 15 / max_turns 10 — too low for tool-heavy agents (big MCP schemas + verbose
+# tool results truncate the run with "réponse incomplète — budget atteint"). Read by
+# agent-factory _init-defaults (the agent record wins over the shared profile).
+# ⚠️ The Agents app's create/updateAgent does NOT persist these — a deploy reverts them to
+# the profile default. After deploy, set them with a direct PATCH /v1/agents/<id>
+# { token_budget, tool_call_budget, max_turns } (deploy.yml forwards them, but the Agents
+# app currently ignores them, so the PATCH is authoritative).
+token_budget: null
+tool_call_budget: null
+max_turns: null
+
 # --- Capabilities ---
 # Each entry becomes a tool on the deployed agent. Native system tools
 # (todo_write, knowledge_search, planning, memory, delegation, ...) are injected
