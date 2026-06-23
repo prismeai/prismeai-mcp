@@ -210,6 +210,40 @@ By default, `<appName>` = workspace slug. If the user supplies a different name
    ```bash
    cd <appDir> && npm install
    ```
+
+7b. **Bootstrap hardening — apply these BEFORE the first build.** All three ship
+    broken in starter-spa and each is a *recurring* boot-time crash if skipped
+    (observed again 2026-06-23). Fix them proactively, don't wait for the smoke test.
+
+    a. **Trim `scripts/externals.mjs` to the real socle.** starter-spa marks
+       `@radix-ui/react-label`, `@radix-ui/react-switch`, `@radix-ui/react-slider`
+       as host-provided, but the AppRenderer socle does **not** expose them →
+       `ModuleLoadError: Module "@radix-ui/react-label" is not available in the
+       shared socle` at boot (a bundled `<Label>`/shadcn input is enough to hit it).
+       **Remove those three lines** so esbuild bundles them. The runtime's
+       `ModuleLoadError` prints the exact "Available modules" list — trim to match
+       if any other module surfaces. See [[feedback_starter_spa_externals_drift]].
+
+    b. **Convert dark mode to a media query in `src/styles/globals.css`.** starter-spa
+       ships a class-based `.dark { … }` block, but the AppRenderer **never toggles a
+       `.dark` class** → the app is permanently forced to light and ignores the user's
+       OS theme. Rewrite the block as:
+       ```css
+       /* was: .dark { --background: …; … } */
+       @media (prefers-color-scheme: dark) { :root { --background: …; … } }
+       ```
+       Also drop the full-bleed `body { @apply bg-background … }` (keep only
+       `text-foreground`) so the app doesn't paint a frame in the host's theme. Cf. rule 8.
+
+    c. **Don't rely on lucide-react icons beyond a tiny verified set.** lucide-react is
+       external (socle) and the socle ships only a **curated subset** (~250 icons). A
+       valid-looking import (`FileSpreadsheetIcon`, `PresentationIcon`, …) that isn't in
+       the subset resolves to `undefined` at runtime and the whole app crashes with
+       **Minified React error #130** ("Element type is invalid … got: undefined") — and
+       **typecheck passes**, because TS sees the full npm package. Safest default for a
+       fresh app: a **CSS spinner** for loading and **inline SVG / emoji** for decoration;
+       add lucide icons only one-by-one after confirming each renders. Cf. rule 7.
+
 8. First build :
    ```bash
    cd <appDir> && npm run build
@@ -352,7 +386,10 @@ These come straight from `pptx-generator/AGENTS.md`. They MUST be respected.
    `PRISMEAI_API_KEY` (`x-prismeai-api-key`) in scripts/deploy.mjs.
 
 7. **lucide icons** : stick to the curated subset (~250 icons) guaranteed at
-   runtime. Importing a missing icon = "X is undefined" at load time.
+   runtime. A missing icon resolves to `undefined` at load time → the app crashes
+   with **Minified React error #130** ("Element type is invalid … got: undefined").
+   **Typecheck does NOT catch this** (TS sees the full npm package; the socle ships a
+   subset). When in doubt, use a CSS spinner + inline SVG instead — see bootstrap step 7b.
 
 8. **Tailwind classes** : stick to standard utility classes present in the
    platform's pre-compiled CSS. Arbitrary one-offs won't style.
