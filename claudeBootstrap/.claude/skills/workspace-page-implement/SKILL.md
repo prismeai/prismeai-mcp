@@ -48,7 +48,20 @@ Treat each bullet as a checklist item when bootstrapping a new app.
 4. **MCP `upload_file` drops the `metadata` parameter silently** — uploads
    succeed but server-side `metadata: {}` ends up empty. Use `curl` multipart
    with explicit `metadata.path` / `metadata.type` / `metadata.hash` form
-   fields for source uploads. See [[feedback_mcp_upload_file_metadata_dropped]].
+   fields for source uploads (or follow `upload_file` with a
+   `PATCH /workspaces/:id/files/:id {metadata:{path,type:'source',hash}}`).
+   See [[feedback_mcp_upload_file_metadata_dropped]].
+   **PLATFORM FIX 2026-06-23 ~11:30 (commit `ada8572b7` `fix/native-files-upload-metadata`,
+   `services/workspaces/src/utils/uploadMetadata.ts`)**: the upload route now
+   persists both the top-level `metadata` object AND `metadata.<key>` form fields,
+   so on an env running ≥ that build the drop is gone. **Why this matters for the
+   native preview**: a source file uploaded/saved WITHOUT `metadata.path` is keyed
+   by its bare `file.name` (no `src/` prefix) in the sandbox files-map, so the
+   preview compiler's `@/x → src/x` alias resolution FAILS for it (relative `./x`
+   still resolves). Symptom: `@/lib/utils` red-underlined / `(0, import_utils3.readParam)
+   is not a function`, `./` works — NOT a compiler/alias bug (`resolveInVfs` is
+   correct); the cause is the dropped `metadata.path`. On a fixed env, keep `@/`
+   imports and just re-save/redeploy so files regain `metadata.path`.
 5. **In-Builder Builder cannot resolve npm deps outside the socle**
    (`@react-three/*`, `three`, viz libs, etc.). If your app depends on those,
    **warn the user not to click the "Déployer" UI button** — it rebuilds from
