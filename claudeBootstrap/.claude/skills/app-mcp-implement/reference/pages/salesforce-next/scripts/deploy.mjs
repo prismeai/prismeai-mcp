@@ -84,6 +84,8 @@ const SKIP_AUTOMATIONS_SYNC = process.env.PRISMEAI_SKIP_AUTOMATIONS_SYNC === 'tr
 const SKIP_BUNDLE_CLEANUP = process.env.PRISMEAI_SKIP_BUNDLE_CLEANUP === 'true'
 const SKIP_SMOKE = process.env.PRISMEAI_SKIP_SMOKE === 'true'
 const FORCE = process.argv.includes('--force') || process.env.PRISMEAI_FORCE === 'true'
+const SKIP_PUBLISH = process.env.PRISMEAI_SKIP_PUBLISH === 'true'
+const PRISMEAI_APP_SLUG = process.env.PRISMEAI_APP_SLUG || ''
 
 // fail() throws so the top-level try/catch can print a deploy summary + recovery
 // guidance before exiting non-zero. Don't call process.exit() directly here.
@@ -548,9 +550,17 @@ async function patchWorkspaceConfig({ bundleUrl, embedUrl, ws, slug }) {
   const existingBundles = existing.bundles || {}
   const builtAt = new Date().toISOString()
 
+  // A PATCH on /workspaces/<id> REPLACES the `config` object with what we send,
+  // so we must echo back the WHOLE existing config (notably `config.schema`,
+  // which defines the configAppUrl link field shown in Studio) and only override
+  // `config.value`. Sending `{ config: { value } }` alone silently drops
+  // `config.schema` (and any other config sub-key).
   await api('PATCH', `/workspaces/${PRISMEAI_WORKSPACE_ID}`, {
     body: {
       config: {
+        ...(ws?.config || {}),
+        // Inline config UI (Gotcha 31): keep config.block synced to the new bundle.
+        block: bundleUrl,
         value: {
           ...existing,
           bundles: {
@@ -567,6 +577,30 @@ async function patchWorkspaceConfig({ bundleUrl, embedUrl, ws, slug }) {
       },
     },
   })
+}
+
+// ---------------------------------------------------------------------------
+// 4a. Publish the app — snapshot config (config.block + config.value.bundles)
+// into the STORE app.
+//
+// REQUIRED, not optional: installed tenant instances resolve config.block from
+// the PUBLISHED app (getApp reads the last publish_app, NOT the live workspace
+// config). Patching the workspace config alone leaves every instance pointing
+// at the OLD bundle — and once cleanupOrphanBundles deletes it, the instance
+// config UI 404s. Runs AFTER the config PATCH and BEFORE cleanup so the store
+// references the new bundle before the old one is removed.
+// ---------------------------------------------------------------------------
+
+async function publishApp() {
+  if (SKIP_PUBLISH) {
+    console.log('· app publish skipped (PRISMEAI_SKIP_PUBLISH=true)')
+    return
+  }
+  console.log(`→ Publishing app (snapshot config to store)`)
+  const body = { workspaceId: PRISMEAI_WORKSPACE_ID }
+  if (PRISMEAI_APP_SLUG) body.slug = PRISMEAI_APP_SLUG
+  const res = await api('POST', `/apps`, { body })
+  console.log(`✓ published${res?.slug ? ` ${res.slug}` : ''}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -738,6 +772,7 @@ const steps = [
   { key: 'bundle',      label: 'Bundle upload' },
   { key: 'embed',       label: 'embed.js upload' },
   { key: 'config',      label: 'Workspace config PATCH (live pointer)' },
+  { key: 'publish',     label: 'Publish app (snapshot config.block to store)' },
   { key: 'cleanup',     label: 'Orphan bundle cleanup' },
   { key: 'smoke',       label: 'Smoke test (bundle loads + default export)' },
   { key: 'version',     label: 'Version snapshot' },
@@ -762,6 +797,7 @@ const RECOVERY = {
   bundle:      'Bundle upload failed. End users still see the previous version. Re-run `npm run deploy`.',
   embed:       'Bundle is uploaded but embed.js (3rd-party embedding) failed. /apps/<slug> still works. Either set/check PRISMEAI_PLATFORM_URL, or unset it to skip embed entirely.',
   config:      'CRITICAL: bundle was uploaded but workspace config was NOT updated. The new bundle is orphaned; end users still see the OLD version. Re-run `npm run deploy` — a new bundle upload will succeed and the config patch will retry.',
+  publish:     'CRITICAL: workspace config was patched but the app was NOT re-published. Installed tenant instances still resolve the OLD bundle from the published app; once orphan cleanup runs they 404. Re-run `npm run deploy`, or publish_app the workspace, to snapshot config.block into the store.',
   cleanup:     'Deploy SUCCEEDED — the live UI is updated to the new bundle. Cleanup of orphan bundle files failed but is non-critical (will retry next deploy).',
   smoke:       'Bundle is live but the smoke test failed — the bundle may be syntactically broken or reference a missing external. End users will see a "Failed to load bundle" error. Run `npm run undeploy` to roll back, OR fix the bundle and re-deploy.',
   version:     'Deploy SUCCEEDED — the live UI is updated. Version snapshot failed; you may not have a rollback point for this release.',
@@ -784,6 +820,7 @@ try {
   slug = process.env.PRISMEAI_BUNDLE_SLUG || ws?.slug || PRISMEAI_WORKSPACE_ID
 
   await patchWorkspaceConfig({ bundleUrl, embedUrl, ws, slug });  mark('config', 'done')
+  await publishApp();                  mark('publish', SKIP_PUBLISH ? 'skipped' : 'done')
   await cleanupOrphanBundles();        mark('cleanup', SKIP_BUNDLE_CLEANUP ? 'skipped' : 'done')
   await smokeTest({ slug });           mark('smoke', SKIP_SMOKE ? 'skipped' : 'done')
   await versionSnapshot();             mark('version', SKIP_VERSION_SNAPSHOT ? 'skipped' : 'done')
