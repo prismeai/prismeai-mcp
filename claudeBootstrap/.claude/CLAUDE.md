@@ -45,27 +45,34 @@ This avoids unnecessary API calls and ensures you work with the latest local cha
 | `get_prisme_documentation` | Need Prisme.ai syntax, patterns, or feature reference |
 | `lint_doc` | Need to validate automation YAML for common mistakes |
 | `get_app` / `list_apps` | Working with apps from the marketplace |
-| `pull_workspace` / `push_workspace` | Syncing workspace DSUL locally (NEVER pushes `pages/<name>/` React apps — see rule below) |
+| `pull_workspace` / `push_workspace` | Syncing workspace DSUL locally (workspace folders are now DSUL-pure — React apps live in the sibling `pages/<workspace>/`, see rule below) |
 | `execute_automation` | Testing an automation with a payload |
 
-### `push_workspace` MUST NEVER upload `pages/<name>/` subfolders
+### React apps live in `pages/<workspace>/`, OUTSIDE `workspaces/` (moved 2026-06-25)
 
-When a workspace embeds a React app under `pages/<name>/` (starter-spa / nested-app
-convention), that subfolder is a full frontend project (`src/`, `node_modules/`,
-`dist/`, build tooling) — **NOT** DSUL. **Never `push_workspace` it:**
+A workspace's React app (starter-spa pattern) now lives in **`pages/<workspace>/`**,
+a sibling of `workspaces/` at the repo root, **named after the workspace**. The
+workspace folder (`workspaces/<workspace>/`) is **DSUL-pure** — it no longer contains
+any `pages/<name>/` React subfolder (only legacy DSUL pages `*.yml` may remain there).
 
-- The `node_modules` payload makes the importer 500 (and can leave the workspace
-  locked mid-import).
-- The remote keeps the app sources at CANONICAL paths that differ from the local
-  nested layout; pushing the local `pages/<name>/` overwrites that structure and
-  **makes the Studio page disappear**.
-- `push_workspace` does **not** update the runtime `config.value` anyway, so it
-  cannot deploy the bundle pointer (`config.value.bundles[*].bundle`).
+```
+prismeai-workspaces/
+├── workspaces/<workspace>/   ← DSUL only (index.yml, automations/, imports/, security.yml)
+└── pages/<workspace>/        ← React app (src/, scripts/, package.json, dist/, node_modules/)
+```
 
-**Rule:** any MCP push/sync must EXCLUDE every `pages/*/` subdirectory. To deploy a
-workspace's React app / SPA bundle, use the **`/workspace-page-implement`** skill
-(it builds the CJS bundle, uploads it, and PATCHes `config.value` correctly) — never
-`push_workspace`, `upload_file` + manual config edits, or the raw MCP.
+This layout **eliminates the old data-loss risk**: `push_workspace workspaces/<ws>`
+no longer sees any React subfolder, so it can't ship `node_modules` (importer 500) or
+clobber the remote canonical sources (Studio page vanishing). Still true: `push_workspace`
+does **not** update runtime `config.value`, so it can't deploy the bundle pointer
+(`config.value.bundles[*].bundle` / `config.block`).
+
+**Rules:**
+- `push_workspace` targets `workspaces/<ws>` (DSUL). It never touches `pages/<ws>`.
+- To deploy a workspace's React app / SPA bundle, use the **`/workspace-page-implement`**
+  skill (builds the CJS bundle, uploads it, PATCHes `config.value`+`config.block`,
+  `publish_app`) — never `upload_file` + manual config edits or raw MCP for the bundle.
+- App ↔ DSUL are linked by **identical name**: `pages/<ws>` ↔ `workspaces/<ws>`.
 
 ### Event Search Patterns
 

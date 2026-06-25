@@ -75,8 +75,10 @@ Scaffold templates for every file live in `templates/` next to this SKILL.md.
   user is changing environment.
 - Run `validate_automation` on `deploy.yml` and `runTests.yml` after any change to
   them, and after scaffolding a new workspace.
-- Never `push_workspace` a `pages/<name>/` React subfolder (none here by default; if
-  one is ever added, exclude it — see the project-wide rule).
+- A workspace's React app (if any) lives in the sibling top-level `pages/<slug>/` folder
+  (alongside `workspaces/`, named after the workspace), never inside `workspaces/<slug>/`.
+  Agent workspaces are DSUL-pure and have none by default. `push_workspace` targets
+  `workspaces/<slug>/` only and never touches `pages/<slug>/` — see the project-wide rule.
 
 ## The manifest in detail (`agent.yml`)
 
