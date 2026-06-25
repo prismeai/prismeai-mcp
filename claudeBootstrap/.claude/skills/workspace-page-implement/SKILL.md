@@ -474,7 +474,12 @@ Fix any 🔴 MAJOR issue before moving on.
 
 ---
 
-## Phase 7 — Targeted push (MCP for automations, curl for the React side)
+## Phase 7 — Targeted push (deploy workspace + page)
+
+Two equivalent paths: **all-MCP** (push_workspace + upload_file + call_api PATCH +
+publish_app — see the MCP recipe just below, no local creds) or **MCP for automations
++ curl for the React side** (needs the JWT from Phase 2). Pick MCP-only when you don't
+have a local token.
 
 Build an action plan from the diff and execute it. Show the plan to the user and
 get explicit confirmation before any remote write.
@@ -482,6 +487,36 @@ get explicit confirmation before any remote write.
 **Auth for direct fetch** :
 - Header : `Authorization: Bearer <apiKey>` (the JWT from Phase 2).
 - Base URL : `apiUrl` (from Phase 2 ; already includes `/v2`).
+
+### Deploy the workspace + its page entirely via the prisme-ai-builder MCP (no local creds)
+
+When you don't have / don't want to use a local JWT for `deploy.mjs`/curl, the **whole
+deploy (workspace DSUL + page bundle + config) goes through MCP tools**. This is the
+validated `google-workspaces` recipe (2026-06-25). Same order-of-operations as below ;
+each curl step maps to an MCP tool :
+
+1. **DSUL** → `mcp__prisme-ai-builder__push_workspace(workspaceId, path: "<repo>/workspaces/<workspace>", prune: false)`.
+   Targets the DSUL-pure workspace folder. `prune:false` so it can't delete remote files
+   it doesn't know about (the page bundle, source files). **NEVER** pass the app dir
+   `pages/<workspace>` — push only ever sees `workspaces/<workspace>`.
+2. **Build** → `cd <repo>/pages/<workspace> && npm run build` → `dist/bundle.js`.
+3. **Upload bundle** (public, no metadata) → `mcp__prisme-ai-builder__upload_file(workspaceId, path: "<repo>/pages/<workspace>/dist/bundle.js", public: true)` → grab the new URL.
+   (MCP `upload_file` drops `metadata`, so it's fine for the bundle but NOT for SOURCE
+   files that need `metadata.path` — those still go via curl, see Action matrix.)
+4. **PATCH config** → `mcp__prisme-ai-builder__call_api(method: PATCH, path: "/workspaces/<id>", body: {config:{block, schema, value}})`.
+   First `call_api(GET /workspaces/<id>)` → `.config`, then set `config.block` **and**
+   `config.value.bundles[<slug>].bundle` to the new URL, **preserving every other key**
+   (`mcpTools`, `appSecret`, auth). NEVER send a partial `value` — `config.value` is
+   replace-in-whole. For an app+mcp connector with an inline config UI, point BOTH
+   `block` and `bundles[<slug>]` at the same new bundle.
+5. **publish_app** (app+mcp connectors only) → `mcp__prisme-ai-builder__publish_app(workspaceId)`.
+   Snapshots `config.block` into the **published App** so tenant instances pick up the
+   new bundle — WITHOUT it, instances keep the old block (the config UI looks stale).
+   Publish **before** deleting the old bundle file.
+6. **Cleanup + smoke test** → delete orphan old bundle(s) via `call_api(DELETE /workspaces/<id>/files/<fileId>)` ; fetch the new bundle and assert it exports CJS `module.exports.default` (esbuild form `Et(Zt,{default:()=>App});module.exports=...`).
+
+See [[project_app_mcp_config_block_sync]] for the full recipe + the `publish_app`
+gotcha. For the curl/JWT variant, follow the Action matrix below.
 
 ### 🚨 CRITICAL — Order of operations (learned the hard way)
 
