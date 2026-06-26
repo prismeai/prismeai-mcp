@@ -28,13 +28,20 @@ remote agent match them exactly. The user edits files; the skill reconciles.
 
 ## Workspace layout
 
-Agent workspaces live under `workspaces/<slug>/` in the prismeai-workspaces repo
-(the directory that contains `workspaces/` and `docs/`). Detect that root before
-doing anything; if the CWD is the parent "Prisme.ai Projects" dir, the repo root is
-`prismeai-workspaces/`.
+Agent workspaces live under `agents/<slug>/` in the prismeai-workspaces repo —
+a **top-level sibling of `workspaces/` and `pages/`** dedicated to `/agent-builder`
+agents (so Agent Factory agents are not mixed in with the connector/app workspaces).
+Detect the repo root before doing anything (it is the directory that contains
+`workspaces/`, `pages/`, `agents/` and `docs/`); if the CWD is the parent
+"Prisme.ai Projects" dir, the repo root is `prismeai-workspaces/`.
+
+> Migrated 2026-06-26: agent workspaces moved out of `workspaces/<slug>/` into the
+> new top-level `agents/<slug>/`. Discover existing agents under `agents/`; when an
+> older agent is still found under `workspaces/<slug>/`, treat that as legacy and
+> offer to move it to `agents/<slug>/`.
 
 ```text
-workspaces/<slug>/
+agents/<slug>/
 ├── AGENT.md                 # prompt (source of truth)
 ├── agent.yml                # manifest (source of truth)
 ├── index.yml                # workspace config + secret schema
@@ -76,9 +83,10 @@ Scaffold templates for every file live in `templates/` next to this SKILL.md.
 - Run `validate_automation` on `deploy.yml` and `runTests.yml` after any change to
   them, and after scaffolding a new workspace.
 - A workspace's React app (if any) lives in the sibling top-level `pages/<slug>/` folder
-  (alongside `workspaces/`, named after the workspace), never inside `workspaces/<slug>/`.
-  Agent workspaces are DSUL-pure and have none by default. `push_workspace` targets
-  `workspaces/<slug>/` only and never touches `pages/<slug>/` — see the project-wide rule.
+  (alongside `workspaces/`/`agents/`, named after the workspace), never inside the
+  agent folder. Agent workspaces are DSUL-pure and have none by default.
+  `push_workspace` targets the agent's DSUL folder (`agents/<slug>/`) only and never
+  touches `pages/<slug>/` — see the project-wide rule.
 
 ## The manifest in detail (`agent.yml`)
 
@@ -199,7 +207,7 @@ When the user asks to create a new agent:
    initial capabilities/tests.
 2. Present a concise plan (slug, model, profile, capabilities, tests, target env)
    and **ask for confirmation**.
-3. Copy `templates/` into `workspaces/<slug>/`, filling placeholders:
+3. Copy `templates/` into `agents/<slug>/`, filling placeholders:
    - `index.yml`: `name`, `slug`.
    - `AGENT.md`: the prompt draft.
    - `agent.yml`: `name`, `slug`, `model`, `temperature`, `profile`, `visibility`,
@@ -211,7 +219,7 @@ When the user asks to create a new agent:
 
 ## 2. Edit the prompt
 
-- Edit `workspaces/<slug>/AGENT.md` directly (it is plain Markdown).
+- Edit `agents/<slug>/AGENT.md` directly (it is plain Markdown).
 - Summarize the change. Offer to `deploy` so it takes effect.
 
 ## 3. Manage capabilities (capability catalog)
@@ -416,7 +424,7 @@ installed App+MCP connectors run.
 3. Ensure the workspace exists remotely on that env:
    - First time: `create_workspace` → capture the id into
      `deployedIds.<env>.workspaceId`.
-   - Then `push_workspace` (workspace id + local folder) to upload the DSUL
+   - Then `push_workspace` (workspace id + local folder `agents/<slug>/`) to upload the DSUL
      (automations + imports). `push_workspace` does NOT push secret *values*, so
      ensure the `agentFactoryApiKey` secret (the `iak_...` org key) is set on the env
      out-of-band first — otherwise the Agents app calls fail with a `401` that
