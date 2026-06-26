@@ -118,7 +118,7 @@ from `AGENT.md` + `agent.yml`) + the `agent-builder` label. No per-agent deploy 
 | Env | Workspace id | App URL |
 |-----|-------------|---------|
 | sandbox | `65xmBBG` | `https://sandbox.prisme.ai/apps/agent-builder-sync` |
-| prod | _not deployed yet_ | _deploy the central app to prod first, then record its id + `https://<prod-studio>/apps/agent-builder-sync`_ |
+| prod | `JDNlu-Q` | `https://prisme.ai/apps/agent-builder-sync` |
 
 The app's own DSUL/SPA lives at `agents/agent-builder-sync/` + `pages/agent-builder-sync/`
 in the prismeai-workspaces repo (built/deployed via `/workspace-page-implement`). Its
