@@ -105,7 +105,11 @@ Treat each bullet as a checklist item when bootstrapping a new app.
    user with a dark OS gets a dark app inside a light studio (the classic "forgot the
    light theme" bug — hit on AgentBuilderSync 2026-06-26). `darkMode: 'class'` in
    `tailwind.config.js` is the matching setting if you use `dark:` utilities (raw `.dark
-   { --vars }` works regardless). Avoid `bg-X dark:bg-Y` on the root wrapper too : if the
+   { --vars }` works regardless). **Put the `.dark { --vars }` block OUTSIDE `@layer base`**
+   (plain CSS) — inside `@layer base` Tailwind PURGES it (the `.dark` class is never
+   referenced in `src/`; the Studio adds it on `<html>` at runtime), so the bundle ships
+   `:root`-only = permanently light even in a dark studio (same 2026-06-26 incident). Avoid
+   `bg-X dark:bg-Y` on the root wrapper too : if the
    app is rendered inside a Studio shell, a full-bleed background paints a visible frame
    around the content in the host's theme. Let the host provide the page background ;
    only style the card itself.
