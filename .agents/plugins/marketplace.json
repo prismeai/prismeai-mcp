@@ -1,0 +1,23 @@
+{
+  "name": "prismeai-mcp",
+  "interface": {
+    "displayName": "Prisme.ai Plugins"
+  },
+  "plugins": [
+    {
+      "name": "prisme-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "description": "Prisme.ai AI Builder toolkit: MCP server (workspaces, automations, apps, events, AI Knowledge), DSUL linter, skills and hooks.",
+      "version": "2.0.0",
+      "category": "Developer Tools",
+      "keywords": ["prisme.ai", "mcp", "ai-builder", "automation", "dsul"]
+    }
+  ]
+}

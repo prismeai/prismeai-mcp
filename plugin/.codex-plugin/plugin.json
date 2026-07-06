@@ -1,0 +1,25 @@
+{
+  "name": "prisme-ai",
+  "version": "2.0.0",
+  "description": "Prisme.ai AI Builder toolkit: MCP server (workspaces, automations, apps, events, AI Knowledge), DSUL linter, skills and hooks for Claude Code and Codex.",
+  "author": {
+    "name": "Prisme.ai",
+    "url": "https://www.prisme.ai"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Prisme.ai",
+    "longDescription": "Prisme.ai adds MCP tools, skills, documentation, and workflow guidance for building, testing, and operating Prisme.ai workspaces, automations, apps, and Agent Factory agents.",
+    "developerName": "Prisme.ai",
+    "shortDescription": "Build and operate Prisme.ai workspaces, automations and agents.",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://www.prisme.ai",
+    "privacyPolicyURL": "https://www.prisme.ai/privacy-policy",
+    "termsOfServiceURL": "https://www.prisme.ai/terms-of-use",
+    "defaultPrompt": [
+      "Inspect or update a Prisme.ai workspace"
+    ]
+  }
+}

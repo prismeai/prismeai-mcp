@@ -1,8 +1,6 @@
 # Quick Start
 
-Get the Prisme.ai MCP server running with Claude Code in minutes.
-
-> **Not using Claude Code?** See [MANUAL_SETUP.md](./MANUAL_SETUP.md) for Claude Desktop, Cursor, or other MCP clients.
+Install the Prisme.ai plugin from GitHub and start using the bundled MCP server, skills, agents, and DSUL linter in Claude Code or Codex.
 
 ## Prerequisites
 
@@ -54,11 +52,12 @@ During fresh install, you'll be prompted to add environments:
 
 ## What Gets Installed
 
-| Component | Location | Description |
-|-----------|----------|-------------|
-| MCP Server | `build/index.js` | Provides Prisme.ai tools to Claude Code |
-| Prisme Assistant Agent | `~/.claude/agents/prisme-assistant.md` | Specialized agent for Prisme.ai development |
-| Environment Configuration | `~/.claude.json` | API keys and endpoints |
+| Component | Description |
+|-----------|-------------|
+| MCP Server (`prisme-ai-builder`) | Workspaces, automations, apps, events, files, AI Knowledge, DSUL linter |
+| Skills (`/prisme-ai:*`) | Connector scaffolding/testing/docs, A2UI, agent workspaces, `prisme-assistant`, `ticket-validator` — see `/prisme-ai:guide` |
+| Agents (Claude only) | `code-review`, `prisme-assistant` |
+| Hooks (Claude only) | `allow-workspace.sh` workspace allowlist template |
 
 ### Project Setup (Optional)
 
@@ -72,15 +71,7 @@ This folder contains `CLAUDE.md` with Prisme.ai-specific instructions for Claude
 
 ## After Setup
 
-```bash
-# Start Claude Code
-claude
-
-# Or use with the Prisme assistant
-claude --agent prisme-assistant
-```
-
-Type `@` in Claude to see available `mcp__prisme-ai-builder__*` tools.
+Run `/prisme-ai:guide` for the skills catalog and Prisme.ai context. In Claude Code, type `@` to see available `mcp__prisme-ai-builder__*` tools. In Codex, plugin MCP tools may be loaded lazily; use a request that clearly needs Prisme.ai tools, or search for the Prisme.ai Builder tools.
 
 ## Verify Installation
 
