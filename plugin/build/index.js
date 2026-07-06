@@ -28780,6 +28780,72 @@ Alternative: paste the token to me and I will call the \`set_token\` tool \u2014
           }
         });
       }
+      /**
+       * Generic authenticated call to any Prisme.ai REST endpoint.
+       * The Bearer token is injected server-side per environment and is NEVER
+       * exposed to the caller. `path` is relative to the environment's apiUrl base
+       * (which already includes /v2), e.g. "/orgs", "/me", "/workspaces/<id>".
+       */
+      async callApi(params) {
+        const apiUrl = params.environment && this.environments[params.environment]?.apiUrl ? this.environments[params.environment].apiUrl : void 0;
+        const method = (params.method || "GET").toUpperCase();
+        const url2 = params.path.startsWith("/") ? params.path : `/${params.path}`;
+        let response;
+        if (params.apiKey) {
+          const headers = {
+            "x-prismeai-api-key": params.apiKey,
+            "Content-Type": "application/json"
+          };
+          if (params.withUserBearer) {
+            headers["Authorization"] = `Bearer ${this.getApiKeyForEnvironment(params.environment)}`;
+          }
+          response = await axios_default.request({
+            baseURL: apiUrl || this.baseUrl,
+            url: url2,
+            method,
+            params: params.query,
+            data: params.body,
+            headers
+          });
+        } else if (params.asSession) {
+          const effectiveApiKey = this.getApiKeyForEnvironment(params.environment);
+          response = await axios_default.request({
+            baseURL: apiUrl || this.baseUrl,
+            url: url2,
+            method,
+            params: params.query,
+            data: params.body,
+            headers: {
+              Cookie: `access-token=${effectiveApiKey}`,
+              "Content-Type": "application/json"
+            }
+          });
+        } else {
+          const client = this.getClient(apiUrl, params.environment);
+          response = await client.request({
+            url: url2,
+            method,
+            params: params.query,
+            data: params.body
+          });
+        }
+        let data2 = response.data;
+        if (params.pick && params.pick.length) {
+          const proj = (o) => o && typeof o === "object" && !Array.isArray(o) ? Object.fromEntries(
+            params.pick.filter((k) => k in o).map((k) => [k, o[k]])
+          ) : o;
+          if (Array.isArray(data2)) {
+            data2 = data2.map(proj);
+          } else if (data2 && Array.isArray(data2.results)) {
+            data2 = { ...data2, results: data2.results.map(proj) };
+          } else if (data2 && Array.isArray(data2.items)) {
+            data2 = { ...data2, items: data2.items.map(proj) };
+          } else {
+            data2 = proj(data2);
+          }
+        }
+        return { status: response.status, data: data2 };
+      }
       // Automation CRUD operations
       async createAutomation(automation, workspaceId, apiUrl, environment) {
         const wsId = workspaceId || this.workspaceId;
@@ -30640,6 +30706,56 @@ var init_definitions = __esm({
         },
         annotations: {
           readOnlyHint: true
+        }
+      },
+      {
+        name: "call_api",
+        description: "Call any Prisme.ai REST API endpoint, authenticated server-side with the configured environment token (the token is NEVER exposed to the model). Use for endpoints not covered by a dedicated tool \u2014 e.g. list organizations ('/orgs'), the current IAM context ('/me'), org members, API keys, etc. `path` is relative to the environment apiUrl base, which already includes '/v2' (so pass '/orgs', not '/v2/orgs').",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Endpoint path relative to the environment apiUrl base (which already ends in /v2). Examples: '/orgs', '/me', '/workspaces/<id>'. A leading slash is optional."
+            },
+            method: {
+              type: "string",
+              description: "HTTP method (GET, POST, PATCH, PUT, DELETE). Default: GET."
+            },
+            query: {
+              type: "object",
+              description: "Optional query-string parameters, e.g. { limit: 200 }."
+            },
+            body: {
+              type: "object",
+              description: "Optional JSON request body for POST/PATCH/PUT."
+            },
+            environment: {
+              type: "string",
+              description: "Environment name (from PRISME_ENVIRONMENTS), e.g. 'sandbox' or 'prod'. Defaults to the default environment."
+            },
+            pick: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional field projection to keep responses small. Each named top-level key is kept; for list responses the projection is applied to every entry of `results`/`items` (or of a top-level array). E.g. ['slug','name'] on '/orgs'."
+            },
+            asSession: {
+              type: "boolean",
+              description: "Send the token as the `access-token` cookie (browser-session auth) instead of a Bearer access token. Required for session-only endpoints like `PUT /user/active-org`; the active org set this way persists for subsequent asSession calls reusing the same token."
+            },
+            apiKey: {
+              type: "string",
+              description: "Authenticate with this key as `x-prismeai-api-key` (by default NO Bearer). For an `iak_<org>_\u2026` org key the gateway resolves the org from the key with NO membership check \u2014 use this to create/publish an agent in an org you are not a member of (e.g. POST /workspaces/slug:agent-factory/webhooks/v1/agents)."
+            },
+            withUserBearer: {
+              type: "boolean",
+              description: "Only with `apiKey`: ALSO send the configured user Bearer alongside the api key. Combines a real user identity (e.g. superadmin) with the org key's org context, so the gateway can take the admin/owner path while the key selects the org. Use to manage (read/update) an existing agent in another org."
+            }
+          },
+          required: ["path"]
+        },
+        annotations: {
+          readOnlyHint: false
         }
       },
       {
@@ -51014,6 +51130,27 @@ function guessContentType(filenameOrPath) {
 }
 async function handleToolCall(name, args, apiClient) {
   switch (name) {
+    case "call_api": {
+      const { path, method, query, body, environment, pick, asSession, apiKey, withUserBearer } = args;
+      const httpMethod = (method || "GET").toUpperCase();
+      if (PRISME_FORCE_READONLY && !["GET", "HEAD", "OPTIONS"].includes(httpMethod)) {
+        throw new Error(
+          `call_api with method ${httpMethod} is not available in readonly mode (PRISME_FORCE_READONLY=true).`
+        );
+      }
+      const apiResult = await apiClient.callApi({
+        path,
+        method: httpMethod,
+        query,
+        body,
+        environment,
+        pick,
+        asSession,
+        apiKey,
+        withUserBearer
+      });
+      return truncateJsonOutput(apiResult, `call_api ${httpMethod} ${path}`);
+    }
     case "create_automation": {
       enforceReadonlyMode("create_automation");
       const { automation, workspaceId, workspaceName, environment } = args;
