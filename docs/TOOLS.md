@@ -47,7 +47,7 @@ All tools are prefixed with `mcp__prisme-ai-builder__` when used in Claude.
 
 | Tool | Description |
 |------|-------------|
-| `set_token` | Register (or rotate) a user-created API token for an environment. Create the token at `<studio>/settings/tokens`, then call with `environment` + `token` (plus `apiUrl` for a new environment). Probe-validated before persisting to the config dir. See [ENVIRONMENTS.md](./ENVIRONMENTS.md#authentication-api-tokens). |
+| `set_token` | Register (or rotate) a user-created API token for an environment (`environment` + `token`, plus `apiUrl` for a new one). Probe-validated before persisting to the config dir. **Prefer the out-of-band `set-token` CLI** (`node <plugin>/build/index.js set-token …`) so the token never enters the chat / reaches the LLM provider; use this tool only if the user opts to paste the token. See [ENVIRONMENTS.md](./ENVIRONMENTS.md#authentication-api-tokens). |
 
 ## AI Knowledge
 

@@ -22,7 +22,13 @@ For the automated setup with Claude Code CLI, see [README.md](../README.md).
 
 Create a token in the studio of your environment: `https://<studio-domain>/settings/tokens` (e.g. <https://sandbox.prisme.ai/settings/tokens>).
 
-You can either register it at runtime with the `set_token` MCP tool (recommended — it is validated and persisted in `PRISME_CONFIG_DIR`), or pass it statically via the environment variables below.
+Register it with the `set-token` CLI (recommended — the token stays local and is validated before being saved to `PRISME_CONFIG_DIR`):
+
+```bash
+node "/absolute/path/to/mcp-prisme.ai/plugin/build/index.js" set-token sandbox --config-dir "$HOME/.prisme-ai-mcp"
+```
+
+It prompts for the token with hidden input (or reads `PRISME_TOKEN` from the env). Alternatively, register it at runtime with the `set_token` MCP tool, or pass it statically via the environment variables below.
 
 ## Environment Variables
 
