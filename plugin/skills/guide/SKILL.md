@@ -28,6 +28,7 @@ The connector workflow: scaffold a new SaaS connector, test it, consolidate test
 
 | Skill | When to use |
 |---|---|
+| `/prisme-ai:agent-builder` | Scaffold or update an Agent Factory-backed Prisme.ai agent workspace with DSUL templates, deployment automations, tests, and agent instructions. |
 | `/prisme-ai:agent-workspace` | Create a bootstrap workspace that provisions an Agent Factory agent, attaches Storage-backed sources, seeds Agent Evaluations cases, runs evaluation, and validates the setup through the Agents, Storage, and Evaluation product apps. |
 | `/prisme-ai:agent-implement-a2ui` | Add A2UI (Agent-to-UI) surfaces to a Prisme.ai MCP workspace so that LLM agents can render interactive UI (cards, forms, tables, action-cards, confirmations…) through MCP tool calls. The host UI reads the tool's `__surface` payload and renders it from the `prisme://blocks/v1` catalog. |
 
@@ -46,6 +47,8 @@ The connector workflow: scaffold a new SaaS connector, test it, consolidate test
 | Skill | When to use |
 |---|---|
 | `/prisme-ai:prisme-assistant` | Investigate Prisme automations, apps, events, or search Prisme documentation. The expert for event-feed debugging (correlationId, activity feed, execution logs). |
+| `/prisme-ai:debug-events` | Debug Prisme.ai runtime events, activity feeds, and correlationId traces with focused event-search patterns. |
+| `/prisme-ai:dsul-rules` | Check current DSUL authoring/deployment rules and edge cases before editing automations or workspace configuration. |
 | `/prisme-ai:ticket-validator` | After implementing a feature, verify every ticket requirement was met. Run before code review. |
 
 ---
@@ -59,10 +62,12 @@ The connector workflow: scaffold a new SaaS connector, test it, consolidate test
 | Consolidate test coverage into a `*-consumer` workspace | `/prisme-ai:app-mcp-build-consumer` |
 | Write or update the public docs of a connector | `/prisme-ai:app-mcp-document` |
 | Propagate a template fix across all connectors | `/prisme-ai:app-mcp-fleet-sync` |
+| Scaffold an Agent Factory DSUL workspace | `/prisme-ai:agent-builder` |
 | Provision + evaluate an Agent Factory agent | `/prisme-ai:agent-workspace` |
 | Render interactive UI from agent tool calls | `/prisme-ai:agent-implement-a2ui` |
 | Edit the React frontend of a workspace | `/prisme-ai:workspace-page-implement` |
 | Debug events / trace an execution | `/prisme-ai:prisme-assistant` |
+| Check DSUL rules before editing automations | `/prisme-ai:dsul-rules` |
 | Check an implementation against its ticket | `/prisme-ai:ticket-validator` |
 | I don't know where to start | `/prisme-ai:guide` (this) |
 
