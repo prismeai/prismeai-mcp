@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "prisme-ai-builder": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/build/index.js"],
+      "env": {
+        "PRISME_CONFIG_DIR": "${CLAUDE_PLUGIN_DATA}"
+      }
+    }
+  }
+}

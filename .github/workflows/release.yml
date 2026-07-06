@@ -1,0 +1,66 @@
+name: Release plugin bundle
+
+# On every version tag (v2.1.0, ...):
+#   1. rebuild the self-contained MCP bundle (linter inlined, no externals)
+#   2. sync the tag version into both plugin manifests
+#   3. commit build/index.js + manifests back to the default branch
+# Users then pick the release up with `/plugin marketplace update`.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build self-contained bundle
+        run: npm run build:bundle
+
+      - name: Sync version from tag into manifests
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for manifest in plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json package.json; do
+            node -e "
+              const fs = require('fs');
+              const path = '$manifest';
+              const data = JSON.parse(fs.readFileSync(path, 'utf-8'));
+              data.version = '$VERSION';
+              fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
+            "
+          done
+          node -e "
+            const fs = require('fs');
+            const path = '.agents/plugins/marketplace.json';
+            const data = JSON.parse(fs.readFileSync(path, 'utf-8'));
+            data.plugins[0].version = '$VERSION';
+            fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
+          "
+
+      - name: Commit bundle and manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f plugin/build/index.js plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json .agents/plugins/marketplace.json package.json
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "release: bundle ${GITHUB_REF_NAME}"
+            git push origin main
+          fi

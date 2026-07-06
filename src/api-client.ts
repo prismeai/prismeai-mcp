@@ -18,6 +18,7 @@ export interface PrismeConfig {
     workspaceId: string;
     baseUrl: string;
     environments?: EnvironmentsConfig;
+    defaultEnvironment?: string;
 }
 
 export interface Automation {
@@ -215,18 +216,40 @@ export interface ListFilesParams {
     sort?: string;
 }
 
+/**
+ * Derive the studio token-creation page for an environment:
+ * <studio-origin>/settings/tokens. Falls back to deriving the studio origin
+ * from the apiUrl (strip trailing /vN, strip leading "api." subdomain).
+ */
+function tokenCreationUrl(env?: { apiUrl?: string; studioUrl?: string }): string | undefined {
+    if (!env) return undefined;
+    if (env.studioUrl) {
+        return `${env.studioUrl.replace(/\/+$/, '')}/settings/tokens`;
+    }
+    if (!env.apiUrl) return undefined;
+    try {
+        const url = new URL(env.apiUrl);
+        const host = url.host.replace(/^api[.-]/, '');
+        return `${url.protocol}//${host}/settings/tokens`;
+    } catch {
+        return undefined;
+    }
+}
+
 export class PrismeApiClient {
     private client: AxiosInstance;
     private workspaceId: string;
     private baseUrl: string;
     private apiKey: string;
     private environments: EnvironmentsConfig;
+    private defaultEnvironment?: string;
 
     constructor(config: PrismeConfig) {
         this.workspaceId = config.workspaceId;
         this.baseUrl = config.baseUrl;
         this.apiKey = config.apiKey;
         this.environments = config.environments || {};
+        this.defaultEnvironment = config.defaultEnvironment;
         this.client = axios.create({
             baseURL: config.baseUrl,
             headers: {
@@ -236,12 +259,28 @@ export class PrismeApiClient {
         });
     }
 
-    // Get API key for a specific environment
+    private missingTokenError(environment?: string): Error {
+        const envName = environment || this.defaultEnvironment;
+        const envConfig = envName ? this.environments[envName] : undefined;
+        const tokenUrl = tokenCreationUrl(envConfig ?? { apiUrl: this.baseUrl });
+        return new Error(
+            `No credentials for environment \`${envName ?? 'default'}\`. ` +
+                (tokenUrl
+                    ? `Create a token at ${tokenUrl}, then register it with the \`set_token\` tool.`
+                    : `Create a token in the Prisme.ai studio (Settings > Access Tokens), then register it with the \`set_token\` tool.`)
+        );
+    }
+
+    // Get API key for a specific environment; throws an actionable error when
+    // no token is stored for it (the user must create one and call set_token).
     private getApiKeyForEnvironment(environment?: string): string {
-        if (environment && this.environments[environment]?.apiKey) {
-            return this.environments[environment].apiKey!;
+        if (environment && this.environments[environment]) {
+            const key = this.environments[environment].apiKey;
+            if (key) return key;
+            throw this.missingTokenError(environment);
         }
-        return this.apiKey;
+        if (this.apiKey) return this.apiKey;
+        throw this.missingTokenError(environment);
     }
 
     /**
@@ -271,6 +310,42 @@ export class PrismeApiClient {
                 },
             });
         }
+    }
+
+    /**
+     * Register or update an environment at runtime (used by set_token when the
+     * environment is not yet known), then store its token in memory.
+     */
+    upsertEnvironment(environment: string, config: EnvironmentConfig): void {
+        this.environments[environment] = { ...config };
+        if (config.apiKey && config.apiUrl === this.baseUrl) {
+            this.apiKey = config.apiKey;
+            this.client = axios.create({
+                baseURL: this.baseUrl,
+                headers: {
+                    'Authorization': `Bearer ${config.apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+        }
+    }
+
+    /**
+     * Validate a token against an environment with a cheap authenticated call
+     * (GET /me). Returns the authenticated user on success; throws on 401/403
+     * or network failure. Nothing is persisted here.
+     */
+    async probeToken(apiUrl: string, token: string): Promise<any> {
+        const probeClient = axios.create({
+            baseURL: apiUrl,
+            timeout: 15000,
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        const response = await probeClient.get('/me');
+        return response.data;
     }
 
     // Helper to get client with potentially different base URL and environment

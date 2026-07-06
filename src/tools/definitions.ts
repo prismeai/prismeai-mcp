@@ -1926,23 +1926,34 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
     },
   },
   {
-    name: "refresh_auth_token",
+    name: "set_token",
     description:
-      "Open a browser window pointing to the Prisme.ai studio for the given environment, wait for the user to authenticate (if not already), capture the access-token cookie, and update both the in-memory JWT and ~/.claude.json. Requires `studioUrl` to be set on the environment in PRISME_ENVIRONMENTS. Prerequisite: `npx playwright install chromium`.",
+      "Register (or rotate) a user-created Prisme.ai API token for an environment. The user creates the token in the studio at <studio-origin>/settings/tokens (e.g. https://sandbox.prisme.ai/settings/tokens), then provides it here. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
     inputSchema: {
       type: "object",
       properties: {
         environment: {
           type: "string",
           description:
-            "Name of the environment to refresh (must exist in PRISME_ENVIRONMENTS with a studioUrl).",
+            "Name of the environment the token belongs to (e.g. sandbox, prod).",
         },
-        timeoutSeconds: {
-          type: "number",
-          description: "How long to wait for the cookie (default 300, min 30, max 900).",
+        token: {
+          type: "string",
+          description:
+            "API token created by the user in the studio (Settings > Access Tokens).",
+        },
+        apiUrl: {
+          type: "string",
+          description:
+            "API base URL for the environment (e.g. https://api.sandbox.prisme.ai/v2). Required when registering a new environment; otherwise updates the stored value.",
+        },
+        studioUrl: {
+          type: "string",
+          description:
+            "Studio origin for the environment (e.g. https://sandbox.prisme.ai). Optional; used to build token-creation links.",
         },
       },
-      required: ["environment"],
+      required: ["environment", "token"],
     },
   },
 ];
