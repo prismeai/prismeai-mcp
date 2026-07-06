@@ -60,10 +60,10 @@ FILE_MAP = {
     "oauth/automations/initiateOAuth.yml":        ("automations/initiateOAuth.yml", "O"),
     "oauth/automations/checkAuthStatus.yml":      ("automations/checkAuthStatus.yml", "O"),
     "oauth/automations/disconnectOAuth.yml":      ("automations/disconnectOAuth.yml", "O"),
-    "oauth/automations/method-connect.yml":       ("automations/method-connect.yml", "O"),
-    "oauth/automations/method-disconnect.yml":    ("automations/method-disconnect.yml", "O"),
-    "oauth/automations/tool-connect.yml":         ("automations/tool-connect.yml", "O"),
-    "oauth/automations/tool-disconnect.yml":      ("automations/tool-disconnect.yml", "O"),
+    "oauth/automations/methodConnect.yml":        ("automations/methodConnect.yml", "O"),
+    "oauth/automations/methodDisconnect.yml":     ("automations/methodDisconnect.yml", "O"),
+    "oauth/automations/toolConnect.yml":          ("automations/toolConnect.yml", "O"),
+    "oauth/automations/toolDisconnect.yml":       ("automations/toolDisconnect.yml", "O"),
     "oauth/automations/connect.yml":              ("automations/connect.yml", "O"),
     "oauth/automations/disconnect.yml":           ("automations/disconnect.yml", "O"),
 }
@@ -363,14 +363,16 @@ def rule_audit(conn_dir, subs, is_oauth):
                 H("R12-oauth-callback", "OAuth onInstall.yml does not populate `oauthCallbackUrl` "
                                         "readOnly config — tenant can't find the redirect URI.")
 
-    # R15 — every App-mode op argument must carry a `description:`. The Builder
+    # R16 — every App-mode op argument must carry a `description:`. The Builder
     # renders the instruction form from `arguments`, so an undescribed arg shows
     # a blank-hint field (the classic bare `id` complaint). Fix is connector-
     # specific content (API-sourced; id/iid by specific resource) → NEED_HUMAN.
     _HELP = {"mcp", "onInstall", "generateKey", "getConfig", "buildAppAuth", "executeApiCall",
              "handleApiError", "formatToolOutput", "routeToolCall", "ensureAuthentication",
              "connect", "disconnect", "initiateOAuth", "oauthCallback", "checkAuthStatus",
-             "refreshOAuthToken", "disconnectOAuth"}
+             "refreshOAuthToken", "disconnectOAuth", "methodRestOp", "methodGraphqlOp",
+             "toolRestOp", "toolGraphqlOp", "methodConnect", "methodDisconnect",
+             "toolConnect", "toolDisconnect"}
     autos_dir = os.path.join(conn_dir, "automations")
     undoc = []
     if os.path.isdir(autos_dir):
@@ -405,7 +407,8 @@ def rule_audit(conn_dir, subs, is_oauth):
     PRIV = {"mcp", "generateKey", "getConfig", "onInstall", "buildAppAuth", "executeApiCall",
             "handleApiError", "formatToolOutput", "routeToolCall", "ensureAuthentication",
             "refreshOAuthToken", "oauthCallback", "initiateOAuth", "checkAuthStatus",
-            "disconnectOAuth", "method-connect", "method-disconnect"}
+            "disconnectOAuth", "methodRestOp", "methodGraphqlOp", "toolRestOp", "toolGraphqlOp",
+            "methodConnect", "methodDisconnect", "toolConnect", "toolDisconnect"}
     notpriv = []
     if os.path.isdir(autos_dir):
         for fn in sorted(os.listdir(autos_dir)):
@@ -424,6 +427,54 @@ def rule_audit(conn_dir, subs, is_oauth):
                                    f"they leak into the App's instructions list (e.g. a bare "
                                    f"`<App>.generateKey`): {', '.join(notpriv[:8])}{more}. "
                                    f"Add `private: true` (does not block endpoint webhooks).")
+
+    # R19 — automation slugs / filenames should be camelCase, not hyphenated.
+    # Internal dispatcher renames are mechanical if every callsite is updated in
+    # the same pass. Public App-mode hyphenated slugs need human review because
+    # renaming changes the tenant-facing `<App>.<automation>` contract.
+    internal_renames = {
+        "method-restOp": "methodRestOp",
+        "method-graphqlOp": "methodGraphqlOp",
+        "tool-restOp": "toolRestOp",
+        "tool-graphqlOp": "toolGraphqlOp",
+        "method-connect": "methodConnect",
+        "method-disconnect": "methodDisconnect",
+        "tool-connect": "toolConnect",
+        "tool-disconnect": "toolDisconnect",
+    }
+    internal_hits = []
+    public_hits = []
+    if os.path.isdir(autos_dir):
+        for fn in sorted(os.listdir(autos_dir)):
+            if not fn.endswith(".yml"):
+                continue
+            op = fn[:-4]
+            fpath = os.path.join(autos_dir, fn)
+            with open(fpath) as f:
+                doc, _ = load_yaml(f.read())
+            slug = (doc or {}).get("slug") if isinstance(doc, dict) else None
+            names_to_check = {op}
+            if isinstance(slug, str):
+                names_to_check.add(slug)
+            for name in sorted(names_to_check):
+                if "-" not in name:
+                    continue
+                if name in internal_renames or name.startswith("method-") or name.startswith("tool-"):
+                    internal_hits.append(f"{name}->{internal_renames.get(name, 'camelCase')}")
+                else:
+                    public_hits.append(name)
+    if internal_hits:
+        sample = ", ".join(sorted(set(internal_hits))[:8])
+        more = "..." if len(set(internal_hits)) > 8 else ""
+        A("R19-camelcase-automations", f"Internal dispatcher automation slug(s) use hyphenated "
+          f"names instead of camelCase: {sample}{more}. Rename files/slugs and update callsites "
+          f"together (e.g. `method-restOp` -> `methodRestOp`).")
+    if public_hits:
+        sample = ", ".join(sorted(set(public_hits))[:8])
+        more = "..." if len(set(public_hits)) > 8 else ""
+        H("R19-camelcase-automations", f"Public or unknown automation slug(s) contain hyphens: "
+          f"{sample}{more}. Rename only after confirming tenant-facing `<App>.<automation>` "
+          f"contract impact and updating all references.")
 
     # R18 — OAuth credentials must live in the SERVICE workspace's secrets, not
     # in the published App's config.schema. Since the central-OAuth migration
