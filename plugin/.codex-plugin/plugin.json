@@ -7,7 +7,7 @@
     "url": "https://www.prisme.ai"
   },
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
+  "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
     "displayName": "Prisme.ai",
     "longDescription": "Prisme.ai adds MCP tools, skills, documentation, and workflow guidance for building, testing, and operating Prisme.ai workspaces, automations, apps, and Agent Factory agents.",

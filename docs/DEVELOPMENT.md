@@ -27,7 +27,8 @@ mcp-prisme.ai/
 ├── plugin/               # The plugin shipped to Claude Code + Codex
 │   ├── .claude-plugin/   # Claude plugin manifest
 │   ├── .codex-plugin/    # Codex plugin manifest
-│   ├── .mcp.json         # MCP server registration
+│   ├── .mcp.json         # Claude MCP server registration
+│   ├── .codex-plugin/mcp.json # Codex MCP server registration
 │   ├── skills/           # Plugin skills (/prisme-ai:*)
 │   ├── agents/           # Claude agents (code-review, prisme-assistant)
 │   ├── hooks/            # Plugin hooks (allow-workspace.sh)

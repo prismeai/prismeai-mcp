@@ -82,7 +82,8 @@ npm run build:bundle
 | `.agents/plugins/marketplace.json` | Codex marketplace entry, pointing to `./plugin` |
 | `plugin/.claude-plugin/plugin.json` | Claude plugin manifest |
 | `plugin/.codex-plugin/plugin.json` | Codex plugin manifest |
-| `plugin/.mcp.json` | MCP server definition |
+| `plugin/.mcp.json` | Claude MCP server definition |
+| `plugin/.codex-plugin/mcp.json` | Codex MCP server definition |
 | `plugin/build/index.js` | Self-contained MCP server bundle |
 | `plugin/skills/` | Bundled Prisme.ai skills |
 | `plugin/agents/` | Claude Code agents |
