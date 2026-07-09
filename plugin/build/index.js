@@ -15585,7 +15585,7 @@ var init_axios2 = __esm({
 });
 
 // src/auth/persist.ts
-import { promises as fs, readFileSync, mkdirSync, writeFileSync, renameSync } from "fs";
+import { promises as fs, readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 function getConfigDir() {
@@ -15648,44 +15648,6 @@ async function persistTopology(topology) {
   await writeJsonAtomic(path, topology);
   return path;
 }
-function persistTopologySync(topology) {
-  const dir = getConfigDir();
-  mkdirSync(dir, { recursive: true });
-  const path = join(dir, CONFIG_FILE);
-  const tmpPath = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmpPath, JSON.stringify(topology, null, 2) + "\n", { mode: 384 });
-  renameSync(tmpPath, path);
-  return path;
-}
-function importLegacyEnvironments() {
-  if (process.env.PRISME_ENVIRONMENTS) {
-    try {
-      return JSON.parse(process.env.PRISME_ENVIRONMENTS);
-    } catch {
-      console.error("Warning: PRISME_ENVIRONMENTS env var is not valid JSON; ignoring it");
-    }
-  }
-  const claudeJsonPath = process.env.PRISME_CLAUDE_JSON_PATH || join(homedir(), ".claude.json");
-  try {
-    const data2 = readJsonSync(claudeJsonPath);
-    if (!data2) return void 0;
-    let serverConfig = data2?.mcpServers?.[MCP_SERVER_KEY];
-    if (!serverConfig && data2?.projects && typeof data2.projects === "object") {
-      for (const proj of Object.values(data2.projects)) {
-        if (proj?.mcpServers?.[MCP_SERVER_KEY]) {
-          serverConfig = proj.mcpServers[MCP_SERVER_KEY];
-          break;
-        }
-      }
-    }
-    const envsJson = serverConfig?.env?.PRISME_ENVIRONMENTS;
-    if (typeof envsJson === "string") {
-      return JSON.parse(envsJson);
-    }
-  } catch {
-  }
-  return void 0;
-}
 function deriveTokenUrl(env) {
   if (env.studioUrl) {
     return `${env.studioUrl.replace(/\/+$/, "")}/settings/tokens`;
@@ -15699,11 +15661,10 @@ function deriveTokenUrl(env) {
     return void 0;
   }
 }
-var MCP_SERVER_KEY, CONFIG_FILE, CREDENTIALS_FILE;
+var CONFIG_FILE, CREDENTIALS_FILE;
 var init_persist = __esm({
   "src/auth/persist.ts"() {
     "use strict";
-    MCP_SERVER_KEY = "prisme-ai-builder";
     CONFIG_FILE = "config.json";
     CREDENTIALS_FILE = "credentials.json";
   }
@@ -15742,6 +15703,38 @@ function flagString(flags, key) {
   const value = flags[key];
   return typeof value === "string" ? value : void 0;
 }
+function normalizeUrlInput(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+function normalizeApiUrl(value) {
+  const input = normalizeUrlInput(value);
+  const url2 = new URL(input);
+  if (!/^api[.-]/.test(url2.hostname)) {
+    url2.hostname = `api.${url2.hostname}`;
+  }
+  url2.pathname = url2.pathname.replace(/\/+$/, "");
+  if (!/\/v\d+$/.test(url2.pathname)) {
+    url2.pathname = `${url2.pathname === "/" ? "" : url2.pathname}/v2`;
+  }
+  url2.search = "";
+  url2.hash = "";
+  return url2.toString().replace(/\/$/, "");
+}
+function deriveStudioUrl(value) {
+  const input = normalizeUrlInput(value);
+  try {
+    const url2 = new URL(input);
+    url2.hostname = url2.hostname.replace(/^api[.-]/, "");
+    url2.pathname = "";
+    url2.search = "";
+    url2.hash = "";
+    return url2.toString().replace(/\/$/, "");
+  } catch {
+    return void 0;
+  }
+}
 function loadShippedDefaults() {
   const candidates = [
     join2(__dirname, "..", "config", "default-environments.json"),
@@ -15760,7 +15753,7 @@ function loadShippedDefaults() {
 function promptHidden(question) {
   return new Promise((resolve2) => {
     const input = process.stdin;
-    const output = process.stdout;
+    const output = process.stderr;
     if (!input.isTTY) {
       let data2 = "";
       input.setEncoding("utf8");
@@ -15775,7 +15768,11 @@ function promptHidden(question) {
     rlInternal._writeToOutput = (stringToWrite) => {
       if (!muted) original(stringToWrite);
     };
-    output.write(question);
+    output.write("\n=== READY FOR TOKEN INPUT ===\n");
+    output.write(`${question}
+`);
+    output.write("Paste the token now, then press Enter. Input is hidden, so typed/pasted characters will not appear.\n");
+    output.write("Token > ");
     muted = true;
     rl.question("", (answer) => {
       rl.close();
@@ -15783,6 +15780,29 @@ function promptHidden(question) {
       resolve2(answer.trim());
     });
   });
+}
+function promptLine(question) {
+  return new Promise((resolve2) => {
+    const input = process.stdin;
+    const output = process.stdout;
+    if (!input.isTTY) {
+      resolve2("");
+      return;
+    }
+    const rl = createInterface({ input, output });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve2(answer.trim());
+    });
+  });
+}
+async function promptRequiredHidden(question) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const answer = await promptHidden(question);
+    if (answer) return answer;
+    console.error("No token entered. Paste the token, then press Enter. Press Ctrl+C to cancel.");
+  }
+  return "";
 }
 function printUsage() {
   console.log(
@@ -15797,12 +15817,14 @@ function printUsage() {
       "API before being saved to the config dir (credentials.json, mode 600).",
       "",
       "Options:",
-      "  --api-url <url>      API base URL (required only for a brand-new environment)",
+      "  --api-url <url>      API base URL (optional; prompts if missing)",
       "  --studio-url <url>   Studio origin (optional; used for token-creation links)",
       "  --config-dir <dir>   Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
       "",
       "The token is read from an interactive hidden prompt, or from the PRISME_TOKEN",
       "env var if set. Avoid passing it as a plain argument (shell history leak).",
+      "For the instance URL prompt, you can enter either the studio/base URL",
+      "(https://sandbox.prisme.ai) or the API URL (https://api.sandbox.prisme.ai/v2).",
       "",
       "After it succeeds, re-run your request in Claude Code / Codex (no restart needed)."
     ].join("\n")
@@ -15840,23 +15862,57 @@ async function runCli(argv) {
   const existing = topology.environments[environment];
   const apiUrlFlag = flagString(flags, "api-url");
   const studioUrlFlag = flagString(flags, "studio-url");
-  const apiUrl = apiUrlFlag ?? existing?.apiUrl;
-  if (!apiUrl) {
+  let apiUrl = apiUrlFlag ? normalizeApiUrl(apiUrlFlag) : existing?.apiUrl;
+  let studioUrl = studioUrlFlag ?? existing?.studioUrl;
+  if (!apiUrl && !process.stdin.isTTY) {
     const known = Object.keys(topology.environments).join(", ") || "(none)";
     console.error(
-      `Unknown environment "${environment}" (known: ${known}). Pass --api-url to register it, e.g. --api-url https://api.sandbox.prisme.ai/v2`
+      `Unknown environment "${environment}" (known: ${known}). Pass --api-url to register it, e.g. --api-url https://api.sandbox.prisme.ai/v2. You can also pass the studio/base URL, e.g. --api-url https://sandbox.prisme.ai.`
     );
     return 1;
   }
+  console.log(`Registering token for environment "${environment}".`);
+  console.log(`Config dir: ${getConfigDir()}`);
+  if (apiUrl) {
+    console.log(`Resolved API URL: ${apiUrl}`);
+  }
+  console.log("The token input is hidden. Paste the token, then press Enter.");
   let token = process.env.PRISME_TOKEN?.trim();
   if (!token) {
-    token = await promptHidden(`Paste the API token for "${environment}" (input hidden): `);
+    token = await promptRequiredHidden(`Paste the API token for "${environment}" (input hidden)`);
   }
   if (!token) {
     console.error("No token provided. Aborting; nothing was saved.");
     return 1;
   }
-  const studioUrl = studioUrlFlag ?? existing?.studioUrl;
+  if (!apiUrl) {
+    const known = Object.keys(topology.environments).join(", ") || "(none)";
+    console.log(`Unknown environment "${environment}" (known: ${known}).`);
+    console.log(
+      "Enter the instance URL. Accepted formats: https://sandbox.prisme.ai or https://api.sandbox.prisme.ai/v2."
+    );
+  }
+  if (process.stdin.isTTY) {
+    const apiPrompt = apiUrl ? `Instance API URL or studio/base URL [${apiUrl}]: ` : "Instance API URL or studio/base URL: ";
+    const apiInput = await promptLine(apiPrompt);
+    if (apiInput) {
+      try {
+        apiUrl = normalizeApiUrl(apiInput);
+        studioUrl = studioUrl ?? deriveStudioUrl(apiInput);
+      } catch {
+        console.error(
+          `Invalid instance URL "${apiInput}". Use a studio/base URL like https://sandbox.prisme.ai or an API URL like https://api.sandbox.prisme.ai/v2.`
+        );
+        return 1;
+      }
+    }
+  }
+  if (!apiUrl) {
+    console.error(
+      "No API URL provided. Aborting; nothing was saved. Use a studio/base URL like https://sandbox.prisme.ai or an API URL like https://api.sandbox.prisme.ai/v2."
+    );
+    return 1;
+  }
   process.stdout.write(`Validating token against ${apiUrl} ... `);
   let me;
   try {
@@ -28673,7 +28729,7 @@ var init_api_client = __esm({
 
 Recommended (keeps your token private \u2014 it never enters this chat or reaches the LLM provider):
 1. ${createLine}
-2. Run this in your OWN terminal (it prompts for the token with hidden input, validates it, then saves it):
+2. Run this in your OWN terminal as one shell command. Copy the next line exactly; do not insert line breaks inside quoted paths. The CLI prints "READY FOR TOKEN INPUT", then prompts for the token with hidden input, then asks for the instance URL. You can enter the studio/base URL (for example https://sandbox.prisme.ai) or the API URL (for example https://api.sandbox.prisme.ai/v2); it validates the token, then saves it:
 
    ${cliCommand}
 
@@ -28682,12 +28738,25 @@ Recommended (keeps your token private \u2014 it never enters this chat or reache
 Alternative: paste the token to me and I will call the \`set_token\` tool \u2014 but be aware the token would then be sent over the network to the LLM provider as part of this conversation.`
         );
       }
+      unknownEnvironmentError(environment) {
+        const available = Object.keys(this.environments);
+        return new Error(
+          `Unknown environment: "${environment}". Available: ${available.length > 0 ? available.join(", ") : "none configured"}. If you meant "${environment}", configure it before retrying. Create an API token in the target Prisme.ai studio, find the environment API URL (for example https://studio.prisme.ai uses https://api.studio.prisme.ai/v2, and https://sandbox.prisme.ai uses https://api.sandbox.prisme.ai/v2). Then run this as one shell command (copy it exactly; do not insert line breaks inside quoted paths). You may also omit --api-url and enter either the studio/base URL or API URL when the CLI prompts:
+
+   node "${this.serverScriptPath ?? "<plugin>/build/index.js"}" set-token ${environment} --api-url <api-url>${this.configDir ? ` --config-dir "${this.configDir}"` : ""}
+
+Agents should use the /prisme-ai:setup skill for the setup workflow.`
+        );
+      }
       // Get API key for a specific environment; throws an actionable error when
       // no token is stored for it. Before failing, attempt a lazy reload from
       // credentials.json so a token just registered via the CLI is picked up
       // without restarting the session.
       getApiKeyForEnvironment(environment) {
-        if (environment && this.environments[environment]) {
+        if (environment && !this.environments[environment]) {
+          throw this.unknownEnvironmentError(environment);
+        }
+        if (environment) {
           let key = this.environments[environment].apiKey;
           if (!key) {
             const reloaded = this.reloadTokens?.(environment);
@@ -29732,7 +29801,7 @@ var require_main = __commonJS({
 });
 
 // src/config.ts
-import { existsSync as existsSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2, renameSync as renameSync2, mkdirSync as mkdirSync2 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync3 } from "fs";
 import { join as join3, dirname as dirname2 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function validateEnvironments(parsed) {
@@ -29780,43 +29849,6 @@ function loadEnvironments() {
       `Warning: invalid config.json in ${getConfigDir()}: ${error instanceof Error ? error.message : "Unknown error"}`
     );
   }
-  const legacy = importLegacyEnvironments();
-  if (legacy && Object.keys(legacy).length > 0) {
-    try {
-      const environments = validateEnvironments(legacy);
-      const topology = { environments: {} };
-      const creds = {};
-      for (const [envName, env] of Object.entries(environments)) {
-        const { apiKey, ...rest } = env;
-        topology.environments[envName] = rest;
-        if (apiKey) {
-          creds[envName] = { token: apiKey, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
-        }
-      }
-      try {
-        persistTopologySync(topology);
-        if (Object.keys(creds).length > 0) {
-          const credsPath = join3(getConfigDir(), CREDENTIALS_FILE);
-          const tmpPath = `${credsPath}.tmp-${process.pid}-${Date.now()}`;
-          mkdirSync2(getConfigDir(), { recursive: true });
-          writeFileSync2(tmpPath, JSON.stringify(creds, null, 2) + "\n", { mode: 384 });
-          renameSync2(tmpPath, credsPath);
-        }
-        console.error(
-          `Imported legacy PRISME_ENVIRONMENTS into ${getConfigDir()}`
-        );
-      } catch (err) {
-        console.error(
-          `Warning: could not write imported config to ${getConfigDir()}: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-      return { environments };
-    } catch (error) {
-      console.error(
-        `Warning: legacy PRISME_ENVIRONMENTS is invalid: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
-    }
-  }
   const shippedDefault = [
     join3(__dirname2, "..", "config", "default-environments.json"),
     join3(__dirname2, "..", "plugin", "config", "default-environments.json")
@@ -29837,26 +29869,23 @@ function loadEnvironments() {
   return { environments: {} };
 }
 function resolveWorkspaceAndEnvironment(params) {
+  const explicitEnvConfig = params.environment ? environmentsConfig[params.environment] : void 0;
+  if (params.environment && !explicitEnvConfig) {
+    const availableEnvs = Object.keys(environmentsConfig);
+    throw new Error(
+      `Unknown environment: "${params.environment}". Available: ${availableEnvs.length > 0 ? availableEnvs.join(", ") : "none configured"}. If you meant "${params.environment}", configure it before retrying.`
+    );
+  }
   if (params.workspaceId) {
-    let apiUrl = PRISME_API_BASE_URL;
-    if (params.environment && environmentsConfig[params.environment]) {
-      apiUrl = environmentsConfig[params.environment].apiUrl;
-    }
     return {
       workspaceId: params.workspaceId,
-      apiUrl,
+      apiUrl: explicitEnvConfig?.apiUrl ?? PRISME_API_BASE_URL,
       environment: params.environment,
       source: "parameter"
     };
   }
   if (params.environment && params.workspaceName) {
-    const envConfig = environmentsConfig[params.environment];
-    if (!envConfig) {
-      const availableEnvs = Object.keys(environmentsConfig);
-      throw new Error(
-        `Unknown environment: "${params.environment}". Available: ${availableEnvs.length > 0 ? availableEnvs.join(", ") : "none configured"}`
-      );
-    }
+    const envConfig = explicitEnvConfig;
     if (!envConfig.workspaces) {
       throw new Error(
         `Environment "${params.environment}" has no workspace mappings configured. Provide workspaceId directly instead of workspaceName.`
@@ -29902,13 +29931,7 @@ function resolveWorkspaceAndEnvironment(params) {
     };
   }
   if (params.environment) {
-    const envConfig = environmentsConfig[params.environment];
-    if (!envConfig) {
-      const availableEnvs = Object.keys(environmentsConfig);
-      throw new Error(
-        `Unknown environment: "${params.environment}". Available: ${availableEnvs.length > 0 ? availableEnvs.join(", ") : "none configured"}`
-      );
-    }
+    const envConfig = explicitEnvConfig;
     const envWorkspaceId = envConfig.workspaces ? Object.values(envConfig.workspaces)[0] : void 0;
     const workspaceId = envWorkspaceId || PRISME_WORKSPACE_ID || "";
     return {
@@ -29930,7 +29953,7 @@ function resolveWorkspaceAndEnvironment(params) {
     source: "default"
   };
 }
-var import_dotenv, __dirname2, PRISME_FORCE_READONLY, PRISME_DISABLE_FEEDBACK_TOOLS, PRISME_WORKSPACES, PRISME_DEFAULT_ENVIRONMENT, LEGACY_PRISME_API_KEY, LEGACY_PRISME_WORKSPACE_ID, LEGACY_PRISME_API_BASE_URL, PRISME_API_KEY, PRISME_WORKSPACE_ID, PRISME_API_BASE_URL, workspaceMappings, environmentsConfig, defaultEnvironmentName, loaded, storedCredentials;
+var import_dotenv, __dirname2, PRISME_FORCE_READONLY, PRISME_DISABLE_FEEDBACK_TOOLS, PRISME_WORKSPACES, PRISME_DEFAULT_ENVIRONMENT, ENV_PRISME_API_KEY, ENV_PRISME_WORKSPACE_ID, ENV_PRISME_API_BASE_URL, PRISME_API_KEY, PRISME_WORKSPACE_ID, PRISME_API_BASE_URL, workspaceMappings, environmentsConfig, defaultEnvironmentName, loaded, storedCredentials;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
@@ -29942,9 +29965,9 @@ var init_config = __esm({
     PRISME_DISABLE_FEEDBACK_TOOLS = process.env.PRISME_DISABLE_FEEDBACK_TOOLS === "true";
     PRISME_WORKSPACES = process.env.PRISME_WORKSPACES;
     PRISME_DEFAULT_ENVIRONMENT = process.env.PRISME_DEFAULT_ENVIRONMENT;
-    LEGACY_PRISME_API_KEY = process.env.PRISME_API_KEY;
-    LEGACY_PRISME_WORKSPACE_ID = process.env.PRISME_WORKSPACE_ID;
-    LEGACY_PRISME_API_BASE_URL = process.env.PRISME_API_BASE_URL;
+    ENV_PRISME_API_KEY = process.env.PRISME_API_KEY;
+    ENV_PRISME_WORKSPACE_ID = process.env.PRISME_WORKSPACE_ID;
+    ENV_PRISME_API_BASE_URL = process.env.PRISME_API_BASE_URL;
     PRISME_API_BASE_URL = "https://api.staging.prisme.ai/v2";
     workspaceMappings = {};
     environmentsConfig = {};
@@ -30017,14 +30040,14 @@ var init_config = __esm({
         );
       }
     }
-    if (!PRISME_API_KEY && LEGACY_PRISME_API_KEY) {
-      PRISME_API_KEY = LEGACY_PRISME_API_KEY;
+    if (!PRISME_API_KEY && ENV_PRISME_API_KEY) {
+      PRISME_API_KEY = ENV_PRISME_API_KEY;
     }
-    if (!PRISME_WORKSPACE_ID && LEGACY_PRISME_WORKSPACE_ID) {
-      PRISME_WORKSPACE_ID = LEGACY_PRISME_WORKSPACE_ID;
+    if (!PRISME_WORKSPACE_ID && ENV_PRISME_WORKSPACE_ID) {
+      PRISME_WORKSPACE_ID = ENV_PRISME_WORKSPACE_ID;
     }
-    if (LEGACY_PRISME_API_BASE_URL && PRISME_API_BASE_URL === "https://api.staging.prisme.ai/v2") {
-      PRISME_API_BASE_URL = LEGACY_PRISME_API_BASE_URL;
+    if (ENV_PRISME_API_BASE_URL && PRISME_API_BASE_URL === "https://api.staging.prisme.ai/v2") {
+      PRISME_API_BASE_URL = ENV_PRISME_API_BASE_URL;
     }
     if (Object.keys(environmentsConfig).length === 0 && !PRISME_API_KEY) {
       console.error(
@@ -30096,11 +30119,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30122,11 +30145,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30190,11 +30213,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30219,11 +30242,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30244,11 +30267,11 @@ var init_definitions = __esm({
           properties: {
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30281,7 +30304,7 @@ var init_definitions = __esm({
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL"
+              description: "Optional environment name (from configured environments) to use specific API URL"
             },
             page: {
               type: "number",
@@ -30314,7 +30337,7 @@ var init_definitions = __esm({
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL"
+              description: "Optional environment name (from configured environments) to use specific API URL"
             }
           },
           required: ["appSlug"]
@@ -30360,11 +30383,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30382,11 +30405,11 @@ var init_definitions = __esm({
           properties: {
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30411,11 +30434,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30459,11 +30482,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30485,11 +30508,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30514,11 +30537,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30547,11 +30570,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30569,11 +30592,11 @@ var init_definitions = __esm({
           properties: {
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30610,11 +30633,11 @@ var init_definitions = __esm({
           properties: {
             workspaceName: {
               type: "string",
-              description: "Workspace name (as configured in PRISME_ENVIRONMENTS or PRISME_WORKSPACES)"
+              description: "Workspace name (as configured in configured environment or workspace mappings)"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and credentials"
+              description: "Optional environment name (from configured environments) to use specific API URL and credentials"
             },
             workspaceId: {
               type: "string",
@@ -30665,7 +30688,7 @@ var init_definitions = __esm({
             },
             environment: {
               type: "string",
-              description: "Environment name (from PRISME_ENVIRONMENTS) to create the workspace in"
+              description: "Environment name (from configured environments) to create the workspace in"
             }
           },
           required: ["workspace", "environment"]
@@ -30703,7 +30726,7 @@ var init_definitions = __esm({
             },
             environment: {
               type: "string",
-              description: "Environment name (from PRISME_ENVIRONMENTS) to search workspaces in"
+              description: "Environment name (from configured environments) to search workspaces in"
             }
           },
           required: ["environment"]
@@ -30736,7 +30759,7 @@ var init_definitions = __esm({
             },
             environment: {
               type: "string",
-              description: "Environment name (from PRISME_ENVIRONMENTS), e.g. 'sandbox' or 'prod'. Defaults to the default environment."
+              description: "Environment name (from configured environments), e.g. 'sandbox' or 'prod'. Defaults to the default environment."
             },
             pick: {
               type: "array",
@@ -30778,11 +30801,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -30874,11 +30897,11 @@ var init_definitions = __esm({
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -31118,11 +31141,11 @@ Use this to cancel a report, edit its message, or change its type.`,
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -31154,11 +31177,11 @@ Use this to cancel a report, edit its message, or change its type.`,
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -31201,11 +31224,11 @@ Use this to cancel a report, edit its message, or change its type.`,
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -31238,11 +31261,11 @@ Use this to cancel a report, edit its message, or change its type.`,
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -31301,11 +31324,11 @@ Use this to cancel a report, edit its message, or change its type.`,
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -31340,11 +31363,11 @@ Use this to cancel a report, edit its message, or change its type.`,
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -31366,11 +31389,11 @@ Use this to cancel a report, edit its message, or change its type.`,
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -31392,11 +31415,11 @@ Use this to cancel a report, edit its message, or change its type.`,
             },
             workspaceName: {
               type: "string",
-              description: "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping"
+              description: "Workspace name that resolves to ID via configured environment or workspace mappings"
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace"
+              description: "Optional environment name (from configured environments) to use specific API URL and workspace"
             },
             workspaceId: {
               type: "string",
@@ -31478,7 +31501,7 @@ Requires a legacy AI Knowledge project API key (from AI Knowledge > API & Webhoo
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL"
+              description: "Optional environment name (from configured environments) to use specific API URL"
             }
           },
           required: ["projectId", "text", "apiKey"]
@@ -31578,7 +31601,7 @@ Requires a legacy AI Knowledge project API key.`,
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL"
+              description: "Optional environment name (from configured environments) to use specific API URL"
             }
           },
           required: ["method", "apiKey"]
@@ -31698,7 +31721,7 @@ Requires a legacy AI Knowledge project API key.`,
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL"
+              description: "Optional environment name (from configured environments) to use specific API URL"
             }
           },
           required: ["method", "projectId", "apiKey"]
@@ -31800,7 +31823,7 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
             },
             environment: {
               type: "string",
-              description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL"
+              description: "Optional environment name (from configured environments) to use specific API URL"
             }
           },
           required: ["method"]
@@ -31808,7 +31831,7 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
       },
       {
         name: "set_token",
-        description: "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead \u2014 tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error); it prompts for the token with hidden input and never exposes it to the chat. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
+        description: "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead \u2014 tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error). When relaying that command, preserve it as one shell command and do not insert line breaks inside quoted paths. It prompts for the token with hidden input, then asks for the instance URL; users can enter a studio/base URL such as `https://sandbox.prisme.ai` or an API URL such as `https://api.sandbox.prisme.ai/v2`. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
         inputSchema: {
           type: "object",
           properties: {
@@ -32146,7 +32169,7 @@ var require_utils2 = __commonJS({
     module.exports = Utils;
     Utils.prototype.makeDir = function(folder) {
       const self2 = this;
-      function mkdirSync4(fpath) {
+      function mkdirSync2(fpath) {
         let resolvedPath = fpath.split(self2.sep)[0];
         fpath.split(self2.sep).forEach(function(name) {
           if (!name || name.substr(-1, 1) === ":") return;
@@ -32160,7 +32183,7 @@ var require_utils2 = __commonJS({
           if (stat && stat.isFile()) throw Errors.FILE_IN_THE_WAY(`"${resolvedPath}"`);
         });
       }
-      mkdirSync4(folder);
+      mkdirSync2(folder);
     };
     Utils.prototype.writeFileTo = function(path, content, overwrite, attr) {
       const self2 = this;
@@ -51048,7 +51071,7 @@ var init_dist = __esm({
 });
 
 // src/tools/handlers.ts
-import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, existsSync as existsSync3, mkdirSync as mkdirSync3, readdirSync, statSync } from "fs";
+import { readFileSync as readFileSync4, writeFileSync, existsSync as existsSync3, mkdirSync, readdirSync, statSync } from "fs";
 import { fileURLToPath as fileURLToPath3 } from "url";
 import { basename, dirname as dirname3, join as join4, resolve, extname } from "path";
 function formatLintErrors(result) {
@@ -51983,7 +52006,7 @@ ${formatLintErrors(lintResult)}`
       );
       const zip = new import_adm_zip.default(zipBuffer);
       if (!existsSync3(resolvedPath)) {
-        mkdirSync3(resolvedPath, { recursive: true });
+        mkdirSync(resolvedPath, { recursive: true });
       }
       const extractedFiles = [];
       const currentPrefix = "current/";
@@ -51994,14 +52017,14 @@ ${formatLintErrors(lintResult)}`
             const targetFilePath = join4(resolvedPath, relativePath);
             if (entry.isDirectory) {
               if (!existsSync3(targetFilePath)) {
-                mkdirSync3(targetFilePath, { recursive: true });
+                mkdirSync(targetFilePath, { recursive: true });
               }
             } else {
               const fileDir = dirname3(targetFilePath);
               if (!existsSync3(fileDir)) {
-                mkdirSync3(fileDir, { recursive: true });
+                mkdirSync(fileDir, { recursive: true });
               }
-              writeFileSync3(targetFilePath, entry.getData());
+              writeFileSync(targetFilePath, entry.getData());
               extractedFiles.push(relativePath);
             }
           }
@@ -52854,7 +52877,7 @@ async function startServer() {
       if (axiosError.response) {
         const expiredHint = axiosError.response.status === 401 ? `
 
-The stored token was rejected (expired or revoked). Recommended: re-register it WITHOUT exposing it in this chat \u2014 run in your own terminal:
+The stored token was rejected (expired or revoked). Recommended: re-register it WITHOUT exposing it in this chat \u2014 run the next line in your own terminal as one shell command (copy it exactly; do not insert line breaks inside quoted paths). The CLI prompts for the token, then the instance URL; it accepts either a studio/base URL such as https://sandbox.prisme.ai or an API URL such as https://api.sandbox.prisme.ai/v2:
 
    node "${process.argv[1]}" set-token ${defaultEnvironmentName ?? "<environment>"} --config-dir "${getConfigDir()}"
 

@@ -1,9 +1,10 @@
 # Prisme.ai API URL (must include /v2 suffix).
 PRISMEAI_API_URL={{api_url}}
 
-# Personal access token (JWT). Auto-filled from the prisme-ai-builder MCP env.
+# Personal access token. Create it in the target Prisme.ai studio at
+# <studio-url>/settings/tokens and fill it locally. Do NOT paste it in chat.
 # Do NOT commit this file (.env is gitignored).
-PRISMEAI_ACCESS_TOKEN={{access_token}}
+PRISMEAI_ACCESS_TOKEN=<fill-locally>
 
 # Workspace ID where the bundle will be deployed (short ID, e.g. B4eoHS6).
 PRISMEAI_WORKSPACE_ID={{workspace_id}}

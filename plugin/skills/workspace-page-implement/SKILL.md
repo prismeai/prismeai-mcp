@@ -169,37 +169,21 @@ an app inside an existing one), call `mcp__prisme-ai-builder__create_workspace`.
 
 ---
 
-## Phase 2 (common) — Pull auth from the prisme-ai-builder MCP env
+## Phase 2 (common) — Use the configured Prisme.ai MCP environment
 
-The MCP `prisme-ai-builder` already holds the user's credentials. We reuse them
-instead of asking the user to mint a personal access token.
+Use the `prisme-ai-builder` MCP tools with an explicit `environment` parameter.
+If the environment or token is not configured, stop and follow `/prisme-ai:setup`;
+do not ask the user to paste a token into the chat unless they explicitly choose
+the `set_token` fallback after being warned.
 
-```bash
-cat ~/.claude.json | jq -r '.mcpServers["prisme-ai-builder"].env.PRISME_ENVIRONMENTS'
-```
-
-The value is a JSON-stringified object :
-
-```json
-{
-  "sandbox": { "apiUrl": "https://api.sandbox.prisme.ai/v2", "apiKey": "<JWT>", "studioUrl": "https://sandbox.prisme.ai", "workspaces": {...} },
-  "staging": { ... },
-  "prod":    { "apiUrl": "https://api.studio.prisme.ai/v2",  "apiKey": "<JWT>", "studioUrl": "https://studio.prisme.ai",  "workspaces": {...} }
-}
-```
-
-1. Re-parse the inner JSON, pick the env:
+1. Pick the environment:
    - Default `sandbox` unless the user's request contains `prod` / `production`.
-   - When ambiguous, ask via `AskUserQuestion`.
-2. Extract `apiUrl`, `apiKey`, `studioUrl`.
-3. Warn the user if the JWT expires soon:
-   ```bash
-   echo '<JWT>' | cut -d. -f2 | base64 -d 2>/dev/null | jq .exp
-   ```
-   Compare to `date +%s`. Alert (don't block) if `< 7 days`.
-4. **Never** print the raw `apiKey` value in your messages. Treat it like a password.
-5. For direct fetch calls, the auth header is `Authorization: Bearer <apiKey>` (the
-   Prisme.ai backend accepts JWT Bearer in addition to `at:<uuid>` and `x-prismeai-api-key`).
+   - When ambiguous, ask before continuing.
+2. Use MCP tools with the selected `environment` and either `workspaceName` or
+   `workspaceId`. If setup is missing, follow `/prisme-ai:setup`.
+3. For local frontend `.env` files, never extract or print the MCP token. Tell the
+   user to create a token at `<studio-url>/settings/tokens` and fill the local
+   `.env` value in their own terminal/editor.
 
 ---
 
@@ -240,10 +224,10 @@ workspace : `<appDir>` = `pages/<workspace>/`.
    |---|---|---|
    | `templates/App.tsx.tpl` | `<appDir>/src/App.tsx` | `{{workspace_name}}` (from `index.yml > name` or folder name) |
    | `templates/package.json.tpl` | `<appDir>/package.json` | `{{name}}` (kebab-case of `<appName>`), `{{workspace_name}}` |
-   | `templates/env.tpl` | `<appDir>/.env` | `{{api_url}}`, `{{access_token}}`, `{{workspace_id}}`, `{{studio_url}}` (all from MCP env) |
+   | `templates/env.tpl` | `<appDir>/.env` | `{{api_url}}`, `{{workspace_id}}`, `{{studio_url}}`; the user fills `PRISMEAI_ACCESS_TOKEN` locally |
 
    Use `Read` + string replacement, then `Write` to the target. Don't echo
-   `access_token` to the conversation.
+   access tokens to the conversation.
 
 5. `chmod 600 <appDir>/.env` (defense-in-depth against accidental read).
 6. Verify `<appDir>/.gitignore` excludes `.env` (already done by the tarball — `Read` and `Grep` to confirm).

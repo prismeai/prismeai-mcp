@@ -1,8 +1,6 @@
-import { promises as fs, readFileSync, mkdirSync, writeFileSync, renameSync } from "fs";
+import { promises as fs, readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-
-const MCP_SERVER_KEY = "prisme-ai-builder";
 
 export const CONFIG_FILE = "config.json";
 export const CREDENTIALS_FILE = "credentials.json";
@@ -111,63 +109,6 @@ export async function persistTopology(topology: StoredTopology): Promise<string>
   const path = join(getConfigDir(), CONFIG_FILE);
   await writeJsonAtomic(path, topology);
   return path;
-}
-
-/** Synchronous variant used during startup migration. */
-export function persistTopologySync(topology: StoredTopology): string {
-  const dir = getConfigDir();
-  mkdirSync(dir, { recursive: true });
-  const path = join(dir, CONFIG_FILE);
-  const tmpPath = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmpPath, JSON.stringify(topology, null, 2) + "\n", { mode: 0o600 });
-  renameSync(tmpPath, path);
-  return path;
-}
-
-export interface LegacyEnvironment extends StoredEnvironment {
-  apiKey?: string;
-}
-
-/**
- * One-time migration source: the PRISME_ENVIRONMENTS JSON blob, either from
- * the process environment (old `claude mcp add` registration) or from the
- * legacy ~/.claude.json registration written by setup.sh.
- * Returns environments including any embedded apiKeys so the caller can
- * split them into config.json + credentials.json.
- */
-export function importLegacyEnvironments(): Record<string, LegacyEnvironment> | undefined {
-  if (process.env.PRISME_ENVIRONMENTS) {
-    try {
-      return JSON.parse(process.env.PRISME_ENVIRONMENTS);
-    } catch {
-      console.error("Warning: PRISME_ENVIRONMENTS env var is not valid JSON; ignoring it");
-    }
-  }
-
-  const claudeJsonPath =
-    process.env.PRISME_CLAUDE_JSON_PATH || join(homedir(), ".claude.json");
-  try {
-    const data = readJsonSync<any>(claudeJsonPath);
-    if (!data) return undefined;
-
-    let serverConfig = data?.mcpServers?.[MCP_SERVER_KEY];
-    if (!serverConfig && data?.projects && typeof data.projects === "object") {
-      for (const proj of Object.values<any>(data.projects)) {
-        if (proj?.mcpServers?.[MCP_SERVER_KEY]) {
-          serverConfig = proj.mcpServers[MCP_SERVER_KEY];
-          break;
-        }
-      }
-    }
-
-    const envsJson = serverConfig?.env?.PRISME_ENVIRONMENTS;
-    if (typeof envsJson === "string") {
-      return JSON.parse(envsJson);
-    }
-  } catch {
-    // Best-effort migration only; a broken ~/.claude.json must not block startup.
-  }
-  return undefined;
 }
 
 /**

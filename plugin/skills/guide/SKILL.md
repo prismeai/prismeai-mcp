@@ -67,6 +67,7 @@ The connector workflow: scaffold a new SaaS connector, test it, consolidate test
 | Render interactive UI from agent tool calls | `/prisme-ai:agent-implement-a2ui` |
 | Edit the React frontend of a workspace | `/prisme-ai:workspace-page-implement` |
 | Debug events / trace an execution | `/prisme-ai:prisme-assistant` |
+| Configure an MCP environment or token | `/prisme-ai:setup` |
 | Check DSUL rules before editing automations | `/prisme-ai:dsul-rules` |
 | Check an implementation against its ticket | `/prisme-ai:ticket-validator` |
 | I don't know where to start | `/prisme-ai:guide` (this) |
@@ -79,13 +80,13 @@ The connector workflow: scaffold a new SaaS connector, test it, consolidate test
 
 The MCP authenticates with user-created API tokens. When a tool call fails with "No credentials for environment …" (or a 401), **do not ask the user to paste their token into the chat** — that would send it to the LLM provider.
 
-Instead, relay the CLI command from the error message and ask the user to run it in **their own terminal**:
+Instead, relay the CLI command from the error message and ask the user to run it in **their own terminal**. Preserve it as one shell command; do not insert line breaks inside quoted paths.
 
 ```
 node "<plugin>/build/index.js" set-token <environment> --config-dir "<config-dir>"
 ```
 
-The error message already contains the exact path and config dir, and the command prompts for the token with hidden input, validates it, and saves it. After it succeeds, just retry the request — the server picks up the new token automatically (no restart). To create the token, the studio page is `<studio-origin>/settings/tokens` (e.g. https://sandbox.prisme.ai/settings/tokens).
+The error message already contains the exact path and config dir. The command prompts for the token with hidden input, then asks for the instance URL; users can enter the studio/base URL (e.g. https://sandbox.prisme.ai) or the API URL (e.g. https://api.sandbox.prisme.ai/v2). It validates the token and saves it. After it succeeds, just retry the request — the server picks up the new token automatically (no restart). To create the token, the studio page is `<studio-origin>/settings/tokens` (e.g. https://sandbox.prisme.ai/settings/tokens).
 
 Only if the user explicitly insists on pasting the token in the conversation should you fall back to the `set_token` tool — and first warn them the token will be transmitted to the LLM provider as part of the chat.
 

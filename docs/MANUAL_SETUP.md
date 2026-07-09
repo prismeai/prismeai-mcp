@@ -28,7 +28,7 @@ Register it with the `set-token` CLI (recommended — the token stays local and 
 node "/absolute/path/to/mcp-prisme.ai/plugin/build/index.js" set-token sandbox --config-dir "$HOME/.prisme-ai-mcp"
 ```
 
-It prompts for the token with hidden input (or reads `PRISME_TOKEN` from the env). Alternatively, register it at runtime with the `set_token` MCP tool, or pass it statically via the environment variables below.
+It prompts for the token with hidden input (or reads `PRISME_TOKEN` from the env), then asks for the instance URL. You can enter the studio/base URL, e.g. `https://sandbox.prisme.ai`, or the API URL, e.g. `https://api.sandbox.prisme.ai/v2`. Alternatively, register it at runtime with the `set_token` MCP tool, or pass a single environment statically via the environment variables below.
 
 ## Environment Variables
 
@@ -38,7 +38,6 @@ It prompts for the token with hidden input (or reads `PRISME_TOKEN` from the env
 | `PRISME_API_KEY` | No | Static API token for single-environment setups (prefer `set_token`) |
 | `PRISME_API_BASE_URL` | No | API base URL (e.g., `https://api.sandbox.prisme.ai/v2`) |
 | `PRISME_WORKSPACE_ID` | No | Default workspace ID (can be empty) |
-| `PRISME_ENVIRONMENTS` | No | Legacy JSON object for multi-environment configuration — imported into `PRISME_CONFIG_DIR` on first start |
 | `PRISME_DEFAULT_ENVIRONMENT` | No | Default environment name |
 | `PRISME_WORKSPACES` | No | Legacy workspace name mappings (JSON) |
 | `PRISME_FORCE_READONLY` | No | Block all write operations when `true` |
@@ -70,27 +69,43 @@ Config file location:
 
 ### Multi-Environment Configuration
 
+Create or edit `$PRISME_CONFIG_DIR/config.json` with environment topology only, then register each token with `set-token`.
+
+Example `$HOME/.prisme-ai-mcp/config.json`:
+
 ```json
 {
-  "mcpServers": {
-    "prisme-ai-builder": {
-      "command": "node",
-      "args": ["/absolute/path/to/mcp-prisme.ai/plugin/build/index.js"],
-      "env": {
-        "PRISME_API_KEY": "your_jwt_token_here",
-        "PRISME_API_BASE_URL": "https://api.sandbox.prisme.ai/v2",
-        "PRISME_WORKSPACE_ID": "",
-        "PRISME_ENVIRONMENTS": "{\"sandbox\":{\"apiUrl\":\"https://api.sandbox.prisme.ai/v2\",\"apiKey\":\"sandbox_jwt_token\"},\"staging\":{\"apiUrl\":\"https://api.staging.prisme.ai/v2\",\"apiKey\":\"staging_jwt_token\"},\"prod\":{\"apiUrl\":\"https://api.studio.prisme.ai/v2\",\"apiKey\":\"prod_jwt_token\"}}",
-        "PRISME_DEFAULT_ENVIRONMENT": "sandbox"
-      }
+  "environments": {
+    "sandbox": {
+      "apiUrl": "https://api.sandbox.prisme.ai/v2",
+      "studioUrl": "https://sandbox.prisme.ai",
+      "default": true
+    },
+    "prod": {
+      "apiUrl": "https://api.studio.prisme.ai/v2",
+      "studioUrl": "https://studio.prisme.ai"
     }
-  }
+  },
+  "defaultEnvironment": "sandbox"
 }
 ```
 
-### Legacy Workspace Mappings
+Then register tokens:
 
-For single API URL setups:
+```bash
+node "/absolute/path/to/mcp-prisme.ai/plugin/build/index.js" set-token sandbox --config-dir "$HOME/.prisme-ai-mcp"
+node "/absolute/path/to/mcp-prisme.ai/plugin/build/index.js" set-token prod --config-dir "$HOME/.prisme-ai-mcp"
+```
+
+For a new environment that is not already in `config.json`, answer the URL prompt or pass `--api-url`:
+
+```bash
+node "/absolute/path/to/mcp-prisme.ai/plugin/build/index.js" set-token custom --api-url https://api.custom.prisme.ai/v2 --config-dir "$HOME/.prisme-ai-mcp"
+```
+
+### Workspace Mappings
+
+For single API URL setups, `PRISME_WORKSPACES` can map friendly names to workspace IDs:
 
 ```json
 {
@@ -123,25 +138,26 @@ After configuration, restart Cursor to load the MCP server.
 
 ### Environment Structure
 
-Environments are dynamically configured. Each environment requires an API URL and JWT token:
+Environments are dynamically configured. Each environment requires an API URL in `config.json`; tokens live separately in `credentials.json` and are written by `set-token` or `set_token`:
 
 ```json
 {
-  "sandbox": {
-    "apiUrl": "https://api.sandbox.prisme.ai/v2",
-    "apiKey": "your_sandbox_jwt_token"
-  },
-  "staging": {
-    "apiUrl": "https://api.staging.prisme.ai/v2",
-    "apiKey": "your_staging_jwt_token"
-  },
-  "prod": {
-    "apiUrl": "https://api.studio.prisme.ai/v2",
-    "apiKey": "your_prod_jwt_token"
-  },
-  "custom": {
-    "apiUrl": "https://api.your-instance.prisme.ai/v2",
-    "apiKey": "your_custom_jwt_token"
+  "environments": {
+    "sandbox": {
+      "apiUrl": "https://api.sandbox.prisme.ai/v2",
+      "studioUrl": "https://sandbox.prisme.ai"
+    },
+    "staging": {
+      "apiUrl": "https://api.staging.prisme.ai/v2",
+      "studioUrl": "https://staging.prisme.ai"
+    },
+    "prod": {
+      "apiUrl": "https://api.studio.prisme.ai/v2",
+      "studioUrl": "https://studio.prisme.ai"
+    },
+    "custom": {
+      "apiUrl": "https://api.your-instance.prisme.ai/v2"
+    }
   }
 }
 ```
@@ -152,17 +168,19 @@ All tools accept optional parameters:
 
 | Parameter | Description |
 |-----------|-------------|
-| `environment` | Environment name from `PRISME_ENVIRONMENTS` |
-| `workspaceName` | Workspace name from environment or legacy mappings |
+| `environment` | Environment name from the configured environment topology |
+| `workspaceName` | Workspace name from environment or workspace mappings |
 | `workspaceId` | Direct workspace ID (overrides everything) |
 
 ### Resolution Priority
 
 1. Direct `workspaceId` parameter (with `environment` for API URL if provided)
 2. `environment` + `workspaceName` combination
-3. `workspaceName` alone (uses default environment or legacy mappings)
+3. `workspaceName` alone (uses default environment or workspace mappings)
 4. `environment` alone (uses default workspace ID with environment's API URL)
 5. Default workspace and API URL
+
+If `environment` is provided, it must be configured. The server will not fall back to another environment.
 
 ### Usage Examples
 

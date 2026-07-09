@@ -1,14 +1,11 @@
 import dotenv from "dotenv";
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import {
   getConfigDir,
   loadTopologySync,
   loadCredentialsSync,
-  importLegacyEnvironments,
-  persistTopologySync,
-  CREDENTIALS_FILE,
   type StoredTopology,
 } from "./auth/persist.js";
 
@@ -24,10 +21,10 @@ export const PRISME_DISABLE_FEEDBACK_TOOLS = process.env.PRISME_DISABLE_FEEDBACK
 const PRISME_WORKSPACES = process.env.PRISME_WORKSPACES;
 const PRISME_DEFAULT_ENVIRONMENT = process.env.PRISME_DEFAULT_ENVIRONMENT;
 
-// Legacy environment variables (deprecated, use the config dir instead)
-const LEGACY_PRISME_API_KEY = process.env.PRISME_API_KEY;
-const LEGACY_PRISME_WORKSPACE_ID = process.env.PRISME_WORKSPACE_ID;
-const LEGACY_PRISME_API_BASE_URL = process.env.PRISME_API_BASE_URL;
+// Static environment variables for direct, single-environment runs.
+const ENV_PRISME_API_KEY = process.env.PRISME_API_KEY;
+const ENV_PRISME_WORKSPACE_ID = process.env.PRISME_WORKSPACE_ID;
+const ENV_PRISME_API_BASE_URL = process.env.PRISME_API_BASE_URL;
 
 // Default values derived from environments config (set during parsing)
 export let PRISME_API_KEY: string | undefined;
@@ -120,9 +117,7 @@ function validateEnvironments(parsed: any): EnvironmentsConfig {
 /**
  * Load the environment topology, in priority order:
  *   1. <PRISME_CONFIG_DIR>/config.json (the plugin data dir)
- *   2. Legacy PRISME_ENVIRONMENTS (env var or ~/.claude.json registration),
- *      imported once into the config dir
- *   3. The default topology shipped with the plugin (config/default-environments.json)
+ *   2. The default topology shipped with the plugin (config/default-environments.json)
  */
 function loadEnvironments(): { environments: EnvironmentsConfig; defaultName?: string } {
   // 1. Config dir
@@ -142,54 +137,7 @@ function loadEnvironments(): { environments: EnvironmentsConfig; defaultName?: s
     );
   }
 
-  // 2. Legacy PRISME_ENVIRONMENTS (one-time import into the config dir)
-  const legacy = importLegacyEnvironments();
-  if (legacy && Object.keys(legacy).length > 0) {
-    try {
-      const environments = validateEnvironments(legacy);
-
-      // Split into topology (config.json) + tokens (credentials.json)
-      const topology: StoredTopology = { environments: {} };
-      const creds: Record<string, { token: string; updatedAt?: string }> = {};
-      for (const [envName, env] of Object.entries(environments)) {
-        const { apiKey, ...rest } = env;
-        topology.environments[envName] = rest;
-        if (apiKey) {
-          creds[envName] = { token: apiKey, updatedAt: new Date().toISOString() };
-        }
-      }
-
-      try {
-        persistTopologySync(topology);
-        if (Object.keys(creds).length > 0) {
-          const credsPath = join(getConfigDir(), CREDENTIALS_FILE);
-          const tmpPath = `${credsPath}.tmp-${process.pid}-${Date.now()}`;
-          mkdirSync(getConfigDir(), { recursive: true });
-          writeFileSync(tmpPath, JSON.stringify(creds, null, 2) + "\n", { mode: 0o600 });
-          renameSync(tmpPath, credsPath);
-        }
-        console.error(
-          `Imported legacy PRISME_ENVIRONMENTS into ${getConfigDir()}`
-        );
-      } catch (err) {
-        console.error(
-          `Warning: could not write imported config to ${getConfigDir()}: ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        );
-      }
-
-      return { environments };
-    } catch (error) {
-      console.error(
-        `Warning: legacy PRISME_ENVIRONMENTS is invalid: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
-      );
-    }
-  }
-
-  // 3. Default topology shipped with the plugin. From the bundled layout
+  // 2. Default topology shipped with the plugin. From the bundled layout
   // (plugin/build/index.js) it is at ../config; from the tsc/tsx layouts
   // (build/config.js, src/config.ts) it is at <repo>/plugin/config.
   const shippedDefault =
@@ -275,7 +223,7 @@ if (Object.keys(environmentsConfig).length > 0) {
   );
 }
 
-// Parse legacy PRISME_WORKSPACES (flat structure for backward compatibility)
+// Parse PRISME_WORKSPACES flat workspace-name mappings.
 if (Object.keys(environmentsConfig).length === 0 && PRISME_WORKSPACES) {
   try {
     const parsed = JSON.parse(PRISME_WORKSPACES);
@@ -308,15 +256,15 @@ if (Object.keys(environmentsConfig).length === 0 && PRISME_WORKSPACES) {
   }
 }
 
-// Fallback to legacy environment variables if not set from environments config
-if (!PRISME_API_KEY && LEGACY_PRISME_API_KEY) {
-  PRISME_API_KEY = LEGACY_PRISME_API_KEY;
+// Fallback to static environment variables if not set from environments config.
+if (!PRISME_API_KEY && ENV_PRISME_API_KEY) {
+  PRISME_API_KEY = ENV_PRISME_API_KEY;
 }
-if (!PRISME_WORKSPACE_ID && LEGACY_PRISME_WORKSPACE_ID) {
-  PRISME_WORKSPACE_ID = LEGACY_PRISME_WORKSPACE_ID;
+if (!PRISME_WORKSPACE_ID && ENV_PRISME_WORKSPACE_ID) {
+  PRISME_WORKSPACE_ID = ENV_PRISME_WORKSPACE_ID;
 }
-if (LEGACY_PRISME_API_BASE_URL && PRISME_API_BASE_URL === "https://api.staging.prisme.ai/v2") {
-  PRISME_API_BASE_URL = LEGACY_PRISME_API_BASE_URL;
+if (ENV_PRISME_API_BASE_URL && PRISME_API_BASE_URL === "https://api.staging.prisme.ai/v2") {
+  PRISME_API_BASE_URL = ENV_PRISME_API_BASE_URL;
 }
 
 // The server intentionally starts even with no environments/tokens configured:
@@ -336,18 +284,27 @@ export function resolveWorkspaceAndEnvironment(
   params: WorkspaceResolutionParams
 ): WorkspaceResolutionResult {
   // Priority: workspaceId parameter > environment+workspaceName > workspaceName > default
+  const explicitEnvConfig = params.environment
+    ? environmentsConfig[params.environment]
+    : undefined;
+  if (params.environment && !explicitEnvConfig) {
+    const availableEnvs = Object.keys(environmentsConfig);
+    throw new Error(
+      `Unknown environment: "${params.environment}". ` +
+        `Available: ${
+          availableEnvs.length > 0
+            ? availableEnvs.join(", ")
+            : "none configured"
+        }. ` +
+        `If you meant "${params.environment}", configure it before retrying.`
+    );
+  }
 
   // 1. Direct workspaceId parameter (use environment's API URL if available, else default)
   if (params.workspaceId) {
-    let apiUrl = PRISME_API_BASE_URL;
-
-    if (params.environment && environmentsConfig[params.environment]) {
-      apiUrl = environmentsConfig[params.environment].apiUrl;
-    }
-
     return {
       workspaceId: params.workspaceId,
-      apiUrl,
+      apiUrl: explicitEnvConfig?.apiUrl ?? PRISME_API_BASE_URL,
       environment: params.environment,
       source: "parameter",
     };
@@ -355,18 +312,7 @@ export function resolveWorkspaceAndEnvironment(
 
   // 2. Environment + workspaceName (from environments config)
   if (params.environment && params.workspaceName) {
-    const envConfig = environmentsConfig[params.environment];
-    if (!envConfig) {
-      const availableEnvs = Object.keys(environmentsConfig);
-      throw new Error(
-        `Unknown environment: "${params.environment}". ` +
-          `Available: ${
-            availableEnvs.length > 0
-              ? availableEnvs.join(", ")
-              : "none configured"
-          }`
-      );
-    }
+    const envConfig = explicitEnvConfig!;
 
     if (!envConfig.workspaces) {
       throw new Error(
@@ -391,7 +337,7 @@ export function resolveWorkspaceAndEnvironment(
     };
   }
 
-  // 3. Just workspaceName (use default environment or legacy mappings)
+  // 3. Just workspaceName (use default environment or flat workspace mappings)
   if (params.workspaceName) {
     // Try default environment first if it exists and has workspaces
     if (defaultEnvironmentName && environmentsConfig[defaultEnvironmentName]?.workspaces) {
@@ -407,7 +353,7 @@ export function resolveWorkspaceAndEnvironment(
       }
     }
 
-    // Fall back to legacy workspace mappings
+    // Fall back to flat workspace mappings.
     const resolvedId = workspaceMappings[params.workspaceName];
     if (!resolvedId) {
       throw new Error(
@@ -425,18 +371,7 @@ export function resolveWorkspaceAndEnvironment(
 
   // 4. Just environment (use environment's API URL, but workspaceId must be provided or available)
   if (params.environment) {
-    const envConfig = environmentsConfig[params.environment];
-    if (!envConfig) {
-      const availableEnvs = Object.keys(environmentsConfig);
-      throw new Error(
-        `Unknown environment: "${params.environment}". ` +
-          `Available: ${
-            availableEnvs.length > 0
-              ? availableEnvs.join(", ")
-              : "none configured"
-          }`
-      );
-    }
+    const envConfig = explicitEnvConfig!;
 
     // Try to get a default workspace from this environment.
     // It's OK if none is configured — some tools (get_app, searchWorkspaces,

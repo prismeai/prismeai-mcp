@@ -13,6 +13,8 @@ The server reads and writes its configuration in `PRISME_CONFIG_DIR` (set by the
 
 A default topology (sandbox, staging, prod) ships with the plugin in `config/default-environments.json` and is used until you register your own environments.
 
+If a tool call explicitly names an environment that is not configured, the MCP stops before any API call. It does not fall back to the default environment.
+
 ## Dynamic Environments
 
 You can add any number of custom environments with any name. Registering a token for an unknown environment via `set_token` (passing `apiUrl`) creates it.
@@ -57,6 +59,8 @@ When resolving workspace and API URL:
 3. `workspaceName` alone (uses default environment)
 4. `environment` alone (uses default workspace ID)
 5. Fall back to default workspace and API URL
+
+When `environment` is present, that environment must exist in `config.json` or in the shipped default topology. Unknown explicit environments return a setup error instead of using another environment.
 
 ## Environment Structure
 
@@ -111,15 +115,15 @@ Authentication uses **user-created API tokens** (no browser automation).
 This path never exposes the token to the chat / LLM provider:
 
 1. Create a token in the studio of the target environment: `https://<studio-domain>/settings/tokens` (e.g. <https://sandbox.prisme.ai/settings/tokens>).
-2. Run the server binary's `set-token` command in your own terminal (the exact path + config dir are printed in the "no credentials" error):
+2. Run the server binary's `set-token` command in your own terminal as one shell command (the exact path + config dir are printed in the "no credentials" error). Copy it exactly; do not insert line breaks inside quoted paths:
 
    ```bash
    node "<plugin>/build/index.js" set-token sandbox --config-dir "<config-dir>"
    ```
 
-   It prompts for the token with **hidden input** (or reads `PRISME_TOKEN` from the env), validates it against the API, and saves it to `credentials.json` (mode 600). An invalid token saves nothing.
+   It prompts for the token with **hidden input** (or reads `PRISME_TOKEN` from the env), then asks for the instance URL. You can enter the studio/base URL, e.g. `https://sandbox.prisme.ai`, or the API URL, e.g. `https://api.sandbox.prisme.ai/v2`. The CLI normalizes the URL, validates the token against the API, and saves it to `credentials.json` (mode 600). An invalid token saves nothing.
 
-   For a brand-new environment, add `--api-url` (and optionally `--studio-url`):
+   For a brand-new environment, either answer the URL prompt or pass `--api-url` (and optionally `--studio-url`):
 
    ```bash
    node "<plugin>/build/index.js" set-token custom --api-url https://api.custom.prisme.ai/v2 --config-dir "<config-dir>"
@@ -134,10 +138,6 @@ If you prefer, you can have the agent register the token with the `set_token` to
 ### Rotation / expiry
 
 Re-run `set-token` (CLI or tool) with a fresh token whenever the current one expires or is revoked. Calls failing with HTTP 401 include a reminder with the CLI command; calls targeting an environment with no stored token return the exact CLI command and token-creation URL.
-
-### Migration from setup.sh
-
-On first start, if the config dir is empty, the server imports any legacy `PRISME_ENVIRONMENTS` configuration (from the environment variable or from the old `~/.claude.json` registration) into `config.json` + `credentials.json` automatically.
 
 ## Readonly Mode
 

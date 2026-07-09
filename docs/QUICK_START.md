@@ -4,51 +4,28 @@ Install the Prisme.ai plugin from GitHub and start using the bundled MCP server,
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org) v18+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`)
+- Claude Code and/or Codex
+- Node.js v18+ available to the host runtime
 
 ## Installation
 
-```bash
-# Clone the repository
-git clone https://github.com/prisme-ai/mcp-prisme.ai.git
-cd mcp-prisme.ai
+Repository: [prismeai/prismeai-mcp](https://github.com/prismeai/prismeai-mcp)
 
-# Run the setup script
-./claudeBootstrap/setup.sh
+**Claude Code**
+
+```text
+/plugin marketplace add prismeai/prismeai-mcp
+/plugin install prisme-ai@prismeai-mcp
 ```
 
-## What the Setup Does
+**Codex**
 
-The script guides you through:
+```bash
+codex plugin marketplace add prismeai/prismeai-mcp
+codex plugin add prisme-ai@prismeai-mcp
+```
 
-| Step | Description |
-|------|-------------|
-| Prerequisites check | Verifies Node.js, npm, Claude CLI, installs jq if needed |
-| Anthropic API key | Optional - configure if you don't have Claude Max |
-| Build | Compiles the MCP server |
-| Prisme.ai environments | Add one or more environments with custom API URLs and JWT tokens |
-| Feedback tools | Choose whether to enable bug reporting tools |
-| Agent installation | Installs the `prisme-assistant` agent |
-
-### Environment Setup Flow
-
-During fresh install, you'll be prompted to add environments:
-
-1. **"Do you want to add a Prisme.ai environment?"** - Answer `y` to add an environment
-2. **Environment name** - e.g., `sandbox`, `staging`, `prod`, or any custom name
-3. **API URL** - e.g., `https://api.sandbox.prisme.ai/v2`
-4. **JWT token** - Found in browser: Inspect > Application > Cookies > `access-token` (starts with `ey...`)
-5. Repeat to add more environments, or answer `n` to finish
-
-## Setup Modes
-
-| Mode | Use Case |
-|------|----------|
-| **Fresh install** | First-time setup |
-| **Update** | Rebuild server and update agent (preserves API keys) |
-| **Update API key** | Add or update an environment API key |
-| **Toggle feedback tools** | Enable/disable bug reporting tools (privacy control) |
+No clone, no `npm install`, no build: the plugin ships a prebuilt, self-contained MCP server (`plugin/build/index.js`).
 
 ## What Gets Installed
 
@@ -57,28 +34,47 @@ During fresh install, you'll be prompted to add environments:
 | MCP Server (`prisme-ai-builder`) | Workspaces, automations, apps, events, files, AI Knowledge, DSUL linter |
 | Skills (`/prisme-ai:*`) | Connector scaffolding/testing/docs, A2UI, agent workspaces, `prisme-assistant`, `ticket-validator` — see `/prisme-ai:guide` |
 | Agents (Claude only) | `code-review`, `prisme-assistant` |
-| Hooks (Claude only) | `allow-workspace.sh` workspace allowlist template |
 
-### Project Setup (Optional)
+## Authenticate
 
-To enable Prisme.ai context in your projects, copy the `.claude` folder:
+The recommended path keeps your token out of the chat (it is never sent to the LLM provider):
 
-```bash
-cp -r /path/to/mcp-prisme.ai/claudeBootstrap/dot_claude /path/to/your/project/.claude
-```
+1. Create an API token in the studio of your environment: `https://<studio-domain>/settings/tokens` (e.g. <https://sandbox.prisme.ai/settings/tokens>).
+2. Run `set-token` in your own terminal as one shell command — the exact command (with path + config dir) is printed in the "no credentials" error when you first call a tool. Copy it exactly; do not insert line breaks inside quoted paths:
+   ```bash
+   node "<plugin>/build/index.js" set-token sandbox --config-dir "<config-dir>"
+   ```
+   It prompts for the token with hidden input, then asks for the instance URL. You can enter the studio/base URL, e.g. `https://sandbox.prisme.ai`, or the API URL, e.g. `https://api.sandbox.prisme.ai/v2`; it validates the token and saves it.
+3. Re-run your request — the token is picked up automatically (no restart). Repeat per environment; re-run to rotate.
 
-This folder contains `CLAUDE.md` with Prisme.ai-specific instructions for Claude Code.
+You can instead ask the agent to register a pasted token via the `set_token` tool, but that sends the token to the LLM provider — prefer the CLI above.
 
-## After Setup
+## After Install
 
 Run `/prisme-ai:guide` for the skills catalog and Prisme.ai context. In Claude Code, type `@` to see available `mcp__prisme-ai-builder__*` tools. In Codex, plugin MCP tools may be loaded lazily; use a request that clearly needs Prisme.ai tools, or search for the Prisme.ai Builder tools.
 
 ## Verify Installation
 
-Test with a simple command in Claude:
+Test with a simple command:
 
 ```
-List all automations in the ai-knowledge workspace on <env>
+List all automations in the ai-knowledge workspace on sandbox
+```
+
+If no token is registered yet, the error message gives you the exact token-creation URL.
+
+## Updating
+
+**Claude Code**
+
+```text
+/plugin marketplace update prismeai-mcp
+```
+
+**Codex**
+
+```bash
+codex plugin marketplace upgrade prismeai-mcp
 ```
 
 ---

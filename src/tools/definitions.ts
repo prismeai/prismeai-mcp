@@ -60,12 +60,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -90,12 +90,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -162,12 +162,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -194,12 +194,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -222,12 +222,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -263,7 +263,7 @@ export const tools: Tool[] = [
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL",
+            "Optional environment name (from configured environments) to use specific API URL",
         },
         page: {
           type: "number",
@@ -299,7 +299,7 @@ export const tools: Tool[] = [
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL",
+            "Optional environment name (from configured environments) to use specific API URL",
         },
       },
       required: ["appSlug"],
@@ -347,12 +347,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -373,12 +373,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -406,12 +406,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -458,12 +458,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -488,12 +488,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -521,12 +521,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -558,12 +558,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -584,12 +584,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -632,12 +632,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name (as configured in PRISME_ENVIRONMENTS or PRISME_WORKSPACES)",
+            "Workspace name (as configured in configured environment or workspace mappings)",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and credentials",
+            "Optional environment name (from configured environments) to use specific API URL and credentials",
         },
         workspaceId: {
           type: "string",
@@ -691,7 +691,7 @@ export const tools: Tool[] = [
         environment: {
           type: "string",
           description:
-            "Environment name (from PRISME_ENVIRONMENTS) to create the workspace in",
+            "Environment name (from configured environments) to create the workspace in",
         },
       },
       required: ["workspace", "environment"],
@@ -732,7 +732,7 @@ export const tools: Tool[] = [
         environment: {
           type: "string",
           description:
-            "Environment name (from PRISME_ENVIRONMENTS) to search workspaces in",
+            "Environment name (from configured environments) to search workspaces in",
         },
       },
       required: ["environment"],
@@ -769,7 +769,7 @@ export const tools: Tool[] = [
         environment: {
           type: "string",
           description:
-            "Environment name (from PRISME_ENVIRONMENTS), e.g. 'sandbox' or 'prod'. Defaults to the default environment.",
+            "Environment name (from configured environments), e.g. 'sandbox' or 'prod'. Defaults to the default environment.",
         },
         pick: {
           type: "array",
@@ -817,12 +817,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -922,12 +922,12 @@ export const tools: Tool[] = [
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -1176,12 +1176,12 @@ Use this to cancel a report, edit its message, or change its type.`,
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -1219,12 +1219,12 @@ Use this to cancel a report, edit its message, or change its type.`,
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -1282,12 +1282,12 @@ Use this to cancel a report, edit its message, or change its type.`,
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -1331,12 +1331,12 @@ Use this to cancel a report, edit its message, or change its type.`,
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -1406,12 +1406,12 @@ Use this to cancel a report, edit its message, or change its type.`,
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -1450,12 +1450,12 @@ Use this to cancel a report, edit its message, or change its type.`,
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -1480,12 +1480,12 @@ Use this to cancel a report, edit its message, or change its type.`,
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -1509,12 +1509,12 @@ Use this to cancel a report, edit its message, or change its type.`,
         workspaceName: {
           type: "string",
           description:
-            "Workspace name that resolves to ID via PRISME_WORKSPACES or PRISME_ENVIRONMENTS mapping",
+            "Workspace name that resolves to ID via configured environment or workspace mappings",
         },
         environment: {
           type: "string",
           description:
-            "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL and workspace",
+            "Optional environment name (from configured environments) to use specific API URL and workspace",
         },
         workspaceId: {
           type: "string",
@@ -1597,7 +1597,7 @@ Requires a legacy AI Knowledge project API key (from AI Knowledge > API & Webhoo
         },
         environment: {
           type: "string",
-          description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL",
+          description: "Optional environment name (from configured environments) to use specific API URL",
         },
       },
       required: ["projectId", "text", "apiKey"],
@@ -1697,7 +1697,7 @@ Requires a legacy AI Knowledge project API key.`,
         },
         environment: {
           type: "string",
-          description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL",
+          description: "Optional environment name (from configured environments) to use specific API URL",
         },
       },
       required: ["method", "apiKey"],
@@ -1817,7 +1817,7 @@ Requires a legacy AI Knowledge project API key.`,
         },
         environment: {
           type: "string",
-          description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL",
+          description: "Optional environment name (from configured environments) to use specific API URL",
         },
       },
       required: ["method", "projectId", "apiKey"],
@@ -1919,7 +1919,7 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
         },
         environment: {
           type: "string",
-          description: "Optional environment name (from PRISME_ENVIRONMENTS) to use specific API URL",
+          description: "Optional environment name (from configured environments) to use specific API URL",
         },
       },
       required: ["method"],
@@ -1928,7 +1928,7 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
   {
     name: "set_token",
     description:
-      "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead — tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error); it prompts for the token with hidden input and never exposes it to the chat. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
+      "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead — tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error). When relaying that command, preserve it as one shell command and do not insert line breaks inside quoted paths. It prompts for the token with hidden input, then asks for the instance URL; users can enter a studio/base URL such as `https://sandbox.prisme.ai` or an API URL such as `https://api.sandbox.prisme.ai/v2`. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
     inputSchema: {
       type: "object",
       properties: {

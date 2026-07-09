@@ -46,6 +46,41 @@ function flagString(flags: Record<string, string | true>, key: string): string |
   return typeof value === "string" ? value : undefined;
 }
 
+function normalizeUrlInput(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function normalizeApiUrl(value: string): string {
+  const input = normalizeUrlInput(value);
+  const url = new URL(input);
+  if (!/^api[.-]/.test(url.hostname)) {
+    url.hostname = `api.${url.hostname}`;
+  }
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  if (!/\/v\d+$/.test(url.pathname)) {
+    url.pathname = `${url.pathname === "/" ? "" : url.pathname}/v2`;
+  }
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+function deriveStudioUrl(value: string): string | undefined {
+  const input = normalizeUrlInput(value);
+  try {
+    const url = new URL(input);
+    url.hostname = url.hostname.replace(/^api[.-]/, "");
+    url.pathname = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
 /** Read the default topology shipped with the plugin (bundled or tsc layout). */
 function loadShippedDefaults(): StoredTopology | undefined {
   const candidates = [
@@ -71,7 +106,7 @@ function loadShippedDefaults(): StoredTopology | undefined {
 function promptHidden(question: string): Promise<string> {
   return new Promise((resolve) => {
     const input = process.stdin;
-    const output = process.stdout;
+    const output = process.stderr;
 
     if (!input.isTTY) {
       let data = "";
@@ -89,7 +124,10 @@ function promptHidden(question: string): Promise<string> {
       if (!muted) original(stringToWrite);
     };
 
-    output.write(question);
+    output.write("\n=== READY FOR TOKEN INPUT ===\n");
+    output.write(`${question}\n`);
+    output.write("Paste the token now, then press Enter. Input is hidden, so typed/pasted characters will not appear.\n");
+    output.write("Token > ");
     muted = true;
     rl.question("", (answer) => {
       rl.close();
@@ -97,6 +135,33 @@ function promptHidden(question: string): Promise<string> {
       resolve(answer.trim());
     });
   });
+}
+
+function promptLine(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    const input = process.stdin;
+    const output = process.stdout;
+
+    if (!input.isTTY) {
+      resolve("");
+      return;
+    }
+
+    const rl = createInterface({ input, output });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+async function promptRequiredHidden(question: string): Promise<string> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const answer = await promptHidden(question);
+    if (answer) return answer;
+    console.error("No token entered. Paste the token, then press Enter. Press Ctrl+C to cancel.");
+  }
+  return "";
 }
 
 function printUsage(): void {
@@ -112,12 +177,14 @@ function printUsage(): void {
       "API before being saved to the config dir (credentials.json, mode 600).",
       "",
       "Options:",
-      "  --api-url <url>      API base URL (required only for a brand-new environment)",
+      "  --api-url <url>      API base URL (optional; prompts if missing)",
       "  --studio-url <url>   Studio origin (optional; used for token-creation links)",
       "  --config-dir <dir>   Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
       "",
       "The token is read from an interactive hidden prompt, or from the PRISME_TOKEN",
       "env var if set. Avoid passing it as a plain argument (shell history leak).",
+      "For the instance URL prompt, you can enter either the studio/base URL",
+      "(https://sandbox.prisme.ai) or the API URL (https://api.sandbox.prisme.ai/v2).",
       "",
       "After it succeeds, re-run your request in Claude Code / Codex (no restart needed).",
     ].join("\n")
@@ -164,29 +231,70 @@ export async function runCli(argv: string[]): Promise<number> {
   const existing = topology.environments[environment];
   const apiUrlFlag = flagString(flags, "api-url");
   const studioUrlFlag = flagString(flags, "studio-url");
-  const apiUrl = apiUrlFlag ?? existing?.apiUrl;
+  let apiUrl = apiUrlFlag ? normalizeApiUrl(apiUrlFlag) : existing?.apiUrl;
+  let studioUrl = studioUrlFlag ?? existing?.studioUrl;
 
-  if (!apiUrl) {
+  if (!apiUrl && !process.stdin.isTTY) {
     const known = Object.keys(topology.environments).join(", ") || "(none)";
     console.error(
       `Unknown environment "${environment}" (known: ${known}). ` +
-        `Pass --api-url to register it, e.g. --api-url https://api.sandbox.prisme.ai/v2`
+        `Pass --api-url to register it, e.g. --api-url https://api.sandbox.prisme.ai/v2. ` +
+        `You can also pass the studio/base URL, e.g. --api-url https://sandbox.prisme.ai.`
     );
     return 1;
   }
 
+  console.log(`Registering token for environment "${environment}".`);
+  console.log(`Config dir: ${getConfigDir()}`);
+  if (apiUrl) {
+    console.log(`Resolved API URL: ${apiUrl}`);
+  }
+  console.log("The token input is hidden. Paste the token, then press Enter.");
+
   // Token: PRISME_TOKEN env var, else interactive hidden prompt.
   let token = process.env.PRISME_TOKEN?.trim();
   if (!token) {
-    token = await promptHidden(`Paste the API token for "${environment}" (input hidden): `);
+    token = await promptRequiredHidden(`Paste the API token for "${environment}" (input hidden)`);
   }
   if (!token) {
     console.error("No token provided. Aborting; nothing was saved.");
     return 1;
   }
 
+  if (!apiUrl) {
+    const known = Object.keys(topology.environments).join(", ") || "(none)";
+    console.log(`Unknown environment "${environment}" (known: ${known}).`);
+    console.log(
+      "Enter the instance URL. Accepted formats: https://sandbox.prisme.ai or https://api.sandbox.prisme.ai/v2."
+    );
+  }
+
+  if (process.stdin.isTTY) {
+    const apiPrompt = apiUrl
+      ? `Instance API URL or studio/base URL [${apiUrl}]: `
+      : "Instance API URL or studio/base URL: ";
+    const apiInput = await promptLine(apiPrompt);
+    if (apiInput) {
+      try {
+        apiUrl = normalizeApiUrl(apiInput);
+        studioUrl = studioUrl ?? deriveStudioUrl(apiInput);
+      } catch {
+        console.error(
+          `Invalid instance URL "${apiInput}". Use a studio/base URL like https://sandbox.prisme.ai or an API URL like https://api.sandbox.prisme.ai/v2.`
+        );
+        return 1;
+      }
+    }
+  }
+
+  if (!apiUrl) {
+    console.error(
+      "No API URL provided. Aborting; nothing was saved. Use a studio/base URL like https://sandbox.prisme.ai or an API URL like https://api.sandbox.prisme.ai/v2."
+    );
+    return 1;
+  }
+
   // Probe-validate before persisting anything.
-  const studioUrl = studioUrlFlag ?? existing?.studioUrl;
   process.stdout.write(`Validating token against ${apiUrl} ... `);
   let me: any;
   try {

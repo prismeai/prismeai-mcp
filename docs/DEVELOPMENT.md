@@ -31,7 +31,6 @@ mcp-prisme.ai/
 │   ├── .codex-plugin/mcp.json # Codex MCP server registration
 │   ├── skills/           # Plugin skills (/prisme-ai:*)
 │   ├── agents/           # Claude agents (code-review, prisme-assistant)
-│   ├── hooks/            # Plugin hooks (allow-workspace.sh)
 │   ├── llmDoc/           # Documentation served by get_prisme_documentation
 │   ├── config/           # Default environment topology
 │   └── build/index.js    # Committed self-contained bundle (npm run build:bundle)
@@ -49,7 +48,6 @@ mcp-prisme.ai/
 | `PRISME_API_KEY` | Yes | Bearer token for authentication |
 | `PRISME_WORKSPACE_ID` | Yes | Default workspace ID |
 | `PRISME_API_BASE_URL` | Yes | API base URL |
-| `PRISME_ENVIRONMENTS` | No | Multi-environment JSON config |
 | `PRISME_DEFAULT_ENVIRONMENT` | No | Default environment name |
 | `PRISME_WORKSPACES` | No | Legacy workspace mappings |
 | `PRISME_FORCE_READONLY` | No | Block write operations |

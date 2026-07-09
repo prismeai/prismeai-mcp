@@ -1,6 +1,6 @@
 {
   "name": "prismeai-mcp",
-  "description": "Official Prisme.ai plugins: AI Builder MCP server, DSUL linter, workspace development skills and hooks.",
+  "description": "Official Prisme.ai plugins: AI Builder MCP server, DSUL linter, and workspace development skills.",
   "owner": {
     "name": "Prisme.ai",
     "url": "https://www.prisme.ai"
@@ -9,7 +9,7 @@
     {
       "name": "prisme-ai",
       "source": "./plugin",
-      "description": "Prisme.ai AI Builder toolkit: MCP server (workspaces, automations, apps, events, AI Knowledge), DSUL linter, skills and hooks.",
+      "description": "Prisme.ai AI Builder toolkit: MCP server (workspaces, automations, apps, events, AI Knowledge), DSUL linter, and skills.",
       "author": {
         "name": "Prisme.ai"
       }
