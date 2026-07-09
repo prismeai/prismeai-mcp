@@ -1,6 +1,6 @@
 {
   "name": "prisme-ai",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Prisme.ai AI Builder toolkit: MCP server (workspaces, automations, apps, events, AI Knowledge), DSUL linter, and skills for Claude Code and Codex.",
   "author": {
     "name": "Prisme.ai",

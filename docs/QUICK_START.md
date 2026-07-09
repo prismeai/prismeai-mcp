@@ -44,7 +44,7 @@ The recommended path keeps your token out of the chat (it is never sent to the L
    ```bash
    node "<plugin>/build/index.js" set-token sandbox --config-dir "<config-dir>"
    ```
-   It prompts for the token with hidden input, then asks for the instance URL. You can enter the studio/base URL, e.g. `https://sandbox.prisme.ai`, or the API URL, e.g. `https://api.sandbox.prisme.ai/v2`; it validates the token and saves it.
+   It prompts for the token with hidden input, then asks for the Prisme API URL, e.g. `https://api.sandbox.prisme.ai/v2`. If unsure, open the Prisme instance in a browser and copy the API base URL from the Network tab.
 3. Re-run your request — the token is picked up automatically (no restart). Repeat per environment; re-run to rotate.
 
 You can instead ask the agent to register a pasted token via the `set_token` tool, but that sends the token to the LLM provider — prefer the CLI above.

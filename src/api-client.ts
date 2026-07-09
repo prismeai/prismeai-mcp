@@ -297,7 +297,7 @@ export class PrismeApiClient {
             `No credentials for environment \`${envName ?? 'default'}\`.\n\n` +
                 `Recommended (keeps your token private — it never enters this chat or reaches the LLM provider):\n` +
                 `1. ${createLine}\n` +
-                `2. Run this in your OWN terminal as one shell command. Copy the next line exactly; do not insert line breaks inside quoted paths. The CLI prints "READY FOR TOKEN INPUT", then prompts for the token with hidden input, then asks for the instance URL. You can enter the studio/base URL (for example https://sandbox.prisme.ai) or the API URL (for example https://api.sandbox.prisme.ai/v2); it validates the token, then saves it:\n\n` +
+                `2. Run this in your OWN terminal as one shell command. Copy the next line exactly; do not insert line breaks inside quoted paths. The CLI prompts for the token with hidden input, then asks for the Prisme API URL (for example https://api.sandbox.prisme.ai/v2). If unsure, open the Prisme instance in a browser and copy the API base URL from the Network tab:\n\n` +
                 `   ${cliCommand}\n\n` +
                 `3. Re-run your request.\n\n` +
                 `Alternative: paste the token to me and I will call the \`set_token\` tool — but be aware the token would then be sent over the network to the LLM provider as part of this conversation.`
@@ -313,7 +313,7 @@ export class PrismeApiClient {
                 `Create an API token in the target Prisme.ai studio, find the environment API URL ` +
                 `(for example https://studio.prisme.ai uses https://api.studio.prisme.ai/v2, ` +
                 `and https://sandbox.prisme.ai uses https://api.sandbox.prisme.ai/v2). Then run this as one shell command ` +
-                `(copy it exactly; do not insert line breaks inside quoted paths). You may also omit --api-url and enter either the studio/base URL or API URL when the CLI prompts:\n\n` +
+                `(copy it exactly; do not insert line breaks inside quoted paths). You may also omit --api-url and enter the API URL when the CLI prompts:\n\n` +
                 `   node "${this.serverScriptPath ?? '<plugin>/build/index.js'}" set-token ${environment} --api-url <api-url>` +
                 `${this.configDir ? ` --config-dir "${this.configDir}"` : ''}\n\n` +
                 `Agents should use the /prisme-ai:setup skill for the setup workflow.`

@@ -1,22 +1,21 @@
 # Manual Setup Guide
 
-This guide covers manual configuration for Claude Desktop, Cursor, and other MCP clients.
+This guide covers manual MCP configuration for Claude Desktop, Cursor, and other clients that do not install Codex or Claude Code plugins directly.
 
-For the automated setup with Claude Code CLI, see [README.md](../README.md).
+For Claude Code or Codex, prefer the plugin install flow in [README.md](../README.md) or [Quick Start](./QUICK_START.md). For local repository development, use [Development](./DEVELOPMENT.md).
 
 ## Prerequisites
 
-1. Clone the repository and install dependencies:
-   ```bash
-   git clone https://github.com/prisme-ai/mcp-prisme.ai.git
-   cd mcp-prisme.ai
-   npm install
-   ```
+- A local copy of the released plugin source, or another path that contains the committed runtime bundle.
+- Node.js v18+ available to the MCP client.
 
-2. Build the project (or use the committed `plugin/build/index.js` bundle directly — no build needed):
-   ```bash
-   npm run build
-   ```
+Manual clients should point at the committed plugin bundle:
+
+```text
+plugin/build/index.js
+```
+
+No `npm install` or build step is required for normal manual MCP use.
 
 ## Getting Your API Token
 
@@ -25,10 +24,10 @@ Create a token in the studio of your environment: `https://<studio-domain>/setti
 Register it with the `set-token` CLI (recommended — the token stays local and is validated before being saved to `PRISME_CONFIG_DIR`):
 
 ```bash
-node "/absolute/path/to/mcp-prisme.ai/plugin/build/index.js" set-token sandbox --config-dir "$HOME/.prisme-ai-mcp"
+node "/absolute/path/to/prismeai-mcp/plugin/build/index.js" set-token sandbox --config-dir "$HOME/.prisme-ai-mcp"
 ```
 
-It prompts for the token with hidden input (or reads `PRISME_TOKEN` from the env), then asks for the instance URL. You can enter the studio/base URL, e.g. `https://sandbox.prisme.ai`, or the API URL, e.g. `https://api.sandbox.prisme.ai/v2`. Alternatively, register it at runtime with the `set_token` MCP tool, or pass a single environment statically via the environment variables below.
+It prompts for the token with hidden input (or reads `PRISME_TOKEN` from the env), then asks for the Prisme API URL, e.g. `https://api.sandbox.prisme.ai/v2`. If unsure, open the Prisme instance in a browser and copy the API base URL from the Network tab. Alternatively, register it at runtime with the `set_token` MCP tool, or pass a single environment statically via the environment variables below.
 
 ## Environment Variables
 
@@ -56,7 +55,7 @@ Config file location:
   "mcpServers": {
     "prisme-ai-builder": {
       "command": "node",
-      "args": ["/absolute/path/to/mcp-prisme.ai/plugin/build/index.js"],
+      "args": ["/absolute/path/to/prismeai-mcp/plugin/build/index.js"],
       "env": {
         "PRISME_API_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
         "PRISME_API_BASE_URL": "https://api.sandbox.prisme.ai/v2",
@@ -93,14 +92,14 @@ Example `$HOME/.prisme-ai-mcp/config.json`:
 Then register tokens:
 
 ```bash
-node "/absolute/path/to/mcp-prisme.ai/plugin/build/index.js" set-token sandbox --config-dir "$HOME/.prisme-ai-mcp"
-node "/absolute/path/to/mcp-prisme.ai/plugin/build/index.js" set-token prod --config-dir "$HOME/.prisme-ai-mcp"
+node "/absolute/path/to/prismeai-mcp/plugin/build/index.js" set-token sandbox --config-dir "$HOME/.prisme-ai-mcp"
+node "/absolute/path/to/prismeai-mcp/plugin/build/index.js" set-token prod --config-dir "$HOME/.prisme-ai-mcp"
 ```
 
 For a new environment that is not already in `config.json`, answer the URL prompt or pass `--api-url`:
 
 ```bash
-node "/absolute/path/to/mcp-prisme.ai/plugin/build/index.js" set-token custom --api-url https://api.custom.prisme.ai/v2 --config-dir "$HOME/.prisme-ai-mcp"
+node "/absolute/path/to/prismeai-mcp/plugin/build/index.js" set-token custom --api-url https://api.custom.prisme.ai/v2 --config-dir "$HOME/.prisme-ai-mcp"
 ```
 
 ### Workspace Mappings
@@ -112,7 +111,7 @@ For single API URL setups, `PRISME_WORKSPACES` can map friendly names to workspa
   "mcpServers": {
     "prisme-ai-builder": {
       "command": "node",
-      "args": ["/absolute/path/to/mcp-prisme.ai/plugin/build/index.js"],
+      "args": ["/absolute/path/to/prismeai-mcp/plugin/build/index.js"],
       "env": {
         "PRISME_API_KEY": "your_bearer_token_here",
         "PRISME_WORKSPACE_ID": "your_default_workspace_id",
@@ -274,7 +273,7 @@ When enabled, these tools are hidden and blocked:
   "mcpServers": {
     "prisme-ai-builder": {
       "command": "node",
-      "args": ["/absolute/path/to/mcp-prisme.ai/plugin/build/index.js"],
+      "args": ["/absolute/path/to/prismeai-mcp/plugin/build/index.js"],
       "env": {
         "PRISME_API_KEY": "your_bearer_token_here",
         "PRISME_WORKSPACE_ID": "your_workspace_id_here",
@@ -284,18 +283,6 @@ When enabled, these tools are hidden and blocked:
     }
   }
 }
-```
-
-## Running Standalone
-
-```bash
-# With .env file
-cp .env.example .env
-# Edit .env with your credentials
-npm start
-
-# Development mode (watch for changes)
-npm run dev
 ```
 
 ## Tool Usage Examples

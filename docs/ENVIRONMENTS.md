@@ -121,7 +121,7 @@ This path never exposes the token to the chat / LLM provider:
    node "<plugin>/build/index.js" set-token sandbox --config-dir "<config-dir>"
    ```
 
-   It prompts for the token with **hidden input** (or reads `PRISME_TOKEN` from the env), then asks for the instance URL. You can enter the studio/base URL, e.g. `https://sandbox.prisme.ai`, or the API URL, e.g. `https://api.sandbox.prisme.ai/v2`. The CLI normalizes the URL, validates the token against the API, and saves it to `credentials.json` (mode 600). An invalid token saves nothing.
+   It prompts for the token with **hidden input** (or reads `PRISME_TOKEN` from the env), then asks for the Prisme API URL, e.g. `https://api.sandbox.prisme.ai/v2`. If unsure, open the Prisme instance in a browser and copy the API base URL from the Network tab. The CLI validates the token against the API and saves it to `credentials.json` (mode 600). An invalid token saves nothing.
 
    For a brand-new environment, either answer the URL prompt or pass `--api-url` (and optionally `--studio-url`):
 

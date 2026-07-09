@@ -119,16 +119,7 @@ Runtime requirements:
 
 ## Maintainer Development
 
-Only plugin maintainers need local development commands:
-
-```bash
-npm install
-npm run dev
-npm run build
-npm run build:bundle
-```
-
-`npm run build:bundle` rebuilds the committed runtime artifact at `plugin/build/index.js`.
+Only plugin maintainers need source-based local setup. Use [Development](./docs/DEVELOPMENT.md) to run an MCP client against this repository checkout and rebuild the committed runtime artifact.
 
 ## Plugin Layout
 
@@ -150,6 +141,7 @@ npm run build:bundle
 | Guide | Description |
 |-------|-------------|
 | [Quick Start](./docs/QUICK_START.md) | Plugin install and first token setup |
+| [Manual Setup](./docs/MANUAL_SETUP.md) | Configure non-plugin MCP clients against the committed plugin bundle |
 | [Tools Reference](./docs/TOOLS.md) | MCP tools exposed by the plugin |
 | [Environments](./docs/ENVIRONMENTS.md) | Plugin environment and token persistence |
-| [Development](./docs/DEVELOPMENT.md) | Maintainer development and release flow |
+| [Development](./docs/DEVELOPMENT.md) | Local repository setup for maintainers and release flow |

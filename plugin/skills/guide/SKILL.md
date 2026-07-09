@@ -86,7 +86,7 @@ Instead, relay the CLI command from the error message and ask the user to run it
 node "<plugin>/build/index.js" set-token <environment> --config-dir "<config-dir>"
 ```
 
-The error message already contains the exact path and config dir. The command prompts for the token with hidden input, then asks for the instance URL; users can enter the studio/base URL (e.g. https://sandbox.prisme.ai) or the API URL (e.g. https://api.sandbox.prisme.ai/v2). It validates the token and saves it. After it succeeds, just retry the request — the server picks up the new token automatically (no restart). To create the token, the studio page is `<studio-origin>/settings/tokens` (e.g. https://sandbox.prisme.ai/settings/tokens).
+The error message already contains the exact path and config dir. The command prompts for the token with hidden input, then asks for the Prisme API URL (e.g. https://api.sandbox.prisme.ai/v2). If the user is unsure, tell them to open the Prisme instance in a browser and copy the API base URL from the Network tab. It validates the token and saves it. After it succeeds, just retry the request — the server picks up the new token automatically (no restart). To create the token, the studio page is `<studio-origin>/settings/tokens` (e.g. https://sandbox.prisme.ai/settings/tokens).
 
 Only if the user explicitly insists on pasting the token in the conversation should you fall back to the `set_token` tool — and first warn them the token will be transmitted to the LLM provider as part of the chat.
 

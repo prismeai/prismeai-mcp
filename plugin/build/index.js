@@ -15708,16 +15708,9 @@ function normalizeUrlInput(value) {
   if (!trimmed) return "";
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
-function normalizeApiUrl(value) {
+function cleanApiUrl(value) {
   const input = normalizeUrlInput(value);
   const url2 = new URL(input);
-  if (!/^api[.-]/.test(url2.hostname)) {
-    url2.hostname = `api.${url2.hostname}`;
-  }
-  url2.pathname = url2.pathname.replace(/\/+$/, "");
-  if (!/\/v\d+$/.test(url2.pathname)) {
-    url2.pathname = `${url2.pathname === "/" ? "" : url2.pathname}/v2`;
-  }
   url2.search = "";
   url2.hash = "";
   return url2.toString().replace(/\/$/, "");
@@ -15768,11 +15761,7 @@ function promptHidden(question) {
     rlInternal._writeToOutput = (stringToWrite) => {
       if (!muted) original(stringToWrite);
     };
-    output.write("\n=== READY FOR TOKEN INPUT ===\n");
-    output.write(`${question}
-`);
-    output.write("Paste the token now, then press Enter. Input is hidden, so typed/pasted characters will not appear.\n");
-    output.write("Token > ");
+    output.write(question);
     muted = true;
     rl.question("", (answer) => {
       rl.close();
@@ -15795,6 +15784,14 @@ function promptLine(question) {
       resolve2(answer.trim());
     });
   });
+}
+async function promptRequiredLine(question) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const answer = await promptLine(question);
+    if (answer) return answer;
+    console.error("No API URL entered. Paste the API URL, then press Enter. Press Ctrl+C to cancel.");
+  }
+  return "";
 }
 async function promptRequiredHidden(question) {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -15823,8 +15820,9 @@ function printUsage() {
       "",
       "The token is read from an interactive hidden prompt, or from the PRISME_TOKEN",
       "env var if set. Avoid passing it as a plain argument (shell history leak).",
-      "For the instance URL prompt, you can enter either the studio/base URL",
-      "(https://sandbox.prisme.ai) or the API URL (https://api.sandbox.prisme.ai/v2).",
+      "The API URL must be the Prisme API base URL, e.g.",
+      "https://api.sandbox.prisme.ai/v2. If unsure, open the Prisme instance",
+      "in a browser and copy the API origin/path from the Network tab.",
       "",
       "After it succeeds, re-run your request in Claude Code / Codex (no restart needed)."
     ].join("\n")
@@ -15850,58 +15848,51 @@ async function runCli(argv) {
   if (configDir) {
     process.env.PRISME_CONFIG_DIR = configDir;
   }
+  let storedTopology;
+  let shippedDefaults;
   let topology;
   try {
-    topology = loadTopologySync() ?? loadShippedDefaults() ?? { environments: {} };
+    storedTopology = loadTopologySync();
+    shippedDefaults = loadShippedDefaults();
+    topology = storedTopology ?? shippedDefaults ?? { environments: {} };
   } catch (error) {
     console.error(
       `Could not read existing config: ${error instanceof Error ? error.message : String(error)}`
     );
     topology = { environments: {} };
   }
-  const existing = topology.environments[environment];
+  const existing = storedTopology?.environments[environment];
+  const fallbackExisting = existing ?? shippedDefaults?.environments[environment];
+  const exampleApiUrl = fallbackExisting?.apiUrl ?? "https://api.sandbox.prisme.ai/v2";
   const apiUrlFlag = flagString(flags, "api-url");
   const studioUrlFlag = flagString(flags, "studio-url");
-  let apiUrl = apiUrlFlag ? normalizeApiUrl(apiUrlFlag) : existing?.apiUrl;
+  let apiUrl = apiUrlFlag ? cleanApiUrl(apiUrlFlag) : existing?.apiUrl;
   let studioUrl = studioUrlFlag ?? existing?.studioUrl;
   if (!apiUrl && !process.stdin.isTTY) {
-    const known = Object.keys(topology.environments).join(", ") || "(none)";
     console.error(
-      `Unknown environment "${environment}" (known: ${known}). Pass --api-url to register it, e.g. --api-url https://api.sandbox.prisme.ai/v2. You can also pass the studio/base URL, e.g. --api-url https://sandbox.prisme.ai.`
+      `No API URL provided. Pass --api-url, e.g. --api-url ${exampleApiUrl}`
     );
     return 1;
   }
-  console.log(`Registering token for environment "${environment}".`);
-  console.log(`Config dir: ${getConfigDir()}`);
-  if (apiUrl) {
-    console.log(`Resolved API URL: ${apiUrl}`);
-  }
-  console.log("The token input is hidden. Paste the token, then press Enter.");
+  console.log(`Prisme.ai token setup (${environment})`);
   let token = process.env.PRISME_TOKEN?.trim();
   if (!token) {
-    token = await promptRequiredHidden(`Paste the API token for "${environment}" (input hidden)`);
+    token = await promptRequiredHidden("Token (hidden): ");
   }
   if (!token) {
     console.error("No token provided. Aborting; nothing was saved.");
     return 1;
   }
-  if (!apiUrl) {
-    const known = Object.keys(topology.environments).join(", ") || "(none)";
-    console.log(`Unknown environment "${environment}" (known: ${known}).`);
-    console.log(
-      "Enter the instance URL. Accepted formats: https://sandbox.prisme.ai or https://api.sandbox.prisme.ai/v2."
-    );
-  }
   if (process.stdin.isTTY) {
-    const apiPrompt = apiUrl ? `Instance API URL or studio/base URL [${apiUrl}]: ` : "Instance API URL or studio/base URL: ";
-    const apiInput = await promptLine(apiPrompt);
+    const apiPrompt = apiUrl ? `API URL [${apiUrl}]: ` : `API URL (e.g. ${exampleApiUrl}; copy from Network tab if unsure): `;
+    const apiInput = apiUrl ? await promptLine(apiPrompt) : await promptRequiredLine(apiPrompt);
     if (apiInput) {
       try {
-        apiUrl = normalizeApiUrl(apiInput);
+        apiUrl = cleanApiUrl(apiInput);
         studioUrl = studioUrl ?? deriveStudioUrl(apiInput);
       } catch {
         console.error(
-          `Invalid instance URL "${apiInput}". Use a studio/base URL like https://sandbox.prisme.ai or an API URL like https://api.sandbox.prisme.ai/v2.`
+          `Invalid API URL "${apiInput}". Use the API base URL, e.g. ${exampleApiUrl}.`
         );
         return 1;
       }
@@ -15909,7 +15900,7 @@ async function runCli(argv) {
   }
   if (!apiUrl) {
     console.error(
-      "No API URL provided. Aborting; nothing was saved. Use a studio/base URL like https://sandbox.prisme.ai or an API URL like https://api.sandbox.prisme.ai/v2."
+      `No API URL provided. Aborting; nothing was saved. Use the API base URL, e.g. ${exampleApiUrl}.`
     );
     return 1;
   }
@@ -15934,7 +15925,7 @@ async function runCli(argv) {
     return 1;
   }
   const merged = {
-    ...existing ?? {},
+    ...fallbackExisting ?? {},
     apiUrl,
     ...studioUrl ? { studioUrl } : {}
   };
@@ -28729,7 +28720,7 @@ var init_api_client = __esm({
 
 Recommended (keeps your token private \u2014 it never enters this chat or reaches the LLM provider):
 1. ${createLine}
-2. Run this in your OWN terminal as one shell command. Copy the next line exactly; do not insert line breaks inside quoted paths. The CLI prints "READY FOR TOKEN INPUT", then prompts for the token with hidden input, then asks for the instance URL. You can enter the studio/base URL (for example https://sandbox.prisme.ai) or the API URL (for example https://api.sandbox.prisme.ai/v2); it validates the token, then saves it:
+2. Run this in your OWN terminal as one shell command. Copy the next line exactly; do not insert line breaks inside quoted paths. The CLI prompts for the token with hidden input, then asks for the Prisme API URL (for example https://api.sandbox.prisme.ai/v2). If unsure, open the Prisme instance in a browser and copy the API base URL from the Network tab:
 
    ${cliCommand}
 
@@ -28741,7 +28732,7 @@ Alternative: paste the token to me and I will call the \`set_token\` tool \u2014
       unknownEnvironmentError(environment) {
         const available = Object.keys(this.environments);
         return new Error(
-          `Unknown environment: "${environment}". Available: ${available.length > 0 ? available.join(", ") : "none configured"}. If you meant "${environment}", configure it before retrying. Create an API token in the target Prisme.ai studio, find the environment API URL (for example https://studio.prisme.ai uses https://api.studio.prisme.ai/v2, and https://sandbox.prisme.ai uses https://api.sandbox.prisme.ai/v2). Then run this as one shell command (copy it exactly; do not insert line breaks inside quoted paths). You may also omit --api-url and enter either the studio/base URL or API URL when the CLI prompts:
+          `Unknown environment: "${environment}". Available: ${available.length > 0 ? available.join(", ") : "none configured"}. If you meant "${environment}", configure it before retrying. Create an API token in the target Prisme.ai studio, find the environment API URL (for example https://studio.prisme.ai uses https://api.studio.prisme.ai/v2, and https://sandbox.prisme.ai uses https://api.sandbox.prisme.ai/v2). Then run this as one shell command (copy it exactly; do not insert line breaks inside quoted paths). You may also omit --api-url and enter the API URL when the CLI prompts:
 
    node "${this.serverScriptPath ?? "<plugin>/build/index.js"}" set-token ${environment} --api-url <api-url>${this.configDir ? ` --config-dir "${this.configDir}"` : ""}
 
@@ -31831,7 +31822,7 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
       },
       {
         name: "set_token",
-        description: "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead \u2014 tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error). When relaying that command, preserve it as one shell command and do not insert line breaks inside quoted paths. It prompts for the token with hidden input, then asks for the instance URL; users can enter a studio/base URL such as `https://sandbox.prisme.ai` or an API URL such as `https://api.sandbox.prisme.ai/v2`. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
+        description: "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead \u2014 tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error). When relaying that command, preserve it as one shell command and do not insert line breaks inside quoted paths. It prompts for the token with hidden input, then asks for the Prisme API URL, e.g. `https://api.sandbox.prisme.ai/v2`; if unsure, the user can find it in the browser Network tab while loading the Prisme instance. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
         inputSchema: {
           type: "object",
           properties: {
@@ -52877,7 +52868,7 @@ async function startServer() {
       if (axiosError.response) {
         const expiredHint = axiosError.response.status === 401 ? `
 
-The stored token was rejected (expired or revoked). Recommended: re-register it WITHOUT exposing it in this chat \u2014 run the next line in your own terminal as one shell command (copy it exactly; do not insert line breaks inside quoted paths). The CLI prompts for the token, then the instance URL; it accepts either a studio/base URL such as https://sandbox.prisme.ai or an API URL such as https://api.sandbox.prisme.ai/v2:
+The stored token was rejected (expired or revoked). Recommended: re-register it WITHOUT exposing it in this chat \u2014 run the next line in your own terminal as one shell command (copy it exactly; do not insert line breaks inside quoted paths). The CLI prompts for the token, then the Prisme API URL, for example https://api.sandbox.prisme.ai/v2:
 
    node "${process.argv[1]}" set-token ${defaultEnvironmentName ?? "<environment>"} --config-dir "${getConfigDir()}"
 

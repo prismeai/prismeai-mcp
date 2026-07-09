@@ -125,7 +125,7 @@ export async function startServer(): Promise<void> {
       if (axiosError.response) {
         const expiredHint =
           axiosError.response.status === 401
-            ? `\n\nThe stored token was rejected (expired or revoked). Recommended: re-register it WITHOUT exposing it in this chat — run the next line in your own terminal as one shell command (copy it exactly; do not insert line breaks inside quoted paths). The CLI prompts for the token, then the instance URL; it accepts either a studio/base URL such as https://sandbox.prisme.ai or an API URL such as https://api.sandbox.prisme.ai/v2:\n\n   node "${process.argv[1]}" set-token ${defaultEnvironmentName ?? "<environment>"} --config-dir "${getConfigDir()}"\n\nThen re-run your request. (You can instead paste a fresh token for me to register with the \`set_token\` tool, but it would be sent to the LLM provider.)`
+            ? `\n\nThe stored token was rejected (expired or revoked). Recommended: re-register it WITHOUT exposing it in this chat — run the next line in your own terminal as one shell command (copy it exactly; do not insert line breaks inside quoted paths). The CLI prompts for the token, then the Prisme API URL, for example https://api.sandbox.prisme.ai/v2:\n\n   node "${process.argv[1]}" set-token ${defaultEnvironmentName ?? "<environment>"} --config-dir "${getConfigDir()}"\n\nThen re-run your request. (You can instead paste a fresh token for me to register with the \`set_token\` tool, but it would be sent to the LLM provider.)`
             : "";
         return {
           content: [

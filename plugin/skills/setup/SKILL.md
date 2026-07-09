@@ -30,7 +30,7 @@ For other deployments, derive the API URL from the user's Prisme.ai host or ask 
    <studio-url>/settings/tokens
    ```
 
-3. Tell the user to run the exact CLI command from the MCP error in their own terminal. Preserve it as one shell command; do not insert line breaks inside quoted paths. The CLI prompts for the token, then the instance URL; tell the user they can enter either the studio/base URL (`https://sandbox.prisme.ai`) or the API URL (`https://api.sandbox.prisme.ai/v2`).
+3. Tell the user to run the exact CLI command from the MCP error in their own terminal. Preserve it as one shell command; do not insert line breaks inside quoted paths. The CLI prompts for the token, then the Prisme API URL. Give `https://api.sandbox.prisme.ai/v2` as an example, and tell the user they can copy the API base URL from the browser Network tab if unsure.
 
    For a known environment:
 

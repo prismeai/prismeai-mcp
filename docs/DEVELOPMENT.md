@@ -1,20 +1,60 @@
 # Development Guide
 
-## Setup
+This page is for maintainers who want an MCP client to run against this local repository checkout instead of the installed plugin bundle.
+
+For normal installation, use [Quick Start](./QUICK_START.md). For non-plugin MCP clients that should use the released bundle, use [Manual Setup](./MANUAL_SETUP.md).
+
+## Local Setup
 
 ```bash
 # Install dependencies
 npm install
 
-# Build
+# Type-check and build once
 npm run build
 
-# Development mode (watch)
+# Run the MCP server from TypeScript source
 npm run dev
-
-# Start server
-npm start
 ```
+
+`npm run dev` starts `tsx src/index.ts`. Use this when testing local source changes before rebuilding the committed plugin artifact.
+
+## Local MCP Client Configuration
+
+Point your MCP client at the local repository, not at the installed plugin cache.
+
+```json
+{
+  "mcpServers": {
+    "prisme-ai-builder-local": {
+      "cwd": "/absolute/path/to/prismeai-mcp",
+      "command": "npm",
+      "args": ["run", "dev"],
+      "env": {
+        "PRISME_CONFIG_DIR": "/absolute/path/to/prismeai-mcp/.local/prisme-config"
+      }
+    }
+  }
+}
+```
+
+Then register a token for that local config directory:
+
+```bash
+node "/absolute/path/to/prismeai-mcp/plugin/build/index.js" set-token sandbox --config-dir "/absolute/path/to/prismeai-mcp/.local/prisme-config"
+```
+
+The `set-token` command can use the committed bundle because token storage format is shared with the source server.
+
+## Bundle Verification
+
+Before releasing plugin changes, rebuild the self-contained artifact:
+
+```bash
+npm run build:bundle
+```
+
+This updates `plugin/build/index.js`, which is what the Claude Code and Codex plugins run after marketplace installation.
 
 ## Project Structure
 
@@ -45,9 +85,10 @@ mcp-prisme.ai/
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `PRISME_API_KEY` | Yes | Bearer token for authentication |
-| `PRISME_WORKSPACE_ID` | Yes | Default workspace ID |
-| `PRISME_API_BASE_URL` | Yes | API base URL |
+| `PRISME_CONFIG_DIR` | No | Directory for `config.json` and `credentials.json`; recommended for local MCP testing |
+| `PRISME_API_KEY` | No | Static bearer token for single-environment debugging |
+| `PRISME_WORKSPACE_ID` | No | Default workspace ID |
+| `PRISME_API_BASE_URL` | No | API base URL |
 | `PRISME_DEFAULT_ENVIRONMENT` | No | Default environment name |
 | `PRISME_WORKSPACES` | No | Legacy workspace mappings |
 | `PRISME_FORCE_READONLY` | No | Block write operations |
@@ -79,12 +120,12 @@ The MCP server interacts with:
 ## Running Standalone
 
 ```bash
-# Copy and configure .env
+# Optional .env-based local run
 cp .env.example .env
-# Edit .env with your credentials
-
 npm start
 ```
+
+`npm start` runs the committed bundle at `plugin/build/index.js`. Use `npm run dev` when validating source changes.
 
 ## Contributing
 
