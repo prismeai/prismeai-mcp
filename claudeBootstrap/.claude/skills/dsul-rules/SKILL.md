@@ -74,6 +74,23 @@ Dans une condition DSUL, le moteur **auto-quote** chaque `{{var}}` interpolée.
 - `validate_automation` passe quand même (YAML valide). Le bug ne se voit qu'au runtime : la branche ne matche jamais. Vécu sur `_resolve-image-size` (llm-gateway).
 - **Règle** : ne **jamais** écrire `"{{var}}"` dans une condition.
 
+### 2.1 — Guard "valeur vide" : `'{{var}} == ""'` est CASSÉ quand la var est vide
+
+- **Symptôme** : un fallback du type `conditions: '{{fu}} == ""' → set fu = {{autre}}` **ne se déclenche jamais** quand `fu` est réellement vide → la variable reste vide → toute la suite échoue silencieusement.
+- **Pourquoi** : quand `{{fu}}` est vide/undefined, l'interpolation produit ` == ""` (rien à gauche) → syntaxe cassée → condition **toujours fausse**. Idem `'"{{fu}}" == ""'` (var quotée, cf. §2). Vécu sur `oddo-docx-translator` (fallback `body.fileUrl` → argument `fileUrl` qui ne basculait jamais).
+- **Fix** : tester le vide avec `!{{var}}` (opérateur "Empty?") ou `.length` :
+  - ✅ `'!{{fu}}'` → vrai quand `fu` vide
+  - ✅ `'{{fu.length}} == 0'` → robuste (insensible espaces/caractères spéciaux)
+  - ❌ `'{{fu}} == ""'` et `'"{{fu}}" == ""'` → jamais vrais sur valeur vide
+
+### 2.2 — Opérateur `matches` : le pattern n'est PAS interpolé, et ne jamais le négier
+
+- **Symptôme** : une garde `'{{url}} matches "/v2/files/{{global.workspaceId}}/"'` ne matche **jamais**, même quand `global.workspaceId` se résout bien ailleurs. Vécu sur `oddo-docx-translator` (validation SSRF cross-instance) : `matches "/v2/files/"` = `yes` mais `matches "/v2/files/{{global.workspaceId}}/"` = `no`.
+- **Pourquoi** : dans `'{{lhs}} matches "pattern"'`, seul le **LHS** est interpolé. Le **pattern** (côté droit) est pris **littéralement** comme regex → un `{{global.workspaceId}}` dans le pattern cherche la sous-chaîne littérale `{{global.workspaceId}}`, introuvable. `matches` fait un **search partiel** (sous-chaîne, non ancré) : `matches "files"` trouve `.../files/...`.
+- **Fix** :
+  - Pattern = **littéral pur**, jamais de `{{}}` dedans. Pour valider une URL Storage plateforme **cross-instance**, utiliser un fragment de path SANS host ni id : `'{{url}} matches "/v2/files/"'` (marche sandbox, prod, instance client Azure…). **Ne pas** figer le host `api.sandbox.prisme.ai` (env-scopé → casse à la livraison client).
+  - **Ne jamais négier un `matches` dont le pattern contient `.` ou `/`** : `'!({{url}} matches "api.sandbox.prisme.ai/v2/files/")'` est mal parsé et « FIRE » alors que la version positive matche (contradiction). Pattern robuste : positif → set un flag `okUrl = "yes"`, puis condition **séparée** `'{{okUrl}} == "no"'` (comparaison simple, ni regex ni négation) pour l'erreur/`break`.
+
 ---
 
 ## 3. Accès aux propriétés — clés avec tiret
@@ -176,6 +193,11 @@ Coder défensivement : garder contre la forme erreur avant d'écrire en aval :
 ### 8.6 — Cache négatif persistant
 Si une fonction CC est tombée en cache négatif (module load-failed à cause d'un `oneOf`/`type:array`), **rien** ne l'invalide : ni `update_app_instance_config`, ni `push_workspace`, ni renommage, ni `uninstall`+reinstall (vécu : bloquée 4 h). **Workaround** : créer une **2e instance Custom Code** avec un slug dédié (ex. `Bindings`) contenant les fonctions à débloquer ; appel via `Bindings.run`. Cache vierge → chargement immédiat.
 
+### 8.7bis — Pas de `description` au niveau d'une fonction (schéma durci)
+- **Symptôme** : au déploiement/reconfig d'une fonction CC, `RequestValidationError: request/body/functions/<fn>/description must NOT have additional properties` (errorCode `additionalProperties.openapi.validation`) → la fonction n'est **jamais déployée** → `ObjectNotFound` au runtime.
+- **Pourquoi** : le service de déploiement CC valide chaque fonction contre un schéma OpenAPI `additionalProperties: false` qui n'autorise QUE `language`, `parameters`, `code`. Le champ `description` **au niveau de la fonction** est rejeté. Schéma **durci** avec les versions récentes de la plateforme : une fonction avec `description` qui « tournait » avant peut casser après un upgrade client (vécu sur `oddo-docx-translator` post-upgrade, 2026-07).
+- **Fix** : ne déclarer que `language` / `parameters` / `code`. Mettre la doc de la fonction dans la **docstring du `code`**. Les `description` **par paramètre** (`parameters.<arg>.description`) sont, elles, tolérées. Diagnostiquer via `search_events type:"Custom Code.error"`.
+
 ### 8.7 — Upload depuis Custom Code = credential explicite
 Le CC tourne dans un service isolé, **sans auth ambiante**. Upload anonyme vers `/files` → `401`. `prismeaiApiKey: { name: "workspace" }` n'est résolu que par l'instruction DSUL `fetch`/`Prismeai API.upload`, jamais accessible au CC. **Fix** : passer une clé API brute en paramètre (secret workspace + `config.value`), ou faire l'upload en DSUL quand le contenu n'est pas un gros blob.
 
@@ -204,11 +226,13 @@ Le CC tourne dans un service isolé, **sans auth ambiante**. Upload anonyme vers
 
 1. Aucun `? :`, `[]`, `|| []`, `{{` littéral dans un `{% %}`/`{{ }}`/condition.
 2. Aucune comparaison `"{{var}}"` dans une condition.
-3. Aucune clé hyphénée en notation pointée.
-4. Aucune variable interne nommée `output`.
-5. Aucun `break: { scope: all }`.
-6. Aucun `date()` sans argument → `{{run.date}}`.
-7. État durable par user → module `secrets`, pas `scope: user`.
-8. Custom Code : pas de `#`, pas de `type: array`/`oneOf`, fonctions vérifiées appelables après push (deploy = push + bump clé racine `lastDeploySync` pour forcer le vrai diff → §8.5).
-9. Collection : champs déclarés au schéma, `insertedId` pas `_id`.
-10. Lancer `validate_automation` — puis se rappeler qu'il ne couvre AUCUNE règle ci-dessus.
+3. Guard "vide" via `!{{var}}` ou `.length`, JAMAIS `'{{var}} == ""'` (cassé sur valeur vide → §2.1).
+4. `matches` : pattern **littéral** (aucun `{{}}` dedans), jamais négié si `.`/`/` — flag + `== "no"` (→ §2.2). Pour une URL Storage cross-instance : `matches "/v2/files/"`, pas de host en dur.
+5. Aucune clé hyphénée en notation pointée.
+6. Aucune variable interne nommée `output`.
+7. Aucun `break: { scope: all }`.
+8. Aucun `date()` sans argument → `{{run.date}}`.
+9. État durable par user → module `secrets`, pas `scope: user`.
+10. Custom Code : pas de `#`, pas de `type: array`/`oneOf`, **pas de `description` fonction-level** (§8.7bis), fonctions vérifiées appelables après push (deploy = push + bump clé racine `lastDeploySync` pour forcer le vrai diff → §8.5).
+11. Collection : champs déclarés au schéma, `insertedId` pas `_id`.
+12. Lancer `validate_automation` — puis se rappeler qu'il ne couvre AUCUNE règle ci-dessus.

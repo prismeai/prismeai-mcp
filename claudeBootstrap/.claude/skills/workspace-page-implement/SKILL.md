@@ -54,13 +54,17 @@ Treat each bullet as a checklist item when bootstrapping a new app.
    derives its editable source-view from canonical paths ; prefixing makes the
    auto-page disappear with an `InvalidVersionError` alert. Local↔remote
    asymmetry is intentional. See [[convention_react_app_nested]].
-3. **Studio SPA detection requires 2 boilerplate automations** in the DSUL
-   workspace folder : `workspaces/<workspace>/automations/v1/status.yml` +
-   `workspaces/<workspace>/automations/on-app-greeting-requested.yml`. Without them, the workspace
-   renders only the "Lecture seule" auto-page and source files appear in
-   Fichiers but aren't wired to an editable view. **Always scaffold these at
-   bootstrap.** See [[feedback_studio_spa_detection_needs_automations]] for
-   the exact YAMLs.
+3. **Studio SPA detection needs NO automation** (corrected 2026-07-07, verified on
+   workspace `cat-ia-v2`). Detection is driven by the **source files**
+   (`metadata.type=source`) + the **`config.value.bundles[<slug>]`** pointer — the
+   editable source-view appears from those alone. The starter ships two *demo*
+   automations, `v1/status` and `on-app-greeting-requested`, but they are **example
+   endpoints, not a requirement** : `v1/status` is only a health-check the starter's
+   `App.tsx` pings, and `on-app-greeting-requested` is a demo async echo. If you drop
+   the starter's ping/greeting demo (as any real app does), **delete both** — they
+   add nothing at runtime and each `v1/status` hit runs an automation. Keep
+   `v1/status` only if you keep the template's ping in `App.tsx`. See
+   [[feedback_studio_spa_detection_no_automations]].
 4. **MCP `upload_file` drops the `metadata` parameter silently** — uploads
    succeed but server-side `metadata: {}` ends up empty. Use `curl` multipart
    with explicit `metadata.path` / `metadata.type` / `metadata.hash` form
@@ -287,10 +291,12 @@ workspace : `<appDir>` = `pages/<workspace>/`.
    ```
    If it fails, surface the esbuild output to the user. Don't proceed.
 
-9. **Scaffold the 2 Studio-detection boilerplate automations in the DSUL workspace folder**
-   `workspaces/<workspace>/automations/` (without these, the Studio won't expose
-   the editable source-view — see
-   [[feedback_studio_spa_detection_needs_automations]]) :
+9. **(Optional) Starter demo automations — NOT required for SPA detection** (cf.
+   convention 3 ; the editable source-view comes from the source files +
+   `config.value.bundles` pointer alone). Create `v1/status` **only if** you keep
+   the starter template's health-check ping in `App.tsx` ; otherwise skip it.
+   `on-app-greeting-requested` is a pure demo echo — skip it unless you want the
+   greeting round-trip. For reference, the YAMLs are :
 
    `workspaces/<workspace>/automations/v1/status.yml` :
    ```yaml
@@ -671,8 +677,9 @@ and curl actions queued. Wait for user OK.
    - App name (`<appName>`, = workspace slug) + local path (`pages/<workspace>/`)
    - Env (sandbox / staging / prod)
    - Version (`PRISMEAI_APP_VERSION`)
-   - Automations touched : counts (created / updated / deleted) — and call out
-     the 2 boilerplate (`v1/status`, `on-app-greeting-requested`) if scaffolded.
+   - Automations touched : counts (created / updated / deleted). The starter demo
+     endpoints (`v1/status`, `on-app-greeting-requested`) are optional and NOT
+     needed for SPA detection — mention them only if you actually created any.
    - Source files pushed : count + bundle size
 3. **Reminder for the user** : if the app uses non-socle deps (three.js,
    @react-three/*, viz libs…), say it explicitly — "ne clique pas sur
