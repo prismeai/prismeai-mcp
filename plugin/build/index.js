@@ -15593,6 +15593,10 @@ function getConfigDir() {
   if (fromEnv && !fromEnv.includes("${")) {
     return fromEnv;
   }
+  const fromClaudeEnv = process.env.PRISME_CLAUDE_CONFIG_DIR;
+  if (fromClaudeEnv && !fromClaudeEnv.includes("${")) {
+    return fromClaudeEnv;
+  }
   return join(homedir(), ".prisme-ai-mcp");
 }
 function readJsonSync(path) {

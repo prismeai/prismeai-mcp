@@ -29,15 +29,20 @@ export type StoredCredentials = Record<string, StoredCredential>;
 /**
  * Resolve the directory where the MCP persists its config + credentials.
  *
- * Plugins set PRISME_CONFIG_DIR to ${CLAUDE_PLUGIN_DATA} (a per-plugin data
- * dir that survives updates). When the variable is unset — or was not
- * expanded by the host (still contains "${") — fall back to a stable
- * per-user directory so manual `node build/index.js` runs keep working.
+ * Plugins set PRISME_CONFIG_DIR to the host's per-plugin data directory
+ * (${PLUGIN_DATA} in Codex, ${CLAUDE_PLUGIN_DATA} in Claude Code). When a
+ * variable is unset — or was not expanded by the host (still contains "${") —
+ * fall back to a stable per-user directory so manual `node build/index.js`
+ * runs keep working.
  */
 export function getConfigDir(): string {
   const fromEnv = process.env.PRISME_CONFIG_DIR;
   if (fromEnv && !fromEnv.includes("${")) {
     return fromEnv;
+  }
+  const fromClaudeEnv = process.env.PRISME_CLAUDE_CONFIG_DIR;
+  if (fromClaudeEnv && !fromClaudeEnv.includes("${")) {
+    return fromClaudeEnv;
   }
   return join(homedir(), ".prisme-ai-mcp");
 }
