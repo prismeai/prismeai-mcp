@@ -2,4 +2,4 @@ workspaceId: PvCEGmC
 app:
   slug: SalesforceNext
   name: Salesforce Next
-  description: App + MCP connector for Salesforce CRM (REST API v62.0) — tenant-context model. The MCP endpoint runs in the tenant app-instance context; agents are authorized via an agentId/agentApiKey registry validated against agent-factory. Service-to-service auth via OAuth2 JWT Bearer (Connected App) for both agent (MCP) and App-mode calls.
+  description: App + MCP connector for Salesforce CRM (REST API v62.0) — tenant-context model. The MCP endpoint runs in the tenant app-instance context; agents are identified through injected scope and checked against the tenant allowlist. Service-to-service auth uses OAuth2 JWT Bearer (Connected App) for both MCP and App-mode calls.

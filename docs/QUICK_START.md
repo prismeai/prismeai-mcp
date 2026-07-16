@@ -33,7 +33,7 @@ No clone, no `npm install`, no build: the plugin ships a prebuilt, self-containe
 |-----------|-------------|
 | MCP Server (`prisme-ai-builder`) | Workspaces, automations, apps, events, files, AI Knowledge, DSUL linter |
 | Skills (`/prisme-ai:*`) | Connector scaffolding/testing/docs, A2UI, agent workspaces, `prisme-assistant`, `ticket-validator` — see `/prisme-ai:guide` |
-| Agents (Claude only) | `code-review`, `prisme-assistant` |
+| Agents (Claude only) | `prisme-code-review` |
 
 ## Authenticate
 

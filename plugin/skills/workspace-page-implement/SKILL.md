@@ -172,7 +172,7 @@ an app inside an existing one), call `mcp__prisme-ai-builder__create_workspace`.
 ## Phase 2 (common) — Use the configured Prisme.ai MCP environment
 
 Use the `prisme-ai-builder` MCP tools with an explicit `environment` parameter.
-If the environment or token is not configured, stop and follow `/prisme-ai:setup`;
+If the environment or token is not configured, stop and follow `/prisme-ai:prisme-mcp-setup`;
 do not ask the user to paste a token into the chat unless they explicitly choose
 the `set_token` fallback after being warned.
 
@@ -180,7 +180,7 @@ the `set_token` fallback after being warned.
    - Default `sandbox` unless the user's request contains `prod` / `production`.
    - When ambiguous, ask before continuing.
 2. Use MCP tools with the selected `environment` and either `workspaceName` or
-   `workspaceId`. If setup is missing, follow `/prisme-ai:setup`.
+   `workspaceId`. If setup is missing, follow `/prisme-ai:prisme-mcp-setup`.
 3. For local frontend `.env` files, never extract or print the MCP token. Tell the
    user to create a token at `<studio-url>/settings/tokens` and fill the local
    `.env` value in their own terminal/editor.
@@ -464,7 +464,7 @@ These come straight from `pptx-generator/AGENTS.md`. They MUST be respected.
 | Automation validation | Each YAML touched in `automations/` | `mcp__prisme-ai-builder__validate_automation` |
 | Lint reference | When unsure on DSUL syntax | `mcp__prisme-ai-builder__validate_automation` |
 | Build | If `src/` was touched | `cd <appDir> && npm run build` (skip if only YAML changed) |
-| Code review (optional) | On the full diff before push | `Task(subagent_type: "code-review", ...)` |
+| Code review (optional) | On the full diff before push | `Task(subagent_type: "prisme-code-review", ...)` |
 
 Fix any 🔴 MAJOR issue before moving on.
 

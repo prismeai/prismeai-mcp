@@ -1,6 +1,11 @@
+---
+name: prisme-mcp-setup
+description: Configure or repair Prisme.ai MCP environment and token storage without exposing credentials in chat. Use when an environment is unknown, no token is registered, a stored token is rejected, or the user asks to configure MCP authentication.
+---
+
 # Prisme.ai MCP Setup
 
-Use this skill when a Prisme.ai MCP tool reports that an environment is unknown, no token is registered, or a stored token was rejected.
+Use this procedure when a Prisme.ai MCP tool reports that an environment is unknown, no token is registered, or a stored token was rejected.
 
 ## Rules
 

@@ -136,7 +136,7 @@ Read `<workspace>/index.yml` and collect:
 
 Also introspect:
 - `automations/buildAppAuth.yml` → identify the auth mode (static token / Basic / OAuth2 client-credentials / OAuth2 AC) — affects wording of the Prerequisites + Configuration tables.
-- `automations/initiateOAuth.yml` (optional) → if present, the connector supports OAuth2 authorization-code. **Since the OAuth-central migration (gitlab pilot, 2026-05-28)** the credentials are NOT tenant-facing anymore: check `secrets.schema` in `index.yml` for `<<SERVICE_SLUG>>OauthClientId` / `<<SERVICE_SLUG>>OauthClientSecret`. If both are declared at the workspace level (and absent from `config.schema`), the connector is in the **Central-OAuth via Governance** archetype — fill the *Platform admin (Governance)* accordion with the full `<Steps>` block (see the gitlab.mdx reference). If `oauthClientId` is still in `config.schema`, the connector is on the legacy per-tenant model — flag it as a candidate for `/app-mcp-fleet-sync` migration.
+- `automations/initiateOAuth.yml` (optional) → if present, the connector supports OAuth2 authorization-code. **Since the OAuth-central migration (gitlab pilot, 2026-05-28)** the credentials are NOT tenant-facing anymore: check `secrets.schema` in `index.yml` for `<<SERVICE_SLUG>>OauthClientId` / `<<SERVICE_SLUG>>OauthClientSecret`. If both are declared at the workspace level (and absent from `config.schema`), the connector is in the **Central-OAuth via Governance** archetype — fill the *Platform admin (Governance)* accordion with the full `<Steps>` block (see the gitlab.mdx reference). If `oauthClientId` is still in `config.schema`, flag the connector as using the legacy per-tenant model and document the current behavior without prescribing a removed migration workflow.
 - `automations/mcp.yml` → inspect the dispatch to pin the archetype (see the archetype table above). `authMode: central` default + `conditions: '{{headers["mcp-api-key"]}}' → authMode: tenant` ⇒ **Central-OAuth via Governance**. A single tenant-context flow with `validateAgent` + an agent allowlist and **no `mcp-api-key`** ⇒ **Tenant-context + config SPA** (e.g. `google-workspaces`). A bare static-token resolution ⇒ **Static-credential**.
 
 ### Phase 3 — Categorize the tools
@@ -338,7 +338,7 @@ Print to the user:
 - Any sections flagged for human review (`<!-- REVIEW: ... -->` comments in the generated MDX)
 - A reminder that `docs.json` validation passed (`json.load` succeeded)
 - A reminder that the internal-link check (Phase 5.3) passed (`BROKEN: none`), and any link that had to be re-pointed
-- The next recommended step: run `/app-mcp-test <workspace-slug> <environment>` to test the App+MCP workspace with real credentials before publishing or announcing the connector.
+- The next recommended step: run `/prisme-ai:prisme-app-mcp-test <workspace-slug> <environment>` to create or update the consumer E2E workspace and verify the connector before announcing it.
 
 ### Phase 7 — Guide the user to run the local preview
 

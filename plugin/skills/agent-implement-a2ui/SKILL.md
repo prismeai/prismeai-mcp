@@ -400,7 +400,7 @@ After push, give the user:
 
 ## Phase 8 — Review
 
-Spawn a sub-task with `Agent` (subagent_type: code-review or general-purpose) to review the generated automations. Format issues as 🔴 MAJOR | 🟠 NEED_HUMAN bullets, per project CLAUDE.md. Fix MAJORs immediately; ask for the rest.
+Spawn a sub-task with `Agent` (subagent_type: prisme-code-review or general-purpose) to review the generated automations. Format issues as 🔴 MAJOR | 🟠 NEED_HUMAN bullets, per project CLAUDE.md. Fix MAJORs immediately; ask for the rest.
 
 ---
 

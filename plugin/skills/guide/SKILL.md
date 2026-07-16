@@ -12,15 +12,13 @@ This plugin ships a set of skills for Prisme.ai workspace development. They are 
 
 ## App + MCP connectors
 
-The connector workflow: scaffold a new SaaS connector, test it, consolidate tests in a consumer workspace, document it, and keep the whole fleet in sync over time.
+The connector workflow: scaffold a new SaaS connector, verify it through a durable consumer workspace, and document it.
 
 | Skill | When to use |
 |---|---|
 | `/prisme-ai:app-mcp-implement` | Scaffold a brand-new App + MCP workspace for a third-party SaaS (REST or GraphQL). Produces `index.yml`, `security.yml`, `.import.yml`, helpers, Custom Code, MCP Core, tool/method automations, and pushes to the target env. |
-| `/prisme-ai:app-mcp-test` | E2E smoke-test the tools exposed by an existing App + MCP workspace. Asks for credentials, lists every MCP tool, executes them one by one, fixes errors until the suite passes. Supports static tokens, Basic, OAuth2 client-credentials, and OAuth2 authorization-code (PKCE). |
-| `/prisme-ai:app-mcp-build-consumer` | Build or audit the matching `*-consumer` workspace that consolidates the proven smoke-test coverage into a durable DSUL test suite. Typically chained after `/prisme-ai:app-mcp-test`. |
+| `/prisme-ai:prisme-app-mcp-test` | Create or update the matching `*-consumer` E2E workspace, run its App and MCP tests, and iterate on the consumer or approved connector fixes until the suite passes. |
 | `/prisme-ai:app-mcp-document` | Generate the public MDX documentation page for an existing connector in the `prismeai/docs` repo (Mintlify). Mirrors the layout of existing pages like `gryzzly.mdx`, `data-galaxy.mdx`. |
-| `/prisme-ai:app-mcp-fleet-sync` | Find every connector workspace (by the `app-mcp` label), diff each against the current `/prisme-ai:app-mcp-implement` templates + rule checklist, and apply approved fixes. Run when a template trap-fix lands and the deployed fleet drifts. |
 
 ---
 
@@ -58,16 +56,14 @@ The connector workflow: scaffold a new SaaS connector, test it, consolidate test
 | Situation | Skill |
 |---|---|
 | Build a new third-party SaaS connector (App + MCP) | `/prisme-ai:app-mcp-implement` |
-| Test the tools of an existing connector with real credentials | `/prisme-ai:app-mcp-test` |
-| Consolidate test coverage into a `*-consumer` workspace | `/prisme-ai:app-mcp-build-consumer` |
+| Build and run a connector's durable `*-consumer` E2E suite | `/prisme-ai:prisme-app-mcp-test` |
 | Write or update the public docs of a connector | `/prisme-ai:app-mcp-document` |
-| Propagate a template fix across all connectors | `/prisme-ai:app-mcp-fleet-sync` |
 | Scaffold an Agent Factory DSUL workspace | `/prisme-ai:agent-builder` |
 | Provision + evaluate an Agent Factory agent | `/prisme-ai:agent-workspace` |
 | Render interactive UI from agent tool calls | `/prisme-ai:agent-implement-a2ui` |
 | Edit the React frontend of a workspace | `/prisme-ai:workspace-page-implement` |
 | Debug events / trace an execution | `/prisme-ai:prisme-assistant` |
-| Configure an MCP environment or token | `/prisme-ai:setup` |
+| Configure an MCP environment or token | `/prisme-ai:prisme-mcp-setup` |
 | Check DSUL rules before editing automations | `/prisme-ai:dsul-rules` |
 | Check an implementation against its ticket | `/prisme-ai:ticket-validator` |
 | I don't know where to start | `/prisme-ai:guide` (this) |

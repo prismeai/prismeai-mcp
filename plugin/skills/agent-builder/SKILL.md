@@ -352,14 +352,14 @@ Goal: install a connector into the agent's workspace, configure its credentials,
 wire it to the agent as an `mcp` tool.
 
 1. `list_apps` (and/or `get_app`) to find the connector and read its config schema.
-   For connector specifics, defer to the `app-mcp-implement` / `app-mcp-test` skills.
+   For connector specifics, defer to the `app-mcp-implement` / `prisme-app-mcp-test` skills.
 2. Ensure the workspace exists on the **target env** (deploy at least once, Op 7, so
    `deployedIds.<env>.workspaceId` is set).
 3. `install_app_instance` into `deployedIds.<env>.workspaceId` with `appSlug`, a local
    `slug`, and the `config` (credentials/options). Mirror the resulting import locally
    as `imports/<slug>.yml` so it stays git-versioned.
 4. Configure / verify credentials with `update_app_instance_config` if needed. Smoke
-   the connector with the `app-mcp-test` skill when the user wants confidence.
+   the connector with the `prisme-app-mcp-test` consumer suite when the user wants confidence.
 5. Add an `appMcp[]` entry to `agent.yml`: `appSlug`, `slug`, `config`, and a `tool`
    block (`type: mcp`, `name`, `description`). **Do not hardcode `server`** — it
    embeds the per-env workspaceId.

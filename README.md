@@ -8,8 +8,8 @@ Prisme.ai MCP is distributed as a plugin for **Claude Code** and **Codex**. The 
 |-----------|-------------|
 | MCP server | `prisme-ai-builder` tools for workspaces, automations, apps, events, files, AI Knowledge, and Prisme.ai documentation |
 | DSUL validation | `validate_automation`, backed by the bundled linter |
-| Skills | `/prisme-ai:*` skills for connector scaffolding, testing, documentation, fleet sync, A2UI, workspace pages, assistant workflows, and ticket validation |
-| Claude agents | `code-review` and `prisme-assistant` for Claude Code |
+| Skills | `/prisme-ai:*` skills for connector scaffolding, consumer E2E testing, documentation, A2UI, workspace pages, assistant workflows, and ticket validation |
+| Claude agents | `prisme-code-review` for Claude Code |
 
 ## Install From GitHub
 
@@ -66,7 +66,7 @@ The guide lists every bundled skill and includes the Prisme.ai environment rules
 For environment or token setup help, run:
 
 ```text
-/prisme-ai:setup
+/prisme-ai:prisme-mcp-setup
 ```
 
 Typical requests:
@@ -128,9 +128,8 @@ Only plugin maintainers need source-based local setup. Use [Development](./docs/
 | `.claude-plugin/marketplace.json` | Claude marketplace entry, pointing to `./plugin` |
 | `.agents/plugins/marketplace.json` | Codex marketplace entry, pointing to `./plugin` |
 | `plugin/.claude-plugin/plugin.json` | Claude plugin manifest |
-| `plugin/.codex-plugin/plugin.json` | Codex plugin manifest |
 | `plugin/.mcp.json` | Claude MCP server definition |
-| `plugin/.codex-plugin/mcp.json` | Codex MCP server definition |
+| `plugin/.codex-plugin/plugin.json` | Codex manifest with its inline MCP server definition |
 | `plugin/build/index.js` | Self-contained MCP server bundle |
 | `plugin/skills/` | Bundled Prisme.ai skills |
 | `plugin/agents/` | Claude Code agents |

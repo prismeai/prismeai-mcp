@@ -68,9 +68,8 @@ mcp-prisme.ai/
 │   ├── .claude-plugin/   # Claude plugin manifest
 │   ├── .codex-plugin/    # Codex plugin manifest
 │   ├── .mcp.json         # Claude MCP server registration
-│   ├── .codex-plugin/mcp.json # Codex MCP server registration
 │   ├── skills/           # Plugin skills (/prisme-ai:*)
-│   ├── agents/           # Claude agents (code-review, prisme-assistant)
+│   ├── agents/           # Claude agent (prisme-code-review)
 │   ├── llmDoc/           # Documentation served by get_prisme_documentation
 │   ├── config/           # Default environment topology
 │   └── build/index.js    # Committed self-contained bundle (npm run build:bundle)

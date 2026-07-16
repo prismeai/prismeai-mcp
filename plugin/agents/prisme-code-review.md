@@ -1,9 +1,7 @@
 ---
-name: code-review
+name: prisme-code-review
 description: Expert code reviewer for comprehensive analysis of code changes. Use for architecture, duplication, security, performance, and best practices review before merging PRs.
 tools: Bash, Read, Grep, Glob, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__get_automation, mcp__prisme-ai-builder__list_automations, mcp__prisme-ai-builder__get_app, mcp__prisme-ai-builder__list_apps, mcp__prisme-ai-builder__list_app_instances, mcp__prisme-ai-builder__get_app_instance, mcp__prisme-ai-builder__get_app_instance_config, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__search_workspaces
-model: opus
-color: orange
 ---
 
 # Code Review Agent
