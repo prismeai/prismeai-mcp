@@ -99,7 +99,7 @@ Pull plugin updates from the marketplace:
 codex plugin marketplace upgrade prismeai-mcp
 ```
 
-Release tags rebuild and commit the self-contained bundle at `plugin/build/index.js`.
+Plugin updates are distributed from the committed source. Maintainers rebuild and commit `plugin/build/index.js` before tagging; CI only verifies that the tagged commit is consistent.
 
 ## Runtime Model
 

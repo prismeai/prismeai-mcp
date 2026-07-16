@@ -5,9 +5,11 @@
   "type": "module",
   "main": "plugin/build/index.js",
   "scripts": {
-    "preinstall": "cd linter && npm install",
+    "preinstall": "npm ci --prefix linter",
     "build": "cd linter && npm run build && cd .. && tsc",
     "build:bundle": "cd linter && npm run build && cd .. && node scripts/bundle.mjs",
+    "test": "npm --prefix linter test",
+    "validate:versions": "node scripts/validate-plugin-versions.mjs",
     "start": "node plugin/build/index.js",
     "dev": "tsx src/index.ts"
   },

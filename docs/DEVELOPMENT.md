@@ -56,6 +56,15 @@ npm run build:bundle
 
 This updates `plugin/build/index.js`, which is what the Claude Code and Codex plugins run after marketplace installation.
 
+## Minimal Release Flow
+
+1. Bump the same version in `package.json`, `package-lock.json`, both plugin manifests, and `.agents/plugins/marketplace.json`.
+2. Run `npm run build:bundle`, `npm test`, and `npm run validate:versions`.
+3. Commit the source, manifests, and generated bundle together.
+4. Tag that exact commit as `v<version>`.
+
+GitHub Actions validates pull requests, `main`, and version tags. It never changes the repository or publishes a release artifact.
+
 ## Project Structure
 
 ```
