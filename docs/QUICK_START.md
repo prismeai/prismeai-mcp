@@ -49,6 +49,8 @@ The recommended path keeps your token out of the chat (it is never sent to the L
 
 You can instead ask the agent to register a pasted token via the `set_token` tool, but that sends the token to the LLM provider — prefer the CLI above.
 
+**Self-hosted / on-premise instance?** Point a custom environment at your own API URL — see [Environment Configuration → On-premise / self-hosted instances](./ENVIRONMENTS.md#on-premise--self-hosted-instances).
+
 ## After Install
 
 Run `/prisme-ai:guide` for the skills catalog and Prisme.ai context. In Claude Code, type `@` to see available `mcp__prisme-ai-builder__*` tools. In Codex, plugin MCP tools may be loaded lazily; use a request that clearly needs Prisme.ai tools, or search for the Prisme.ai Builder tools.

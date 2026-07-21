@@ -68,7 +68,7 @@ Config file location:
 
 ### Multi-Environment Configuration
 
-Create or edit `$PRISME_CONFIG_DIR/config.json` with environment topology only, then register each token with `set-token`.
+Create or edit `$PRISME_CONFIG_DIR/config.json` with environment topology only, then register each token with `set-token`. For self-hosted / on-premise instances with their own API URL, see [Environment Configuration → On-premise / self-hosted instances](./ENVIRONMENTS.md#on-premise--self-hosted-instances).
 
 Example `$HOME/.prisme-ai-mcp/config.json`:
 

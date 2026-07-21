@@ -27,6 +27,59 @@ You can add any number of custom environments with any name. Registering a token
 | `prod` | `https://api.studio.prisme.ai/v2` |
 | `custom` | `https://api.your-instance.prisme.ai/v2` |
 
+## On-premise / self-hosted instances
+
+A Prisme.ai instance deployed on a client's own domain is just a custom environment: give it any name and point `apiUrl` at their API base URL. Nothing is hardcoded to `*.prisme.ai`.
+
+> **You don't need to resolve `<plugin>` or `<config-dir>` by hand.** Ask the agent to run any Prisme tool against your instance (e.g. `environment: "acme-onprem"`); the MCP replies with the exact `set-token` command — absolute path and `--config-dir` already filled in, with an `--api-url <api-url>` slot for your instance URL. Or run `/prisme-ai:setup`. The `<plugin>` / `<config-dir>` placeholders below are only for illustration.
+
+### Register in one command (recommended)
+
+```bash
+node "<plugin>/build/index.js" set-token acme-onprem \
+  --api-url https://api.acme.example.com/v2 \
+  --studio-url https://studio.acme.example.com \
+  --config-dir "<config-dir>"
+```
+
+This validates the token against `<apiUrl>/me`, then writes the environment topology to `config.json` **and** the token to `credentials.json` (mode 600) in one step. Reference it afterwards with `"environment": "acme-onprem"` in any tool call.
+
+### Or declare several instances up front
+
+Pre-declare the topology (no secrets) in `<config-dir>/config.json`, then register a token per environment:
+
+```json
+{
+  "environments": {
+    "acme-onprem": {
+      "apiUrl": "https://api.acme.example.com/v2",
+      "studioUrl": "https://studio.acme.example.com",
+      "default": true
+    },
+    "acme-onprem-preprod": {
+      "apiUrl": "https://api.preprod.acme.example.com/v2",
+      "studioUrl": "https://studio.preprod.acme.example.com"
+    }
+  },
+  "defaultEnvironment": "acme-onprem"
+}
+```
+
+```bash
+node "<plugin>/build/index.js" set-token acme-onprem --config-dir "<config-dir>"
+node "<plugin>/build/index.js" set-token acme-onprem-preprod --config-dir "<config-dir>"
+```
+
+Because each environment already exists in `config.json`, `set-token` reuses its declared `apiUrl` and does not need `--api-url` here.
+
+### On-premise specifics
+
+| Point | Detail |
+|-------|--------|
+| **`apiUrl` must include `/v2`** | It is the API **base URL**; every call is relative to it (`<apiUrl>/me`, `<apiUrl>/workspaces/…`). Use `https://api.acme.example.com/v2`, not `https://api.acme.example.com`. |
+| **`--studio-url` is optional** | Used only to build "create a token here" links. When omitted it is derived by stripping the `api.`/`api-` prefix from the API host — pass it explicitly when the on-prem hostname does not follow that convention. |
+| **Network reachability** | The `set-token` probe calls the customer's API directly from wherever the CLI runs. It must be able to reach the internal `apiUrl`, otherwise validation fails and nothing is saved. |
+
 ## Using Environments
 
 Specify environment and workspace in tool calls:
