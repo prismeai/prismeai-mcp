@@ -27,7 +27,7 @@ Register it with the `set-token` CLI (recommended — the token stays local and 
 node "/absolute/path/to/prismeai-mcp/plugin/build/index.js" set-token sandbox --config-dir "$HOME/.prisme-ai-mcp"
 ```
 
-It prompts for the token with hidden input (or reads `PRISME_TOKEN` from the env), then asks for the Prisme API URL, e.g. `https://api.sandbox.prisme.ai/v2`. If unsure, open the Prisme instance in a browser and copy the API base URL from the Network tab. Alternatively, register it at runtime with the `set_token` MCP tool, or pass a single environment statically via the environment variables below.
+It prompts for the token with hidden input (or reads `PRISME_TOKEN` from the env), the Prisme API and Studio URLs, and an optional `NODE_EXTRA_CA_CERTS` PEM path. The CA path is stored per environment and used for both token validation and normal MCP HTTPS calls. Alternatively, register it at runtime with the `set_token` MCP tool, or pass a single environment statically via the environment variables below.
 
 ## Environment Variables
 
@@ -78,6 +78,7 @@ Example `$HOME/.prisme-ai-mcp/config.json`:
     "sandbox": {
       "apiUrl": "https://api.sandbox.prisme.ai/v2",
       "studioUrl": "https://sandbox.prisme.ai",
+      "nodeExtraCaCerts": "/absolute/path/to/company-ca.pem",
       "default": true
     },
     "prod": {

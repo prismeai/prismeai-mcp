@@ -2150,11 +2150,12 @@ export async function handleToolCall(
     }
 
     case "set_token": {
-      const { environment, token, apiUrl, studioUrl } = args as {
+      const { environment, token, apiUrl, studioUrl, nodeExtraCaCerts } = args as {
         environment: string;
         token: string;
         apiUrl?: string;
         studioUrl?: string;
+        nodeExtraCaCerts?: string;
       };
 
       if (!environment) {
@@ -2177,13 +2178,18 @@ export async function handleToolCall(
         ...(existing ?? {}),
         apiUrl: apiUrl ?? existing!.apiUrl,
         ...(studioUrl ? { studioUrl } : {}),
+        ...(nodeExtraCaCerts ? { nodeExtraCaCerts } : {}),
       };
 
       // Probe-validate the token before persisting anything: an invalid token
       // must fail here and persist nothing.
       let me: any;
       try {
-        me = await apiClient.probeToken(envCfg.apiUrl, token);
+        me = await apiClient.probeToken(
+          envCfg.apiUrl,
+          token,
+          envCfg.nodeExtraCaCerts
+        );
       } catch (err: any) {
         const status = err?.response?.status;
         const tokenUrl = deriveTokenUrl(envCfg);
@@ -2210,6 +2216,8 @@ export async function handleToolCall(
       const summary = {
         environment,
         apiUrl: envCfg.apiUrl,
+        studioUrl: envCfg.studioUrl,
+        nodeExtraCaCerts: envCfg.nodeExtraCaCerts,
         validatedAs: me?.email ?? me?.id ?? "(authenticated)",
         persistedTo: credentialsPath,
       };

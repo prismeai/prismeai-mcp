@@ -1928,7 +1928,7 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
   {
     name: "set_token",
     description:
-      "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead — tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error). When relaying that command, preserve it as one shell command and do not insert line breaks inside quoted paths. It prompts for the token with hidden input, then asks for the Prisme API URL, e.g. `https://api.sandbox.prisme.ai/v2`; if unsure, the user can find it in the browser Network tab while loading the Prisme instance. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
+      "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead — tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error). When relaying that command, preserve it as one shell command and do not insert line breaks inside quoted paths. It prompts for the token with hidden input, then asks for the Prisme API URL, Studio URL, and an optional NODE_EXTRA_CA_CERTS PEM path. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl and nodeExtraCaCerts) to register an environment that is not configured yet.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1951,6 +1951,11 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
           type: "string",
           description:
             "Studio origin for the environment (e.g. https://sandbox.prisme.ai). Optional; used to build token-creation links.",
+        },
+        nodeExtraCaCerts: {
+          type: "string",
+          description:
+            "Absolute path to a readable PEM CA bundle. The environment's HTTPS clients trust these certificates in addition to Node's built-in roots, matching NODE_EXTRA_CA_CERTS semantics.",
         },
       },
       required: ["environment", "token"],

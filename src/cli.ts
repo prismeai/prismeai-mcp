@@ -1,6 +1,7 @@
 import axios from "axios";
 import { existsSync, readFileSync } from "fs";
-import { dirname, join } from "path";
+import { homedir } from "os";
+import { dirname, isAbsolute, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { createInterface } from "readline";
 import {
@@ -12,6 +13,7 @@ import {
   type StoredTopology,
   type StoredEnvironment,
 } from "./auth/persist.js";
+import { createExtraCaAgent } from "./tls.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -60,6 +62,15 @@ function cleanApiUrl(value: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
+function cleanStudioUrl(value: string): string {
+  const input = normalizeUrlInput(value);
+  const url = new URL(input);
+  url.pathname = "";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 function deriveStudioUrl(value: string): string | undefined {
   const input = normalizeUrlInput(value);
   try {
@@ -72,6 +83,17 @@ function deriveStudioUrl(value: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function cleanExtraCaCertsPath(value: string): string {
+  const unquoted = value.trim().replace(/^(["'])(.*)\1$/, "$2");
+  const expanded =
+    unquoted === "~"
+      ? homedir()
+      : unquoted.startsWith("~/")
+        ? join(homedir(), unquoted.slice(2))
+        : unquoted;
+  return isAbsolute(expanded) ? expanded : resolve(expanded);
 }
 
 /** Read the default topology shipped with the plugin (bundled or tsc layout). */
@@ -176,9 +198,10 @@ function printUsage(): void {
       "API before being saved to the config dir (credentials.json, mode 600).",
       "",
       "Options:",
-      "  --api-url <url>      API base URL (optional; prompts if missing)",
-      "  --studio-url <url>   Studio origin (optional; used for token-creation links)",
-      "  --config-dir <dir>   Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
+      "  --api-url <url>                   API base URL (optional; prompts if missing)",
+      "  --studio-url <url>                Studio origin (optional; prompts interactively)",
+      "  --node-extra-ca-certs <pem-path>  Extra trusted CA bundle for this environment",
+      "  --config-dir <dir>                Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
       "",
       "The token is read from an interactive hidden prompt, or from the PRISME_TOKEN",
       "env var if set. Avoid passing it as a plain argument (shell history leak).",
@@ -239,8 +262,23 @@ export async function runCli(argv: string[]): Promise<number> {
     fallbackExisting?.apiUrl ?? "https://api.sandbox.prisme.ai/v2";
   const apiUrlFlag = flagString(flags, "api-url");
   const studioUrlFlag = flagString(flags, "studio-url");
-  let apiUrl = apiUrlFlag ? cleanApiUrl(apiUrlFlag) : existing?.apiUrl;
-  let studioUrl = studioUrlFlag ?? existing?.studioUrl;
+  const extraCaCertsFlag = flagString(flags, "node-extra-ca-certs");
+  let apiUrl: string | undefined;
+  let studioUrl: string | undefined;
+  try {
+    apiUrl = apiUrlFlag ? cleanApiUrl(apiUrlFlag) : existing?.apiUrl;
+    studioUrl = studioUrlFlag
+      ? cleanStudioUrl(studioUrlFlag)
+      : existing?.studioUrl;
+  } catch (error) {
+    console.error(
+      `Invalid URL: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return 1;
+  }
+  let nodeExtraCaCerts = extraCaCertsFlag
+    ? cleanExtraCaCertsPath(extraCaCertsFlag)
+    : existing?.nodeExtraCaCerts;
 
   if (!apiUrl && !process.stdin.isTTY) {
     console.error(
@@ -277,12 +315,45 @@ export async function runCli(argv: string[]): Promise<number> {
         return 1;
       }
     }
+
+    const suggestedStudioUrl = studioUrl ?? (apiUrl ? deriveStudioUrl(apiUrl) : undefined);
+    const studioPrompt = suggestedStudioUrl
+      ? `Studio URL [${suggestedStudioUrl}]: `
+      : "Studio URL (e.g. https://sandbox.prisme.ai): ";
+    const studioInput = await promptLine(studioPrompt);
+    try {
+      studioUrl = studioInput
+        ? cleanStudioUrl(studioInput)
+        : suggestedStudioUrl;
+    } catch {
+      console.error(
+        `Invalid Studio URL "${studioInput}". Use the Studio origin, e.g. https://sandbox.prisme.ai.`
+      );
+      return 1;
+    }
+
+    const extraCaPrompt = nodeExtraCaCerts
+      ? `NODE_EXTRA_CA_CERTS PEM path (optional) [${nodeExtraCaCerts}]: `
+      : "NODE_EXTRA_CA_CERTS PEM path (optional; press Enter to skip): ";
+    const extraCaInput = await promptLine(extraCaPrompt);
+    if (extraCaInput) {
+      nodeExtraCaCerts = cleanExtraCaCertsPath(extraCaInput);
+    }
   }
 
   if (!apiUrl) {
     console.error(
       `No API URL provided. Aborting; nothing was saved. Use the API base URL, e.g. ${exampleApiUrl}.`
     );
+    return 1;
+  }
+
+  let httpsAgent;
+  try {
+    httpsAgent = createExtraCaAgent(nodeExtraCaCerts);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    console.error("Aborting; nothing was saved.");
     return 1;
   }
 
@@ -294,6 +365,7 @@ export async function runCli(argv: string[]): Promise<number> {
       baseURL: apiUrl,
       timeout: 15000,
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      ...(httpsAgent ? { httpsAgent } : {}),
     });
     const response = await probe.get("/me");
     me = response.data;
@@ -314,6 +386,7 @@ export async function runCli(argv: string[]): Promise<number> {
     ...(fallbackExisting ?? {}),
     apiUrl,
     ...(studioUrl ? { studioUrl } : {}),
+    ...(nodeExtraCaCerts ? { nodeExtraCaCerts } : {}),
   };
   topology.environments[environment] = merged;
 

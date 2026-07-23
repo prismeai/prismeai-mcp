@@ -43,6 +43,8 @@ export interface EnvironmentConfig {
   default?: boolean;
   // Studio origin, used to derive the token-creation URL (<studio>/settings/tokens).
   studioUrl?: string;
+  // Absolute path to a PEM CA bundle, equivalent to NODE_EXTRA_CA_CERTS for this environment.
+  nodeExtraCaCerts?: string;
 }
 
 export interface EnvironmentsConfig {
@@ -91,6 +93,15 @@ function validateEnvironments(parsed: any): EnvironmentsConfig {
 
     if (config.studioUrl !== undefined && typeof config.studioUrl !== "string") {
       throw new Error(`Environment "${envName}" studioUrl must be a string if provided`);
+    }
+
+    if (
+      config.nodeExtraCaCerts !== undefined &&
+      typeof config.nodeExtraCaCerts !== "string"
+    ) {
+      throw new Error(
+        `Environment "${envName}" nodeExtraCaCerts must be a string if provided`
+      );
     }
 
     // workspaces is optional

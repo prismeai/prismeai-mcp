@@ -35,7 +35,7 @@ For other deployments, derive the API URL from the user's Prisme.ai host or ask 
    <studio-url>/settings/tokens
    ```
 
-3. Tell the user to run the exact CLI command from the MCP error in their own terminal. Preserve it as one shell command; do not insert line breaks inside quoted paths. The CLI prompts for the token, then the Prisme API URL. Give `https://api.sandbox.prisme.ai/v2` as an example, and tell the user they can copy the API base URL from the browser Network tab if unsure.
+3. Tell the user to run the exact CLI command from the MCP error in their own terminal. Preserve it as one shell command; do not insert line breaks inside quoted paths. The CLI prompts for the token, the Prisme API and Studio URLs, and an optional `NODE_EXTRA_CA_CERTS` PEM path. Give `https://api.sandbox.prisme.ai/v2` and `https://sandbox.prisme.ai` as examples.
 
    For a known environment:
 
@@ -59,4 +59,4 @@ Only if the user explicitly wants to paste the token in chat, warn them first:
 Using set_token means the token is sent through this conversation to the LLM provider. The CLI path keeps it local.
 ```
 
-Then call `set_token` with `environment`, `token`, and `apiUrl` for a new environment.
+Then call `set_token` with `environment`, `token`, and `apiUrl` for a new environment. Include `studioUrl` and `nodeExtraCaCerts` when needed.

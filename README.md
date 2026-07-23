@@ -48,7 +48,7 @@ Credentials are user-created API tokens, registered per environment. The recomme
    node "<plugin>/build/index.js" set-token sandbox --config-dir "<config-dir>"
    ```
 
-   It prompts for the token with hidden input, probe-validates it against the API, then saves it to the plugin data dir (`credentials.json`, mode 600). An invalid token saves nothing.
+   It prompts for the token with hidden input, the API and Studio URLs, and an optional `NODE_EXTRA_CA_CERTS` PEM path. It probe-validates the token (using the extra CA when configured), then saves it to the plugin data dir (`credentials.json`, mode 600). An invalid token saves nothing.
 3. Re-run your request — the server picks up the new token automatically (no restart). Run `set-token` again anytime to rotate.
 
 When a tool call has no token (or hits a 401), the error message contains the exact command to run. If you first try to use any tool from the chat, the LLM agent will read that error and provide the proper `set-token` arguments for your environment and config dir. You can instead let the agent register a pasted token via the `set_token` tool, but that token is sent to the LLM provider as part of the conversation — prefer the CLI.

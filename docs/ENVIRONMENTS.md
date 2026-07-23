@@ -8,7 +8,7 @@ The server reads and writes its configuration in `PRISME_CONFIG_DIR` (set by the
 
 | File | Contents |
 |------|----------|
-| `config.json` | Environment topology: `{ "environments": { name: { apiUrl, studioUrl?, workspaces? } }, "defaultEnvironment"? }` — no secrets |
+| `config.json` | Environment topology: `{ "environments": { name: { apiUrl, studioUrl?, nodeExtraCaCerts?, workspaces? } }, "defaultEnvironment"? }` — no secrets |
 | `credentials.json` | Per-environment API tokens (`{ name: { token, updatedAt } }`), file mode 600 |
 
 A default topology (sandbox, staging, prod) ships with the plugin in `config/default-environments.json` and is used until you register your own environments.
@@ -124,7 +124,8 @@ Each environment in `config.json` contains:
   "environments": {
     "sandbox": {
       "apiUrl": "https://api.sandbox.prisme.ai/v2",
-      "studioUrl": "https://sandbox.prisme.ai"
+      "studioUrl": "https://sandbox.prisme.ai",
+      "nodeExtraCaCerts": "/absolute/path/to/company-ca.pem"
     },
     "prod": {
       "apiUrl": "https://api.studio.prisme.ai/v2"
@@ -138,6 +139,7 @@ Each environment in `config.json` contains:
 |-------|----------|-------------|
 | `apiUrl` | Yes | Base API URL for this environment |
 | `studioUrl` | No | Studio origin, used to build the token-creation URL. Derived from `apiUrl` when absent. |
+| `nodeExtraCaCerts` | No | Absolute path to a readable PEM CA bundle. The environment trusts it in addition to Node's built-in roots, matching `NODE_EXTRA_CA_CERTS` semantics. |
 | `workspaces` | No | Optional name-to-ID mappings |
 | `default` | No | Marks the default environment |
 
@@ -174,12 +176,12 @@ This path never exposes the token to the chat / LLM provider:
    node "<plugin>/build/index.js" set-token sandbox --config-dir "<config-dir>"
    ```
 
-   It prompts for the token with **hidden input** (or reads `PRISME_TOKEN` from the env), then asks for the Prisme API URL, e.g. `https://api.sandbox.prisme.ai/v2`. If unsure, open the Prisme instance in a browser and copy the API base URL from the Network tab. The CLI validates the token against the API and saves it to `credentials.json` (mode 600). An invalid token saves nothing.
+   It prompts for the token with **hidden input** (or reads `PRISME_TOKEN` from the env), the Prisme API URL, the Studio URL, and an optional `NODE_EXTRA_CA_CERTS` PEM path. The certificate path is stored as `nodeExtraCaCerts` in `config.json`. The CLI uses the extra CA for its token probe, and the MCP uses it for subsequent HTTPS calls. The CLI saves the validated token to `credentials.json` (mode 600); an invalid token or unreadable CA file saves nothing.
 
-   For a brand-new environment, either answer the URL prompt or pass `--api-url` (and optionally `--studio-url`):
+   For a brand-new environment, either answer the prompts or pass `--api-url` with optional `--studio-url` and `--node-extra-ca-certs` flags:
 
    ```bash
-   node "<plugin>/build/index.js" set-token custom --api-url https://api.custom.prisme.ai/v2 --config-dir "<config-dir>"
+   node "<plugin>/build/index.js" set-token custom --api-url https://api.custom.prisme.ai/v2 --studio-url https://custom.prisme.ai --node-extra-ca-certs /absolute/path/to/company-ca.pem --config-dir "<config-dir>"
    ```
 
 3. Re-run your request. The server re-reads `credentials.json` on the next call, so **no restart is needed**.

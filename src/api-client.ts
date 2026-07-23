@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import FormData from 'form-data';
+import { createExtraCaAgent } from './tls.js';
 
 export interface EnvironmentConfig {
     apiUrl: string;
@@ -7,6 +8,7 @@ export interface EnvironmentConfig {
     workspaces?: Record<string, string>;
     default?: boolean;
     studioUrl?: string;
+    nodeExtraCaCerts?: string;
 }
 
 export interface EnvironmentsConfig {
@@ -267,11 +269,32 @@ export class PrismeApiClient {
         this.reloadTokens = config.reloadTokens;
         this.client = axios.create({
             baseURL: config.baseUrl,
+            ...this.tlsOptions(config.baseUrl, config.defaultEnvironment),
             headers: {
                 'Authorization': `Bearer ${config.apiKey}`,
                 'Content-Type': 'application/json',
             },
         });
+    }
+
+    /**
+     * Resolve the per-environment CA bundle for an API URL. The resulting
+     * httpsAgent extends Node's built-in roots with the configured PEM bundle.
+     */
+    private tlsOptions(apiUrl?: string, environment?: string): { httpsAgent?: ReturnType<typeof createExtraCaAgent> } {
+        let envConfig = environment ? this.environments[environment] : undefined;
+        if (!envConfig && apiUrl) {
+            envConfig = Object.values(this.environments).find((env) => env.apiUrl === apiUrl);
+        }
+        if (
+            !envConfig &&
+            this.defaultEnvironment &&
+            (!apiUrl || apiUrl === this.baseUrl)
+        ) {
+            envConfig = this.environments[this.defaultEnvironment];
+        }
+        const httpsAgent = createExtraCaAgent(envConfig?.nodeExtraCaCerts);
+        return httpsAgent ? { httpsAgent } : {};
     }
 
     /**
@@ -297,7 +320,7 @@ export class PrismeApiClient {
             `No credentials for environment \`${envName ?? 'default'}\`.\n\n` +
                 `Recommended (keeps your token private — it never enters this chat or reaches the LLM provider):\n` +
                 `1. ${createLine}\n` +
-                `2. Run this in your OWN terminal as one shell command. Copy the next line exactly; do not insert line breaks inside quoted paths. The CLI prompts for the token with hidden input, then asks for the Prisme API URL (for example https://api.sandbox.prisme.ai/v2). If unsure, open the Prisme instance in a browser and copy the API base URL from the Network tab:\n\n` +
+                `2. Run this in your OWN terminal as one shell command. Copy the next line exactly; do not insert line breaks inside quoted paths. The CLI prompts for the token with hidden input, the Prisme API and Studio URLs, and an optional NODE_EXTRA_CA_CERTS PEM path:\n\n` +
                 `   ${cliCommand}\n\n` +
                 `3. Re-run your request.\n\n` +
                 `Alternative: paste the token to me and I will call the \`set_token\` tool — but be aware the token would then be sent over the network to the LLM provider as part of this conversation.`
@@ -372,6 +395,7 @@ export class PrismeApiClient {
             this.apiKey = apiKey;
             this.client = axios.create({
                 baseURL: this.baseUrl,
+                ...this.tlsOptions(this.baseUrl, environment),
                 headers: {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json',
@@ -390,6 +414,7 @@ export class PrismeApiClient {
             this.apiKey = config.apiKey;
             this.client = axios.create({
                 baseURL: this.baseUrl,
+                ...this.tlsOptions(this.baseUrl, environment),
                 headers: {
                     'Authorization': `Bearer ${config.apiKey}`,
                     'Content-Type': 'application/json',
@@ -403,10 +428,12 @@ export class PrismeApiClient {
      * (GET /me). Returns the authenticated user on success; throws on 401/403
      * or network failure. Nothing is persisted here.
      */
-    async probeToken(apiUrl: string, token: string): Promise<any> {
+    async probeToken(apiUrl: string, token: string, nodeExtraCaCerts?: string): Promise<any> {
+        const httpsAgent = createExtraCaAgent(nodeExtraCaCerts);
         const probeClient = axios.create({
             baseURL: apiUrl,
             timeout: 15000,
+            ...(httpsAgent ? { httpsAgent } : {}),
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json',
@@ -427,6 +454,7 @@ export class PrismeApiClient {
         // Create a new client instance for this specific request
         return axios.create({
             baseURL: apiUrl || this.baseUrl,
+            ...this.tlsOptions(apiUrl || this.baseUrl, environment),
             headers: {
                 'Authorization': `Bearer ${effectiveApiKey}`,
                 'Content-Type': 'application/json',
@@ -480,6 +508,7 @@ export class PrismeApiClient {
                 params: params.query,
                 data: params.body,
                 headers,
+                ...this.tlsOptions(apiUrl || this.baseUrl, params.environment),
             });
         } else if (params.asSession) {
             // Session mode: send the token as the `access-token` cookie (NOT as a
@@ -498,6 +527,7 @@ export class PrismeApiClient {
                     Cookie: `access-token=${effectiveApiKey}`,
                     'Content-Type': 'application/json',
                 },
+                ...this.tlsOptions(apiUrl || this.baseUrl, params.environment),
             });
         } else {
             const client = this.getClient(apiUrl, params.environment);
@@ -921,10 +951,11 @@ export class PrismeApiClient {
     }
 
     // Get client for AI Knowledge API (uses api key header instead of Bearer token)
-    private getAIKnowledgeClient(apiKey: string, apiUrl?: string): AxiosInstance {
+    private getAIKnowledgeClient(apiKey: string, apiUrl?: string, environment?: string): AxiosInstance {
         const baseUrl = this.getAIKnowledgeBaseUrl(apiUrl);
         return axios.create({
             baseURL: baseUrl,
+            ...this.tlsOptions(apiUrl || this.baseUrl, environment),
             headers: {
                 'knowledge-project-apikey': apiKey,
                 'Content-Type': 'application/json',
@@ -1039,6 +1070,7 @@ export class PrismeApiClient {
             const baseUrl = this.getAIKnowledgeBaseUrl(apiUrl);
             client = axios.create({
                 baseURL: baseUrl,
+                ...this.tlsOptions(apiUrl || this.baseUrl, environment),
                 headers: {
                     'Authorization': `Bearer ${this.getApiKeyForEnvironment(environment)}`,
                     'Content-Type': 'application/json',
@@ -1048,7 +1080,7 @@ export class PrismeApiClient {
             if (auth.type !== 'apiKey') {
                 throw new Error(`Method "${method}" requires project apiKey, not Bearer token`);
             }
-            client = this.getAIKnowledgeClient(auth.apiKey, apiUrl);
+            client = this.getAIKnowledgeClient(auth.apiKey, apiUrl, environment);
         }
 
         switch (method) {

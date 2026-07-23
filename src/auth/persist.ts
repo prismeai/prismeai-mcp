@@ -8,6 +8,8 @@ export const CREDENTIALS_FILE = "credentials.json";
 export interface StoredEnvironment {
   apiUrl: string;
   studioUrl?: string;
+  /** Absolute path to a PEM CA bundle, with NODE_EXTRA_CA_CERTS semantics. */
+  nodeExtraCaCerts?: string;
   workspaces?: Record<string, string>;
   default?: boolean;
 }

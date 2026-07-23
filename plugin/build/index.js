@@ -11721,10 +11721,10 @@ var init_CanceledError = __esm({
 });
 
 // node_modules/axios/lib/core/settle.js
-function settle(resolve2, reject, response) {
+function settle(resolve3, reject, response) {
   const validateStatus2 = response.config.validateStatus;
   if (!response.status || !validateStatus2 || validateStatus2(response.status)) {
-    resolve2(response);
+    resolve3(response);
   } else {
     reject(new AxiosError_default(
       "Request failed with status code " + response.status,
@@ -13691,7 +13691,7 @@ var init_http = __esm({
     http2Sessions = new Http2Sessions();
     isHttpAdapterSupported = typeof process !== "undefined" && utils_default.kindOf(process) === "process";
     wrapAsync = (asyncExecutor) => {
-      return new Promise((resolve2, reject) => {
+      return new Promise((resolve3, reject) => {
         let onDone;
         let isDone;
         const done = (value, isRejected) => {
@@ -13701,7 +13701,7 @@ var init_http = __esm({
         };
         const _resolve = (value) => {
           done(value);
-          resolve2(value);
+          resolve3(value);
         };
         const _reject = (reason) => {
           done(reason, true);
@@ -13753,7 +13753,7 @@ var init_http = __esm({
       }
     };
     http_default = isHttpAdapterSupported && function httpAdapter(config) {
-      return wrapAsync(async function dispatchHttpRequest(resolve2, reject, onDone) {
+      return wrapAsync(async function dispatchHttpRequest(resolve3, reject, onDone) {
         let { data: data2, lookup, family, httpVersion = 1, http2Options } = config;
         const { responseType, responseEncoding } = config;
         const method = config.method.toUpperCase();
@@ -13838,7 +13838,7 @@ var init_http = __esm({
           }
           let convertedData;
           if (method !== "GET") {
-            return settle(resolve2, reject, {
+            return settle(resolve3, reject, {
               status: 405,
               statusText: "method not allowed",
               headers: {},
@@ -13860,7 +13860,7 @@ var init_http = __esm({
           } else if (responseType === "stream") {
             convertedData = stream3.Readable.from(convertedData);
           }
-          return settle(resolve2, reject, {
+          return settle(resolve3, reject, {
             data: convertedData,
             status: 200,
             statusText: "OK",
@@ -14079,7 +14079,7 @@ var init_http = __esm({
           };
           if (responseType === "stream") {
             response.data = responseStream;
-            settle(resolve2, reject, response);
+            settle(resolve3, reject, response);
           } else {
             const responseBuffer = [];
             let totalResponseBytes = 0;
@@ -14127,7 +14127,7 @@ var init_http = __esm({
               } catch (err) {
                 return reject(AxiosError_default.from(err, null, config, response.request, response));
               }
-              settle(resolve2, reject, response);
+              settle(resolve3, reject, response);
             });
           }
           abortEmitter.once("abort", (err) => {
@@ -14425,7 +14425,7 @@ var init_xhr = __esm({
     init_resolveConfig();
     isXHRAdapterSupported = typeof XMLHttpRequest !== "undefined";
     xhr_default = isXHRAdapterSupported && function(config) {
-      return new Promise(function dispatchXhrRequest(resolve2, reject) {
+      return new Promise(function dispatchXhrRequest(resolve3, reject) {
         const _config = resolveConfig_default(config);
         let requestData = _config.data;
         const requestHeaders = AxiosHeaders_default.from(_config.headers).normalize();
@@ -14459,7 +14459,7 @@ var init_xhr = __esm({
             request
           };
           settle(function _resolve(value) {
-            resolve2(value);
+            resolve3(value);
             done();
           }, function _reject(err) {
             reject(err);
@@ -14857,8 +14857,8 @@ var init_fetch = __esm({
           responseType = responseType || "text";
           let responseData = await resolvers[utils_default.findKey(resolvers, responseType) || "text"](response, config);
           !isStreamResponse && unsubscribe && unsubscribe();
-          return await new Promise((resolve2, reject) => {
-            settle(resolve2, reject, {
+          return await new Promise((resolve3, reject) => {
+            settle(resolve3, reject, {
               data: responseData,
               headers: AxiosHeaders_default.from(response.headers),
               status: response.status,
@@ -15304,8 +15304,8 @@ var init_CancelToken = __esm({
           throw new TypeError("executor must be a function.");
         }
         let resolvePromise;
-        this.promise = new Promise(function promiseExecutor(resolve2) {
-          resolvePromise = resolve2;
+        this.promise = new Promise(function promiseExecutor(resolve3) {
+          resolvePromise = resolve3;
         });
         const token = this;
         this.promise.then((cancel) => {
@@ -15318,9 +15318,9 @@ var init_CancelToken = __esm({
         });
         this.promise.then = (onfulfilled) => {
           let _resolve;
-          const promise = new Promise((resolve2) => {
-            token.subscribe(resolve2);
-            _resolve = resolve2;
+          const promise = new Promise((resolve3) => {
+            token.subscribe(resolve3);
+            _resolve = resolve3;
           }).then(onfulfilled);
           promise.cancel = function reject() {
             token.unsubscribe(_resolve);
@@ -15670,13 +15670,56 @@ var init_persist = __esm({
   }
 });
 
+// src/tls.ts
+import { readFileSync as readFileSync2 } from "fs";
+import { Agent } from "https";
+import { createSecureContext, rootCertificates } from "tls";
+function createExtraCaAgent(nodeExtraCaCerts) {
+  if (!nodeExtraCaCerts) return void 0;
+  const cached = extraCaAgents.get(nodeExtraCaCerts);
+  if (cached) return cached;
+  let extraCa;
+  try {
+    extraCa = readFileSync2(nodeExtraCaCerts, "utf8");
+  } catch (error) {
+    throw new Error(
+      `Could not read NODE_EXTRA_CA_CERTS file "${nodeExtraCaCerts}": ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (!extraCa.includes("-----BEGIN CERTIFICATE-----")) {
+    throw new Error(
+      `NODE_EXTRA_CA_CERTS file "${nodeExtraCaCerts}" does not contain a PEM certificate`
+    );
+  }
+  try {
+    createSecureContext({ ca: extraCa });
+  } catch (error) {
+    throw new Error(
+      `NODE_EXTRA_CA_CERTS file "${nodeExtraCaCerts}" is not a valid PEM CA bundle: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  const agent = new Agent({
+    ca: [...rootCertificates, extraCa]
+  });
+  extraCaAgents.set(nodeExtraCaCerts, agent);
+  return agent;
+}
+var extraCaAgents;
+var init_tls = __esm({
+  "src/tls.ts"() {
+    "use strict";
+    extraCaAgents = /* @__PURE__ */ new Map();
+  }
+});
+
 // src/cli.ts
 var cli_exports = {};
 __export(cli_exports, {
   runCli: () => runCli
 });
-import { existsSync, readFileSync as readFileSync2 } from "fs";
-import { dirname, join as join2 } from "path";
+import { existsSync, readFileSync as readFileSync3 } from "fs";
+import { homedir as homedir2 } from "os";
+import { dirname, isAbsolute, join as join2, resolve } from "path";
 import { fileURLToPath } from "url";
 import { createInterface } from "readline";
 function parseArgs(argv) {
@@ -15715,6 +15758,14 @@ function cleanApiUrl(value) {
   url2.hash = "";
   return url2.toString().replace(/\/$/, "");
 }
+function cleanStudioUrl(value) {
+  const input = normalizeUrlInput(value);
+  const url2 = new URL(input);
+  url2.pathname = "";
+  url2.search = "";
+  url2.hash = "";
+  return url2.toString().replace(/\/$/, "");
+}
 function deriveStudioUrl(value) {
   const input = normalizeUrlInput(value);
   try {
@@ -15728,6 +15779,11 @@ function deriveStudioUrl(value) {
     return void 0;
   }
 }
+function cleanExtraCaCertsPath(value) {
+  const unquoted = value.trim().replace(/^(["'])(.*)\1$/, "$2");
+  const expanded = unquoted === "~" ? homedir2() : unquoted.startsWith("~/") ? join2(homedir2(), unquoted.slice(2)) : unquoted;
+  return isAbsolute(expanded) ? expanded : resolve(expanded);
+}
 function loadShippedDefaults() {
   const candidates = [
     join2(__dirname, "..", "config", "default-environments.json"),
@@ -15736,7 +15792,7 @@ function loadShippedDefaults() {
   for (const path of candidates) {
     if (existsSync(path)) {
       try {
-        return JSON.parse(readFileSync2(path, "utf-8"));
+        return JSON.parse(readFileSync3(path, "utf-8"));
       } catch {
       }
     }
@@ -15744,14 +15800,14 @@ function loadShippedDefaults() {
   return void 0;
 }
 function promptHidden(question) {
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     const input = process.stdin;
     const output = process.stderr;
     if (!input.isTTY) {
       let data2 = "";
       input.setEncoding("utf8");
       input.on("data", (chunk) => data2 += chunk);
-      input.on("end", () => resolve2(data2.split(/\r?\n/)[0]?.trim() ?? ""));
+      input.on("end", () => resolve3(data2.split(/\r?\n/)[0]?.trim() ?? ""));
       return;
     }
     const rl = createInterface({ input, output });
@@ -15766,22 +15822,22 @@ function promptHidden(question) {
     rl.question("", (answer) => {
       rl.close();
       output.write("\n");
-      resolve2(answer.trim());
+      resolve3(answer.trim());
     });
   });
 }
 function promptLine(question) {
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     const input = process.stdin;
     const output = process.stdout;
     if (!input.isTTY) {
-      resolve2("");
+      resolve3("");
       return;
     }
     const rl = createInterface({ input, output });
     rl.question(question, (answer) => {
       rl.close();
-      resolve2(answer.trim());
+      resolve3(answer.trim());
     });
   });
 }
@@ -15814,9 +15870,10 @@ function printUsage() {
       "API before being saved to the config dir (credentials.json, mode 600).",
       "",
       "Options:",
-      "  --api-url <url>      API base URL (optional; prompts if missing)",
-      "  --studio-url <url>   Studio origin (optional; used for token-creation links)",
-      "  --config-dir <dir>   Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
+      "  --api-url <url>                   API base URL (optional; prompts if missing)",
+      "  --studio-url <url>                Studio origin (optional; prompts interactively)",
+      "  --node-extra-ca-certs <pem-path>  Extra trusted CA bundle for this environment",
+      "  --config-dir <dir>                Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
       "",
       "The token is read from an interactive hidden prompt, or from the PRISME_TOKEN",
       "env var if set. Avoid passing it as a plain argument (shell history leak).",
@@ -15866,8 +15923,19 @@ async function runCli(argv) {
   const exampleApiUrl = fallbackExisting?.apiUrl ?? "https://api.sandbox.prisme.ai/v2";
   const apiUrlFlag = flagString(flags, "api-url");
   const studioUrlFlag = flagString(flags, "studio-url");
-  let apiUrl = apiUrlFlag ? cleanApiUrl(apiUrlFlag) : existing?.apiUrl;
-  let studioUrl = studioUrlFlag ?? existing?.studioUrl;
+  const extraCaCertsFlag = flagString(flags, "node-extra-ca-certs");
+  let apiUrl;
+  let studioUrl;
+  try {
+    apiUrl = apiUrlFlag ? cleanApiUrl(apiUrlFlag) : existing?.apiUrl;
+    studioUrl = studioUrlFlag ? cleanStudioUrl(studioUrlFlag) : existing?.studioUrl;
+  } catch (error) {
+    console.error(
+      `Invalid URL: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return 1;
+  }
+  let nodeExtraCaCerts = extraCaCertsFlag ? cleanExtraCaCertsPath(extraCaCertsFlag) : existing?.nodeExtraCaCerts;
   if (!apiUrl && !process.stdin.isTTY) {
     console.error(
       `No API URL provided. Pass --api-url, e.g. --api-url ${exampleApiUrl}`
@@ -15897,11 +15965,35 @@ async function runCli(argv) {
         return 1;
       }
     }
+    const suggestedStudioUrl = studioUrl ?? (apiUrl ? deriveStudioUrl(apiUrl) : void 0);
+    const studioPrompt = suggestedStudioUrl ? `Studio URL [${suggestedStudioUrl}]: ` : "Studio URL (e.g. https://sandbox.prisme.ai): ";
+    const studioInput = await promptLine(studioPrompt);
+    try {
+      studioUrl = studioInput ? cleanStudioUrl(studioInput) : suggestedStudioUrl;
+    } catch {
+      console.error(
+        `Invalid Studio URL "${studioInput}". Use the Studio origin, e.g. https://sandbox.prisme.ai.`
+      );
+      return 1;
+    }
+    const extraCaPrompt = nodeExtraCaCerts ? `NODE_EXTRA_CA_CERTS PEM path (optional) [${nodeExtraCaCerts}]: ` : "NODE_EXTRA_CA_CERTS PEM path (optional; press Enter to skip): ";
+    const extraCaInput = await promptLine(extraCaPrompt);
+    if (extraCaInput) {
+      nodeExtraCaCerts = cleanExtraCaCertsPath(extraCaInput);
+    }
   }
   if (!apiUrl) {
     console.error(
       `No API URL provided. Aborting; nothing was saved. Use the API base URL, e.g. ${exampleApiUrl}.`
     );
+    return 1;
+  }
+  let httpsAgent;
+  try {
+    httpsAgent = createExtraCaAgent(nodeExtraCaCerts);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    console.error("Aborting; nothing was saved.");
     return 1;
   }
   process.stdout.write(`Validating token against ${apiUrl} ... `);
@@ -15910,7 +16002,8 @@ async function runCli(argv) {
     const probe = axios_default.create({
       baseURL: apiUrl,
       timeout: 15e3,
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      ...httpsAgent ? { httpsAgent } : {}
     });
     const response = await probe.get("/me");
     me = response.data;
@@ -15927,7 +16020,8 @@ async function runCli(argv) {
   const merged = {
     ...fallbackExisting ?? {},
     apiUrl,
-    ...studioUrl ? { studioUrl } : {}
+    ...studioUrl ? { studioUrl } : {},
+    ...nodeExtraCaCerts ? { nodeExtraCaCerts } : {}
   };
   topology.environments[environment] = merged;
   try {
@@ -15952,6 +16046,7 @@ var init_cli = __esm({
     "use strict";
     init_axios2();
     init_persist();
+    init_tls();
     __dirname = dirname(fileURLToPath(import.meta.url));
   }
 });
@@ -21344,7 +21439,7 @@ var init_protocol = __esm({
        */
       request(request, resultSchema, options) {
         const { relatedRequestId, resumptionToken, onresumptiontoken } = options !== null && options !== void 0 ? options : {};
-        return new Promise((resolve2, reject) => {
+        return new Promise((resolve3, reject) => {
           var _a, _b, _c, _d, _e, _f;
           if (!this._transport) {
             reject(new Error("Not connected"));
@@ -21395,7 +21490,7 @@ var init_protocol = __esm({
             }
             try {
               const result = resultSchema.parse(response.result);
-              resolve2(result);
+              resolve3(result);
             } catch (error) {
               reject(error);
             }
@@ -24444,7 +24539,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref2];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve2.call(this, root, ref2);
+      let _sch = resolve3.call(this, root, ref2);
       if (_sch === void 0) {
         const schema2 = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref2];
         const { schemaId } = this.opts;
@@ -24471,7 +24566,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve2(root, ref2) {
+    function resolve3(root, ref2) {
       let sch;
       while (typeof (sch = this.refs[ref2]) == "string")
         ref2 = sch;
@@ -25046,7 +25141,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve2(baseURI, relativeURI, options) {
+    function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -25273,7 +25368,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve2,
+      resolve: resolve3,
       resolveComponent,
       equal,
       serialize,
@@ -28648,12 +28743,12 @@ var init_stdio2 = __esm({
         (_a = this.onclose) === null || _a === void 0 ? void 0 : _a.call(this);
       }
       send(message) {
-        return new Promise((resolve2) => {
+        return new Promise((resolve3) => {
           const json2 = serializeMessage(message);
           if (this._stdout.write(json2)) {
-            resolve2();
+            resolve3();
           } else {
-            this._stdout.once("drain", resolve2);
+            this._stdout.once("drain", resolve3);
           }
         });
       }
@@ -28682,6 +28777,7 @@ var init_api_client = __esm({
     "use strict";
     init_axios2();
     import_form_data2 = __toESM(require_form_data(), 1);
+    init_tls();
     PrismeApiClient = class _PrismeApiClient {
       constructor(config) {
         this.workspaceId = config.workspaceId;
@@ -28694,11 +28790,27 @@ var init_api_client = __esm({
         this.reloadTokens = config.reloadTokens;
         this.client = axios_default.create({
           baseURL: config.baseUrl,
+          ...this.tlsOptions(config.baseUrl, config.defaultEnvironment),
           headers: {
             "Authorization": `Bearer ${config.apiKey}`,
             "Content-Type": "application/json"
           }
         });
+      }
+      /**
+       * Resolve the per-environment CA bundle for an API URL. The resulting
+       * httpsAgent extends Node's built-in roots with the configured PEM bundle.
+       */
+      tlsOptions(apiUrl, environment) {
+        let envConfig = environment ? this.environments[environment] : void 0;
+        if (!envConfig && apiUrl) {
+          envConfig = Object.values(this.environments).find((env) => env.apiUrl === apiUrl);
+        }
+        if (!envConfig && this.defaultEnvironment && (!apiUrl || apiUrl === this.baseUrl)) {
+          envConfig = this.environments[this.defaultEnvironment];
+        }
+        const httpsAgent = createExtraCaAgent(envConfig?.nodeExtraCaCerts);
+        return httpsAgent ? { httpsAgent } : {};
       }
       /**
        * Build the actionable "no credentials" error. It recommends the out-of-band
@@ -28720,7 +28832,7 @@ var init_api_client = __esm({
 
 Recommended (keeps your token private \u2014 it never enters this chat or reaches the LLM provider):
 1. ${createLine}
-2. Run this in your OWN terminal as one shell command. Copy the next line exactly; do not insert line breaks inside quoted paths. The CLI prompts for the token with hidden input, then asks for the Prisme API URL (for example https://api.sandbox.prisme.ai/v2). If unsure, open the Prisme instance in a browser and copy the API base URL from the Network tab:
+2. Run this in your OWN terminal as one shell command. Copy the next line exactly; do not insert line breaks inside quoted paths. The CLI prompts for the token with hidden input, the Prisme API and Studio URLs, and an optional NODE_EXTRA_CA_CERTS PEM path:
 
    ${cliCommand}
 
@@ -28789,6 +28901,7 @@ Agents should use the /prisme-ai:setup skill for the setup workflow.`
           this.apiKey = apiKey;
           this.client = axios_default.create({
             baseURL: this.baseUrl,
+            ...this.tlsOptions(this.baseUrl, environment),
             headers: {
               "Authorization": `Bearer ${apiKey}`,
               "Content-Type": "application/json"
@@ -28806,6 +28919,7 @@ Agents should use the /prisme-ai:setup skill for the setup workflow.`
           this.apiKey = config.apiKey;
           this.client = axios_default.create({
             baseURL: this.baseUrl,
+            ...this.tlsOptions(this.baseUrl, environment),
             headers: {
               "Authorization": `Bearer ${config.apiKey}`,
               "Content-Type": "application/json"
@@ -28818,10 +28932,12 @@ Agents should use the /prisme-ai:setup skill for the setup workflow.`
        * (GET /me). Returns the authenticated user on success; throws on 401/403
        * or network failure. Nothing is persisted here.
        */
-      async probeToken(apiUrl, token) {
+      async probeToken(apiUrl, token, nodeExtraCaCerts) {
+        const httpsAgent = createExtraCaAgent(nodeExtraCaCerts);
         const probeClient = axios_default.create({
           baseURL: apiUrl,
           timeout: 15e3,
+          ...httpsAgent ? { httpsAgent } : {},
           headers: {
             "Authorization": `Bearer ${token}`,
             "Content-Type": "application/json"
@@ -28838,6 +28954,7 @@ Agents should use the /prisme-ai:setup skill for the setup workflow.`
         }
         return axios_default.create({
           baseURL: apiUrl || this.baseUrl,
+          ...this.tlsOptions(apiUrl || this.baseUrl, environment),
           headers: {
             "Authorization": `Bearer ${effectiveApiKey}`,
             "Content-Type": "application/json"
@@ -28869,7 +28986,8 @@ Agents should use the /prisme-ai:setup skill for the setup workflow.`
             method,
             params: params.query,
             data: params.body,
-            headers
+            headers,
+            ...this.tlsOptions(apiUrl || this.baseUrl, params.environment)
           });
         } else if (params.asSession) {
           const effectiveApiKey = this.getApiKeyForEnvironment(params.environment);
@@ -28882,7 +29000,8 @@ Agents should use the /prisme-ai:setup skill for the setup workflow.`
             headers: {
               Cookie: `access-token=${effectiveApiKey}`,
               "Content-Type": "application/json"
-            }
+            },
+            ...this.tlsOptions(apiUrl || this.baseUrl, params.environment)
           });
         } else {
           const client = this.getClient(apiUrl, params.environment);
@@ -29225,10 +29344,11 @@ Agents should use the /prisme-ai:setup skill for the setup workflow.`
         return `${baseApiUrl}/workspaces/${wsId}/webhooks`;
       }
       // Get client for AI Knowledge API (uses api key header instead of Bearer token)
-      getAIKnowledgeClient(apiKey, apiUrl) {
+      getAIKnowledgeClient(apiKey, apiUrl, environment) {
         const baseUrl = this.getAIKnowledgeBaseUrl(apiUrl);
         return axios_default.create({
           baseURL: baseUrl,
+          ...this.tlsOptions(apiUrl || this.baseUrl, environment),
           headers: {
             "knowledge-project-apikey": apiKey,
             "Content-Type": "application/json"
@@ -29378,6 +29498,7 @@ Agents should use the /prisme-ai:setup skill for the setup workflow.`
           const baseUrl = this.getAIKnowledgeBaseUrl(apiUrl);
           client = axios_default.create({
             baseURL: baseUrl,
+            ...this.tlsOptions(apiUrl || this.baseUrl, environment),
             headers: {
               "Authorization": `Bearer ${this.getApiKeyForEnvironment(environment)}`,
               "Content-Type": "application/json"
@@ -29387,7 +29508,7 @@ Agents should use the /prisme-ai:setup skill for the setup workflow.`
           if (auth.type !== "apiKey") {
             throw new Error(`Method "${method}" requires project apiKey, not Bearer token`);
           }
-          client = this.getAIKnowledgeClient(auth.apiKey, apiUrl);
+          client = this.getAIKnowledgeClient(auth.apiKey, apiUrl, environment);
         }
         switch (method) {
           case "get":
@@ -29792,7 +29913,7 @@ var require_main = __commonJS({
 });
 
 // src/config.ts
-import { existsSync as existsSync2, readFileSync as readFileSync3 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync4 } from "fs";
 import { join as join3, dirname as dirname2 } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 function validateEnvironments(parsed) {
@@ -29812,6 +29933,11 @@ function validateEnvironments(parsed) {
     }
     if (config.studioUrl !== void 0 && typeof config.studioUrl !== "string") {
       throw new Error(`Environment "${envName}" studioUrl must be a string if provided`);
+    }
+    if (config.nodeExtraCaCerts !== void 0 && typeof config.nodeExtraCaCerts !== "string") {
+      throw new Error(
+        `Environment "${envName}" nodeExtraCaCerts must be a string if provided`
+      );
     }
     if (config.workspaces !== void 0) {
       if (typeof config.workspaces !== "object" || config.workspaces === null || Array.isArray(config.workspaces)) {
@@ -29846,7 +29972,7 @@ function loadEnvironments() {
   ].find((p) => existsSync2(p)) ?? "";
   try {
     if (shippedDefault && existsSync2(shippedDefault)) {
-      const parsed = JSON.parse(readFileSync3(shippedDefault, "utf-8"));
+      const parsed = JSON.parse(readFileSync4(shippedDefault, "utf-8"));
       return {
         environments: validateEnvironments(parsed.environments),
         defaultName: parsed.defaultEnvironment
@@ -31822,7 +31948,7 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
       },
       {
         name: "set_token",
-        description: "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead \u2014 tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error). When relaying that command, preserve it as one shell command and do not insert line breaks inside quoted paths. It prompts for the token with hidden input, then asks for the Prisme API URL, e.g. `https://api.sandbox.prisme.ai/v2`; if unsure, the user can find it in the browser Network tab while loading the Prisme instance. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl) to register an environment that is not configured yet.",
+        description: "Register (or rotate) a user-created Prisme.ai API token for an environment. PRIVACY: calling this tool means the token travels through the conversation and is sent to the LLM provider. PREFER the out-of-band CLI instead \u2014 tell the user to run `node <plugin>/build/index.js set-token <environment> --config-dir <dir>` in their own terminal (the exact command is included in the 'no credentials' error). When relaying that command, preserve it as one shell command and do not insert line breaks inside quoted paths. It prompts for the token with hidden input, then asks for the Prisme API URL, Studio URL, and an optional NODE_EXTRA_CA_CERTS PEM path. Only use this tool if the user explicitly chooses to paste the token here despite that. The token is validated with a probe call to the API before being persisted to the MCP config dir (credentials.json, mode 600); an invalid token persists nothing. Pass apiUrl (and optionally studioUrl and nodeExtraCaCerts) to register an environment that is not configured yet.",
         inputSchema: {
           type: "object",
           properties: {
@@ -31841,6 +31967,10 @@ For methods using Bearer token, use workspaceName/environment to resolve credent
             studioUrl: {
               type: "string",
               description: "Studio origin for the environment (e.g. https://sandbox.prisme.ai). Optional; used to build token-creation links."
+            },
+            nodeExtraCaCerts: {
+              type: "string",
+              description: "Absolute path to a readable PEM CA bundle. The environment's HTTPS clients trust these certificates in addition to Node's built-in roots, matching NODE_EXTRA_CA_CERTS semantics."
             }
           },
           required: ["environment", "token"]
@@ -34175,10 +34305,10 @@ var require_adm_zip = __commonJS({
          * @param {function|string} [props.namefix] - optional function to help fix filename
          */
         addLocalFolderPromise: function(localPath2, props) {
-          return new Promise((resolve2, reject) => {
+          return new Promise((resolve3, reject) => {
             this.addLocalFolderAsync2(Object.assign({ localPath: localPath2 }, props), (err, done) => {
               if (err) reject(err);
-              if (done) resolve2(this);
+              if (done) resolve3(this);
             });
           });
         },
@@ -34365,12 +34495,12 @@ var require_adm_zip = __commonJS({
           keepOriginalPermission = get_Bool(false, keepOriginalPermission);
           overwrite = get_Bool(false, overwrite);
           if (!callback) {
-            return new Promise((resolve2, reject) => {
+            return new Promise((resolve3, reject) => {
               this.extractAllToAsync(targetPath, overwrite, keepOriginalPermission, function(err) {
                 if (err) {
                   reject(err);
                 } else {
-                  resolve2(this);
+                  resolve3(this);
                 }
               });
             });
@@ -34468,11 +34598,11 @@ var require_adm_zip = __commonJS({
                  */
         writeZipPromise: function(targetFileName, props) {
           const { overwrite, perm } = Object.assign({ overwrite: true }, props);
-          return new Promise((resolve2, reject) => {
+          return new Promise((resolve3, reject) => {
             if (!targetFileName && opts.filename) targetFileName = opts.filename;
             if (!targetFileName) reject("ADM-ZIP: ZIP File Name Missing");
             this.toBufferPromise().then((zipData) => {
-              const ret = (done) => done ? resolve2(done) : reject("ADM-ZIP: Wasn't able to write zip file");
+              const ret = (done) => done ? resolve3(done) : reject("ADM-ZIP: Wasn't able to write zip file");
               filetools.writeFileToAsync(targetFileName, zipData, overwrite, perm, ret);
             }, reject);
           });
@@ -34481,8 +34611,8 @@ var require_adm_zip = __commonJS({
          * @returns {Promise<Buffer>} A promise to the Buffer.
          */
         toBufferPromise: function() {
-          return new Promise((resolve2, reject) => {
-            _zip.toAsyncBuffer(resolve2, reject);
+          return new Promise((resolve3, reject) => {
+            _zip.toAsyncBuffer(resolve3, reject);
           });
         },
         /**
@@ -40158,7 +40288,7 @@ var require_compile2 = __commonJS({
       const schOrFunc = root.refs[ref2];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve2.call(this, root, ref2);
+      let _sch = resolve3.call(this, root, ref2);
       if (_sch === void 0) {
         const schema2 = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref2];
         const { schemaId } = this.opts;
@@ -40185,7 +40315,7 @@ var require_compile2 = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve2(root, ref2) {
+    function resolve3(root, ref2) {
       let sch;
       while (typeof (sch = this.refs[ref2]) == "string")
         ref2 = sch;
@@ -40760,7 +40890,7 @@ var require_fast_uri2 = __commonJS({
       }
       return uri;
     }
-    function resolve2(baseURI, relativeURI, options) {
+    function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -40987,7 +41117,7 @@ var require_fast_uri2 = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve2,
+      resolve: resolve3,
       resolveComponent,
       equal,
       serialize,
@@ -51062,9 +51192,9 @@ var init_dist = __esm({
 });
 
 // src/tools/handlers.ts
-import { readFileSync as readFileSync4, writeFileSync, existsSync as existsSync3, mkdirSync, readdirSync, statSync } from "fs";
+import { readFileSync as readFileSync5, writeFileSync, existsSync as existsSync3, mkdirSync, readdirSync, statSync } from "fs";
 import { fileURLToPath as fileURLToPath3 } from "url";
-import { basename, dirname as dirname3, join as join4, resolve, extname } from "path";
+import { basename, dirname as dirname3, join as join4, resolve as resolve2, extname } from "path";
 function formatLintErrors(result) {
   const lines = [];
   if (result.valid) {
@@ -51128,7 +51258,7 @@ function getWorkspaceIndexLabels(workspaceDir) {
     };
   }
   try {
-    const parsed = jsYaml.load(readFileSync4(indexPath, "utf-8"));
+    const parsed = jsYaml.load(readFileSync5(indexPath, "utf-8"));
     const labels = parsed && typeof parsed === "object" && "labels" in parsed ? parsed.labels : void 0;
     return {
       indexPath,
@@ -51711,7 +51841,7 @@ ${formatLintErrors(lintResult)}`
           join4(__dirname3, "..", "..", "plugin", "llmDoc", fileName)
         ];
         const docPath = docCandidates.find((p) => existsSync3(p)) ?? docCandidates[0];
-        const documentation = readFileSync4(docPath, "utf-8");
+        const documentation = readFileSync5(docPath, "utf-8");
         return {
           content: [
             {
@@ -51737,7 +51867,7 @@ ${formatLintErrors(lintResult)}`
       const lintOptions = { strict, validateExpressions: validateExprs };
       const validateFile = (filePath) => {
         try {
-          const fileContent = readFileSync4(filePath, "utf-8");
+          const fileContent = readFileSync5(filePath, "utf-8");
           const ext = filePath.toLowerCase();
           const parsed = ext.endsWith(".json") ? JSON.parse(fileContent) : jsYaml.load(fileContent);
           const result = lintAutomation(parsed, lintOptions);
@@ -51764,7 +51894,7 @@ ${formatLintErrors(lintResult)}`
         }
       };
       if (inputPath) {
-        const resolvedPath = resolve(inputPath);
+        const resolvedPath = resolve2(inputPath);
         if (!existsSync3(resolvedPath)) {
           return {
             content: [{ type: "text", text: `Error: Path not found: ${resolvedPath}` }],
@@ -51984,7 +52114,7 @@ ${formatLintErrors(lintResult)}`
         workspaceName,
         environment
       } = args;
-      const resolvedPath = resolve(targetPath);
+      const resolvedPath = resolve2(targetPath);
       const resolved = resolveWorkspaceAndEnvironment({
         workspaceId,
         workspaceName,
@@ -52053,7 +52183,7 @@ ${formatLintErrors(lintResult)}`
         workspaceName,
         environment
       } = args;
-      const resolvedPath = resolve(sourcePath);
+      const resolvedPath = resolve2(sourcePath);
       const resolved = resolveWorkspaceAndEnvironment({
         workspaceId,
         workspaceName,
@@ -52212,7 +52342,7 @@ ${formatLintErrors(lintResult)}`
       let resolvedFileName = fileName;
       let resolvedContentType = contentType;
       if (filePath) {
-        const absPath = resolve(filePath);
+        const absPath = resolve2(filePath);
         if (!existsSync3(absPath)) {
           return {
             content: [
@@ -52221,7 +52351,7 @@ ${formatLintErrors(lintResult)}`
             isError: true
           };
         }
-        buffer = readFileSync4(absPath);
+        buffer = readFileSync5(absPath);
         if (!resolvedFileName) resolvedFileName = basename(absPath);
         if (!resolvedContentType) resolvedContentType = guessContentType(absPath);
       } else if (fileUrl) {
@@ -52678,7 +52808,7 @@ ${formatLintErrors(lintResult)}`
       };
     }
     case "set_token": {
-      const { environment, token, apiUrl, studioUrl } = args;
+      const { environment, token, apiUrl, studioUrl, nodeExtraCaCerts } = args;
       if (!environment) {
         throw new Error("`environment` is required");
       }
@@ -52695,11 +52825,16 @@ ${formatLintErrors(lintResult)}`
       const envCfg = {
         ...existing ?? {},
         apiUrl: apiUrl ?? existing.apiUrl,
-        ...studioUrl ? { studioUrl } : {}
+        ...studioUrl ? { studioUrl } : {},
+        ...nodeExtraCaCerts ? { nodeExtraCaCerts } : {}
       };
       let me;
       try {
-        me = await apiClient.probeToken(envCfg.apiUrl, token);
+        me = await apiClient.probeToken(
+          envCfg.apiUrl,
+          token,
+          envCfg.nodeExtraCaCerts
+        );
       } catch (err) {
         const status = err?.response?.status;
         const tokenUrl = deriveTokenUrl(envCfg);
@@ -52719,6 +52854,8 @@ ${formatLintErrors(lintResult)}`
       const summary = {
         environment,
         apiUrl: envCfg.apiUrl,
+        studioUrl: envCfg.studioUrl,
+        nodeExtraCaCerts: envCfg.nodeExtraCaCerts,
         validatedAs: me?.email ?? me?.id ?? "(authenticated)",
         persistedTo: credentialsPath
       };
@@ -52868,7 +53005,7 @@ async function startServer() {
       if (axiosError.response) {
         const expiredHint = axiosError.response.status === 401 ? `
 
-The stored token was rejected (expired or revoked). Recommended: re-register it WITHOUT exposing it in this chat \u2014 run the next line in your own terminal as one shell command (copy it exactly; do not insert line breaks inside quoted paths). The CLI prompts for the token, then the Prisme API URL, for example https://api.sandbox.prisme.ai/v2:
+The stored token was rejected (expired or revoked). Recommended: re-register it WITHOUT exposing it in this chat \u2014 run the next line in your own terminal as one shell command (copy it exactly; do not insert line breaks inside quoted paths). The CLI prompts for the token, the Prisme API and Studio URLs, and an optional NODE_EXTRA_CA_CERTS PEM path:
 
    node "${process.argv[1]}" set-token ${defaultEnvironmentName ?? "<environment>"} --config-dir "${getConfigDir()}"
 
