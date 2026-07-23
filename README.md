@@ -85,19 +85,29 @@ Trace this correlationId in sandbox: <id>
 
 ## Updating
 
-Pull plugin updates from the marketplace:
+Update in this order: first refresh the marketplace catalog, then update the
+installed plugin. Refreshing the marketplace alone does not replace the
+installed copy.
 
 ### Claude Code
 
 ```text
 /plugin marketplace update prismeai-mcp
+/plugin update prisme-ai@prismeai-mcp
+/reload-plugins
 ```
 
 ### Codex
 
 ```bash
 codex plugin marketplace upgrade prismeai-mcp
+codex plugin add prisme-ai@prismeai-mcp
 ```
+
+Codex does not currently provide a separate `plugin update` command. Re-running
+`plugin add` after the marketplace upgrade installs the latest version from the
+refreshed catalog. Start a new Codex session (or restart the desktop app) to load
+the updated plugin.
 
 Plugin updates are distributed from the committed source. Maintainers rebuild and commit `plugin/build/index.js` before tagging; CI only verifies that the tagged commit is consistent.
 

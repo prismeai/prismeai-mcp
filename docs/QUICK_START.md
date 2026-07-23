@@ -67,17 +67,27 @@ If no token is registered yet, the error message gives you the exact token-creat
 
 ## Updating
 
+Refresh the marketplace first, then update the installed plugin. Updating only
+the marketplace catalog does not replace the installed copy.
+
 **Claude Code**
 
 ```text
 /plugin marketplace update prismeai-mcp
+/plugin update prisme-ai@prismeai-mcp
+/reload-plugins
 ```
 
 **Codex**
 
 ```bash
 codex plugin marketplace upgrade prismeai-mcp
+codex plugin add prisme-ai@prismeai-mcp
 ```
+
+Codex has no separate `plugin update` command. Re-running `plugin add` installs
+the latest version from the refreshed marketplace. Start a new Codex session
+(or restart the desktop app) afterward.
 
 ---
 
