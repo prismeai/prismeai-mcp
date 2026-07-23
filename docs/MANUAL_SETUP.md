@@ -41,6 +41,7 @@ It prompts for the token with hidden input (or reads `PRISME_TOKEN` from the env
 | `PRISME_WORKSPACES` | No | Legacy workspace name mappings (JSON) |
 | `PRISME_FORCE_READONLY` | No | Block all write operations when `true` |
 | `PRISME_DISABLE_FEEDBACK_TOOLS` | No | Disable feedback tools when `true` (no data sent to Prisme.ai) |
+| `NODE_EXTRA_CA_CERTS` | No | Path to a PEM CA bundle trusted by Node.js for all environments; use `nodeExtraCaCerts` in `config.json` to configure it per environment instead. |
 
 ## Claude Desktop Configuration
 
