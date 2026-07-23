@@ -1,7 +1,6 @@
 ---
 name: app-mcp-implement
 description: Build a brand-new Prisme.ai App+MCP connector for a third-party SaaS using the tenant-context model (no HMAC), an entity-grouped registry driven by a generated OpenAPI spec, multi-mode auth (API key / OAuth2 client-credentials / OAuth2 per-user PKCE / JWT service-account) resolved by buildAppAuth, a central platform OAuth client (token-service model — zero-config `oauthCentral` tenant mode + maintainer view in the config SPA), per-user OAuth tokens resolvable from cron, and a model-B config SPA. Reproduces the validated `salesforce-next` build (+ `google-workspaces` central OAuth) for any service. Use when the user says "build an app+mcp for X", "créer une app+mcp pour X", "implémente un connecteur X". Everything needed is here + in `reference/`.
-argument-hint: '[service-name] [?api-docs-url]'
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, Agent, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__upload_file, mcp__prisme-ai-builder__create_workspace, mcp__prisme-ai-builder__search_workspaces, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__get_app_instance_config, mcp__prisme-ai-builder__update_app_instance_config
 ---
 

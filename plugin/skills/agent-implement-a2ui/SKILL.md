@@ -1,7 +1,6 @@
 ---
 name: agent-implement-a2ui
-description: Add A2UI (Agent-to-UI) surfaces to a Prisme.ai MCP workspace so that LLM agents can render interactive UI through MCP tool calls. Scaffolds an MCP endpoint (or extends an existing one) with tools whose outputs include a __surface payload (components, data_model, actions) that the host UI renders using the prisme://blocks/v1 catalog. Use when the user says "ajoute des surfaces A2UI", "expose une UI via MCP", "/agent-implement-a2ui <workspace> <surfaces>", or wants the agent to draw cards/forms/tables/buttons inside a chat.
-argument-hint: "[workspace-id-or-folder] [surfaces: card, form, table, action-card, feedback, confirmation, loader, custom...]"
+description: Add A2UI (Agent-to-UI) surfaces to a Prisme.ai MCP workspace so that LLM agents can render interactive UI through MCP tool calls. Scaffolds an MCP endpoint (or extends an existing one) with tools whose outputs include a __surface payload (components, data_model, actions) that the host UI renders using the prisme://blocks/v1 catalog. Use when the user says "ajoute des surfaces A2UI", "expose une UI via MCP", "/agent-implement-a2ui WORKSPACE SURFACES", or wants the agent to draw cards/forms/tables/buttons inside a chat.
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent, mcp__prisme-ai-builder__pull_workspace, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__search_workspaces, mcp__prisme-ai-builder__list_automations
 ---
 

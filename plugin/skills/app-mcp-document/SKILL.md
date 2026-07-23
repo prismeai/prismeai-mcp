@@ -1,7 +1,6 @@
 ---
 name: app-mcp-document
-description: Generate public documentation (MDX) for a Prisme.ai App+MCP connector, mirroring the structure of existing pages (gryzzly.mdx, data-galaxy.mdx, …) in the prismeai/docs repo. Produces one `apps-store/marketplace/connectors/<slug>.mdx` page and inserts a matching `<Card>` into `overview.mdx`. Use when the user says "document the X app+mcp", "écris la doc de X", "/app-mcp-document X", or similar. Assumes the source workspace already exists locally (scaffolded by `/app-mcp-implement`).
-argument-hint: "[workspace-slug]"
+description: Generate public documentation (MDX) for a Prisme.ai App+MCP connector, mirroring the structure of existing pages (gryzzly.mdx, data-galaxy.mdx, …) in the prismeai/docs repo. Produces one connector MDX page, inserts its matching overview card, and uses an existing locally scaffolded connector workspace. Use when the user says "document the X app+mcp", "écris la doc de X", "/app-mcp-document X", or similar.
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent
 ---
 

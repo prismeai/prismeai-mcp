@@ -9,6 +9,7 @@
     "build": "cd linter && npm run build && cd .. && tsc",
     "build:bundle": "cd linter && npm run build && cd .. && node scripts/bundle.mjs",
     "test": "npm --prefix linter test",
+    "validate:skills": "node scripts/validate-skills.mjs",
     "validate:versions": "node scripts/validate-plugin-versions.mjs",
     "start": "node plugin/build/index.js",
     "dev": "tsx src/index.ts"
