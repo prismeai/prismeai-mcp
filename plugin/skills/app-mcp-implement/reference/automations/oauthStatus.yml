@@ -20,7 +20,7 @@ do:
   - comment: Non-oauth tenants (jwt / clientCredentials / accessToken) have no per-user connection — report connected so a wrongly-wired status_url never gates their tools.
   - set:
       name: statusMode
-      value: '{% {{config.auth.mode}} || "jwt" %}'
+      value: '{% {{config.authMode}} || "jwt" %}'
   - conditions:
       '{{statusMode}} != "oauth"':
         - set:

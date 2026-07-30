@@ -28,7 +28,15 @@ config:
       description: Salesforce REST API version (e.g. v62.0).
   value:
     apiVersion: v62.0
-    salesforceNextAuth: '{{secret.salesforceNextAuth}}'
+    salesforceNextAuthMode: '{{secret.salesforceNextAuthMode}}'
+    salesforceNextLoginHost: '{{secret.salesforceNextLoginHost}}'
+    salesforceNextJwtUsername: '{{secret.salesforceNextJwtUsername}}'
+    salesforceNextOAuthClientId: '{{secret.salesforceNextOAuthClientId}}'
+    salesforceNextOAuthClientSecret: '{{secret.salesforceNextOAuthClientSecret}}'
+    salesforceNextJwtPrivateKey: '{{secret.salesforceNextJwtPrivateKey}}'
+    salesforceNextAccessToken: '{{secret.salesforceNextAccessToken}}'
+    salesforceNextInstanceUrl: '{{secret.salesforceNextInstanceUrl}}'
+    salesforceNextScopes: '{{secret.salesforceNextScopes}}'
     salesforceNextAuthorizedAgents: '{{secret.salesforceNextAuthorizedAgents}}'
     bundles:
       salesforce-next:
@@ -844,10 +852,41 @@ config:
             description: Response format for the MCP client.
 secrets:
   schema:
-    salesforceNextAuth:
-      type: object
-      title: Salesforce auth config
-      description: Auth mode + credentials, managed by the connector config app.
+    salesforceNextAuthMode:
+      type: string
+      title: Salesforce auth mode
+      ui:widget: password
+    salesforceNextLoginHost:
+      type: string
+      title: Salesforce login host
+      ui:widget: password
+    salesforceNextJwtUsername:
+      type: string
+      title: Salesforce JWT username
+      ui:widget: password
+    salesforceNextOAuthClientId:
+      type: string
+      title: Salesforce OAuth client id
+      ui:widget: password
+    salesforceNextOAuthClientSecret:
+      type: string
+      title: Salesforce OAuth client secret
+      ui:widget: password
+    salesforceNextJwtPrivateKey:
+      type: string
+      title: Salesforce JWT private key
+      ui:widget: password
+    salesforceNextAccessToken:
+      type: string
+      title: Salesforce access token
+      ui:widget: password
+    salesforceNextInstanceUrl:
+      type: string
+      title: Salesforce instance URL
+      ui:widget: password
+    salesforceNextScopes:
+      type: string
+      title: Salesforce OAuth scopes
       ui:widget: password
     salesforceNextAuthorizedAgents:
       type: string

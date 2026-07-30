@@ -1,9 +1,8 @@
 slug: buildAppAuth
 name: /Helpers/buildAppAuth
 description: >-
-  Resolve Salesforce auth from the tenant config object `config.auth`
-  (`{mode, loginHost, jwtUsername, oauthClientId, oauthClientSecret,
-  jwtPrivateKey, accessToken, instanceUrl}`). Supported modes:
+  Resolve Salesforce auth from field-level tenant config values. Each value is
+  backed by its own secret containing one plain value. Supported modes:
   - `jwt` (default): OAuth2 JWT Bearer (Connected App + service-account user).
   - `clientCredentials`: OAuth2 client_credentials grant (Connected App run-as user).
   - `accessToken`: caller-managed access token + instance URL (no exchange).
@@ -13,6 +12,7 @@ private: true
 arguments:
   accessToken:
     type: string
+    secret: true
     description: Pre-resolved access token (bypasses config).
   instanceUrl:
     type: string
@@ -33,7 +33,16 @@ do:
       value: '{% {{apiVersion}} || {{config.apiVersion}} || "v62.0" %}'
   - set:
       name: auth
-      value: '{{config.auth}}'
+      value:
+        mode: '{{config.authMode}}'
+        loginHost: '{{config.loginHost}}'
+        jwtUsername: '{{config.jwtUsername}}'
+        oauthClientId: '{{config.oauthClientId}}'
+        oauthClientSecret: '{{config.oauthClientSecret}}'
+        jwtPrivateKey: '{{config.jwtPrivateKey}}'
+        accessToken: '{{config.accessToken}}'
+        instanceUrl: '{{config.instanceUrl}}'
+        scopes: '{{config.scopes}}'
   - set:
       name: mode
       value: '{% {{auth.mode}} || "jwt" %}'

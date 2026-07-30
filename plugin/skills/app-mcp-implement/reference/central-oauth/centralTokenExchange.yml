@@ -5,11 +5,8 @@ private: true
 when:
   endpoint: true
 do:
-  - set:
-      name: c
-      value: '{{config.centralAuth}}'
   - conditions:
-      '!{{c.oauthClientId}} || !{{c.oauthClientSecret}}':
+      '!{{config.centralOAuthClientId}} || !{{config.centralOAuthClientSecret}}':
         - set:
             name: $http
             value:
@@ -39,16 +36,16 @@ do:
               code: '{{body.code}}'
               code_verifier: '{{body.code_verifier}}'
               redirect_uri: '{{body.redirect_uri}}'
-              client_id: '{{c.oauthClientId}}'
-              client_secret: '{{c.oauthClientSecret}}'
+              client_id: '{{config.centralOAuthClientId}}'
+              client_secret: '{{config.centralOAuthClientSecret}}'
       default:
         - set:
             name: tokenBody
             value:
               grant_type: refresh_token
               refresh_token: '{{body.refresh_token}}'
-              client_id: '{{c.oauthClientId}}'
-              client_secret: '{{c.oauthClientSecret}}'
+              client_id: '{{config.centralOAuthClientId}}'
+              client_secret: '{{config.centralOAuthClientSecret}}'
   - fetch:
       url: https://oauth2.googleapis.com/token
       method: POST

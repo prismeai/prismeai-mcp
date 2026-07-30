@@ -2,7 +2,7 @@ slug: oauthCallback
 name: OAuth/oauthCallback
 description: >-
   OAuth2 authorization-code callback. Validates state, exchanges the code at
-  {loginHost}/services/oauth2/token (config.auth creds + stored code_verifier),
+  {loginHost}/services/oauth2/token (field-level config creds + stored code_verifier),
   stores the token in user scope, then redirects (meta-refresh, CSP-safe) to the
   config SPA callback view (?view=oauthCallback&status=…) which shows the result
   and auto-closes the popup. The redirect URI must equal config.oauthCallbackUrl.
@@ -38,7 +38,10 @@ do:
         - break: {}
   - set:
       name: a
-      value: '{{config.auth}}'
+      value:
+        loginHost: '{{config.loginHost}}'
+        oauthClientId: '{{config.oauthClientId}}'
+        oauthClientSecret: '{{config.oauthClientSecret}}'
   - Custom Code.run:
       function: normalizeLoginHost
       parameters:

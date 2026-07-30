@@ -18,9 +18,10 @@ So the core serves it **operationally**:
 - `centralTokenExchange` — proxies the provider token endpoint, injecting the
   central `client_id`/`client_secret` server-side (grants: `authorization_code`+PKCE,
   `refresh_token`). The secret never leaves the core. `emitErrors: false` on its
-  fetch is MANDATORY (else the secret leaks into `runtime.fetch.failed` events).
-- `setOAuthClient` — maintainer webhook writing the core declared secret
-  `<camel>CentralOAuth = {oauthClientId, oauthClientSecret, scopes}`.
+  fetch uses `emitErrors: false` so the secret is not copied into `runtime.fetch.failed` events.
+- `setOAuthClient` — maintainer webhook writing three core secrets, one plain value per key:
+  `<camel>CentralOAuthClientId`, `<camel>CentralOAuthClientSecret`, and
+  `<camel>CentralOAuthScopes`.
   **Fail-closed role gate** (`user.role` ∈ owner/editor/admin **OR
   `user.platformRole = "superadmin"`**, absent = 403): the PATCH below runs with a
   privileged `auth: workspace: true` JWT, so the caller's RBAC is NOT re-checked by
@@ -33,7 +34,7 @@ So the core serves it **operationally**:
   secret). **Do NOT gate the SPA on `GET /security/secrets`** — that returns an
   empty `200 {}` for non-privileged users (not 403), so the form would render to
   everyone (SKILL.md Gotcha 28).
-- `resolveOAuthClient` — called from tenant context: tenant `config.auth` client
+- `resolveOAuthClient` — called from tenant context: tenant field-level client values
   (full override) → else central via the public webhook. Returns
   `{oauthClientId, oauthClientSecret?, scopes, redirectUri, tokenUrl, central}`.
   `tokenUrl` = provider token URL (tenant client / core fast-path) or the
@@ -54,7 +55,9 @@ code cannot exchange it (no verifier).
 
 ## Wiring checklist (placeholders: `google-workspaces` → `<slug>`, `googleWorkspaces` → `<camel>`, `gws` → `<pfx>`)
 
-1. `index.yml config.value`: `centralAuth: '{{secret.<camel>CentralOAuth}}'`.
+1. `index.yml config.value`: add `centralOAuthClientId`,
+   `centralOAuthClientSecret`, and `centralOAuthScopes` bindings to their matching
+   separate secrets, with one plain value per key.
 2. Copy the 7 automations; swap the Google token/authorize URLs for the provider's.
 3. Custom Code: add `packOAuthState`/`unpackOAuthState` (see
    `customcode-packOAuthState.yml.snippet`).
@@ -69,9 +72,9 @@ code cannot exchange it (no verifier).
    non-maintainers get an "Access restricted" card, never the form** — i18n keys
    (en+fr, incl. `maint.noAccessTitle`/`maint.noAccessBody`).
 7. `validateAgent`: first step short-circuits to `{valid:true, reason:'global_endpoint'}`
-   when `{{config.centralAuth.oauthClientId}}` is set, so the CORE/global MCP
+   when `{{config.centralOAuthClientId}}` is set, so the CORE/global MCP
    endpoint accepts every agent (the allowlist is a tenant-only concern; per-user
-   OAuth is the global gate). No-op in tenants — `centralAuth` is a literal there
+   OAuth is the global gate). No-op in tenants — the core bindings remain unresolved there
    (Gotcha 26/29).
 8. Re-`publish_app` after any core config/automation change — instances run the
    published snapshot (Gotcha 26 / 18-cache).

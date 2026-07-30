@@ -3,10 +3,10 @@ name: MCP/onInstall
 description: >-
   Provision the tenant app-instance on install/configure (tenant-context model,
   NO HMAC key). Sets the MCP endpoint (this instance's own webhook) + the config
-  app link, provisions two tenant secrets — `salesforceAuth` (object: auth
-  mode + credentials) and `salesforceAuthorizedAgents` (agent allowlist) —
-  and writes the two-hop bindings so `config.auth` / `config.authorizedAgents`
-  resolve. Exposed URLs use `slug:<slug>` by default (re-import / rename stable);
+  app link, provisions one tenant secret per auth field, with one plain value per
+  key, plus
+  `salesforceNextAuthorizedAgents`, and writes the two-hop bindings so the matching
+  field-level config values resolve. Exposed URLs use `slug:<slug>` by default;
   the raw id is used only for `/config` + `/security/secrets` (don't resolve slug)
   and — for Microsoft Entra connectors only — the OAuth callback. Idempotent.
 private: true
@@ -83,19 +83,63 @@ do:
       name: provisionCount
       value: 0
   - conditions:
-      '!{{existingSecrets.salesforceAuth}}':
+      '!{{existingSecrets.salesforceNextAuthMode}}':
         - set:
-            name: toProvision.salesforceAuth
-            value:
-              value: {}
-              description: 'Salesforce auth config (managed by the connector config app): { mode, loginHost, jwtUsername, oauthClientId, oauthClientSecret, jwtPrivateKey, accessToken, instanceUrl }.'
-        - set:
-            name: provisionCount
-            value: '{% {{provisionCount}} + 1 %}'
+            name: toProvision.salesforceNextAuthMode
+            value: {value: jwt, description: 'Salesforce auth mode.'}
+        - set: {name: provisionCount, value: '{% {{provisionCount}} + 1 %}'}
   - conditions:
-      '!{{existingSecrets.salesforceAuthorizedAgents}}':
+      '!{{existingSecrets.salesforceNextLoginHost}}':
         - set:
-            name: toProvision.salesforceAuthorizedAgents
+            name: toProvision.salesforceNextLoginHost
+            value: {value: 'https://login.salesforce.com', description: 'Salesforce OAuth login host.'}
+        - set: {name: provisionCount, value: '{% {{provisionCount}} + 1 %}'}
+  - conditions:
+      '!{{existingSecrets.salesforceNextJwtUsername}}':
+        - set:
+            name: toProvision.salesforceNextJwtUsername
+            value: {value: '', description: 'Salesforce JWT username.'}
+        - set: {name: provisionCount, value: '{% {{provisionCount}} + 1 %}'}
+  - conditions:
+      '!{{existingSecrets.salesforceNextOAuthClientId}}':
+        - set:
+            name: toProvision.salesforceNextOAuthClientId
+            value: {value: '', description: 'Salesforce OAuth client id.'}
+        - set: {name: provisionCount, value: '{% {{provisionCount}} + 1 %}'}
+  - conditions:
+      '!{{existingSecrets.salesforceNextOAuthClientSecret}}':
+        - set:
+            name: toProvision.salesforceNextOAuthClientSecret
+            value: {value: '', description: 'Salesforce OAuth client secret.'}
+        - set: {name: provisionCount, value: '{% {{provisionCount}} + 1 %}'}
+  - conditions:
+      '!{{existingSecrets.salesforceNextJwtPrivateKey}}':
+        - set:
+            name: toProvision.salesforceNextJwtPrivateKey
+            value: {value: '', description: 'Salesforce JWT private key.'}
+        - set: {name: provisionCount, value: '{% {{provisionCount}} + 1 %}'}
+  - conditions:
+      '!{{existingSecrets.salesforceNextAccessToken}}':
+        - set:
+            name: toProvision.salesforceNextAccessToken
+            value: {value: '', description: 'Salesforce access token.'}
+        - set: {name: provisionCount, value: '{% {{provisionCount}} + 1 %}'}
+  - conditions:
+      '!{{existingSecrets.salesforceNextInstanceUrl}}':
+        - set:
+            name: toProvision.salesforceNextInstanceUrl
+            value: {value: '', description: 'Salesforce instance URL.'}
+        - set: {name: provisionCount, value: '{% {{provisionCount}} + 1 %}'}
+  - conditions:
+      '!{{existingSecrets.salesforceNextScopes}}':
+        - set:
+            name: toProvision.salesforceNextScopes
+            value: {value: '', description: 'Salesforce OAuth scopes.'}
+        - set: {name: provisionCount, value: '{% {{provisionCount}} + 1 %}'}
+  - conditions:
+      '!{{existingSecrets.salesforceNextAuthorizedAgents}}':
+        - set:
+            name: toProvision.salesforceNextAuthorizedAgents
             value:
               value: ''
               description: 'Comma-separated agentIds authorized to call this connector''s MCP endpoint. Managed by the config app.'
@@ -123,15 +167,19 @@ do:
       Binding B — tenant workspace config.value maps each config key onto its
       secret (a secret reference only resolves inside config.value). Literals
       built via Custom Code. PATCH /config replaces `value`, so GET first + merge.
+  - Custom Code.run: {function: makeSecretRef, parameters: {key: salesforceNextAuthMode}, output: secretRefAuthMode}
+  - Custom Code.run: {function: makeSecretRef, parameters: {key: salesforceNextLoginHost}, output: secretRefLoginHost}
+  - Custom Code.run: {function: makeSecretRef, parameters: {key: salesforceNextJwtUsername}, output: secretRefJwtUsername}
+  - Custom Code.run: {function: makeSecretRef, parameters: {key: salesforceNextOAuthClientId}, output: secretRefOAuthClientId}
+  - Custom Code.run: {function: makeSecretRef, parameters: {key: salesforceNextOAuthClientSecret}, output: secretRefOAuthClientSecret}
+  - Custom Code.run: {function: makeSecretRef, parameters: {key: salesforceNextJwtPrivateKey}, output: secretRefJwtPrivateKey}
+  - Custom Code.run: {function: makeSecretRef, parameters: {key: salesforceNextAccessToken}, output: secretRefAccessToken}
+  - Custom Code.run: {function: makeSecretRef, parameters: {key: salesforceNextInstanceUrl}, output: secretRefInstanceUrl}
+  - Custom Code.run: {function: makeSecretRef, parameters: {key: salesforceNextScopes}, output: secretRefScopes}
   - Custom Code.run:
       function: makeSecretRef
       parameters:
-        key: salesforceAuth
-      output: secretRefAuth
-  - Custom Code.run:
-      function: makeSecretRef
-      parameters:
-        key: salesforceAuthorizedAgents
+        key: salesforceNextAuthorizedAgents
       output: secretRefAllowlist
   - set:
       name: configUrl
@@ -147,11 +195,17 @@ do:
   - set:
       name: newWsValue
       value: '{{curWsConfig.value}}'
+  - set: {name: newWsValue.salesforceNextAuthMode, value: '{{secretRefAuthMode}}'}
+  - set: {name: newWsValue.salesforceNextLoginHost, value: '{{secretRefLoginHost}}'}
+  - set: {name: newWsValue.salesforceNextJwtUsername, value: '{{secretRefJwtUsername}}'}
+  - set: {name: newWsValue.salesforceNextOAuthClientId, value: '{{secretRefOAuthClientId}}'}
+  - set: {name: newWsValue.salesforceNextOAuthClientSecret, value: '{{secretRefOAuthClientSecret}}'}
+  - set: {name: newWsValue.salesforceNextJwtPrivateKey, value: '{{secretRefJwtPrivateKey}}'}
+  - set: {name: newWsValue.salesforceNextAccessToken, value: '{{secretRefAccessToken}}'}
+  - set: {name: newWsValue.salesforceNextInstanceUrl, value: '{{secretRefInstanceUrl}}'}
+  - set: {name: newWsValue.salesforceNextScopes, value: '{{secretRefScopes}}'}
   - set:
-      name: newWsValue.salesforceAuth
-      value: '{{secretRefAuth}}'
-  - set:
-      name: newWsValue.salesforceAuthorizedAgents
+      name: newWsValue.salesforceNextAuthorizedAgents
       value: '{{secretRefAllowlist}}'
   - fetch:
       url: '{{configUrl}}'
@@ -172,15 +226,19 @@ do:
   - comment: >-
       Binding A (terminal merge) — instance config keys point at the tenant
       workspace config.value (binding B). `set: config` merge is terminal — keep last.
+  - Custom Code.run: {function: makeConfigRef, parameters: {key: salesforceNextAuthMode}, output: bindingAuthMode}
+  - Custom Code.run: {function: makeConfigRef, parameters: {key: salesforceNextLoginHost}, output: bindingLoginHost}
+  - Custom Code.run: {function: makeConfigRef, parameters: {key: salesforceNextJwtUsername}, output: bindingJwtUsername}
+  - Custom Code.run: {function: makeConfigRef, parameters: {key: salesforceNextOAuthClientId}, output: bindingOAuthClientId}
+  - Custom Code.run: {function: makeConfigRef, parameters: {key: salesforceNextOAuthClientSecret}, output: bindingOAuthClientSecret}
+  - Custom Code.run: {function: makeConfigRef, parameters: {key: salesforceNextJwtPrivateKey}, output: bindingJwtPrivateKey}
+  - Custom Code.run: {function: makeConfigRef, parameters: {key: salesforceNextAccessToken}, output: bindingAccessToken}
+  - Custom Code.run: {function: makeConfigRef, parameters: {key: salesforceNextInstanceUrl}, output: bindingInstanceUrl}
+  - Custom Code.run: {function: makeConfigRef, parameters: {key: salesforceNextScopes}, output: bindingScopes}
   - Custom Code.run:
       function: makeConfigRef
       parameters:
-        key: salesforceAuth
-      output: bindingAuth
-  - Custom Code.run:
-      function: makeConfigRef
-      parameters:
-        key: salesforceAuthorizedAgents
+        key: salesforceNextAuthorizedAgents
       output: bindingAllowlist
   - set:
       name: config
@@ -188,6 +246,14 @@ do:
       value:
         configAppUrl: '{{configAppUrl}}'
         oauthCallbackUrl: '{{oauthCallbackUrl}}'
-        auth: '{{bindingAuth}}'
+        authMode: '{{bindingAuthMode}}'
+        loginHost: '{{bindingLoginHost}}'
+        jwtUsername: '{{bindingJwtUsername}}'
+        oauthClientId: '{{bindingOAuthClientId}}'
+        oauthClientSecret: '{{bindingOAuthClientSecret}}'
+        jwtPrivateKey: '{{bindingJwtPrivateKey}}'
+        accessToken: '{{bindingAccessToken}}'
+        instanceUrl: '{{bindingInstanceUrl}}'
+        scopes: '{{bindingScopes}}'
         authorizedAgents: '{{bindingAllowlist}}'
 output: '{{configAppUrl}}'

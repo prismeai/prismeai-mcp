@@ -15,7 +15,7 @@ do:
         - Custom Code.run:
             function: normalizeLoginHost
             parameters:
-              rawHost: '{{config.auth.loginHost}}'
+              rawHost: '{{config.loginHost}}'
             output: lh
         - set:
             name: loginHost

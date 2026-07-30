@@ -11,14 +11,16 @@
 // per-user OAuth is the access gate (validateAgent short-circuits to global —
 // README point 7). One catalog entry covers the whole org. See cat.* i18n keys.
 //
-// ACCESS GATE (Gotcha 28): the maintainer view must NEVER show the editable form to a
+// ACCESS GATE (Gotcha 28): do not show the editable form to a
 // non-maintainer. Do NOT infer the role from GET /security/secrets — accessManager.findAll
 // returns an empty 200 {} for non-privileged users (NOT 403), indistinguishable from a
 // not-yet-configured maintainer. Gate on the authoritative `maintainerStatus` webhook
 // (returns { allowed } from user.role, mirroring setOAuthClient). See
 // reference/central-oauth/maintainerStatus.yml.
 
-const CENTRAL_OAUTH_SECRET = 'googleWorkspacesCentralOAuth'
+const CENTRAL_OAUTH_CLIENT_ID_SECRET = 'googleWorkspacesCentralOAuthClientId'
+const CENTRAL_OAUTH_CLIENT_SECRET_SECRET = 'googleWorkspacesCentralOAuthClientSecret'
+const CENTRAL_OAUTH_SCOPES_SECRET = 'googleWorkspacesCentralOAuthScopes'
 // Machine name for the catalog entry (snake_case, matches the connector's MCP tool name).
 const CONNECTOR_TOOL_NAME = 'google_workspaces'
 // The connector's OWN (core) workspace slug — STABLE across environments. Used to
@@ -32,9 +34,8 @@ const CENTRAL_SLUG = 'google-workspaces'
 // Maintainer setup — shown when the SPA is loaded from the CORE workspace itself
 // (no ?workspaceId= tenant param, which the consumer configAppUrl always carries).
 // Lets the maintainer store the central platform Google OAuth client, used as
-// fallback by every tenant that does not provide its own client. The whole client
-// object lives in the core declared secret `googleWorkspacesCentralOAuth`,
-// resolved by resolveOAuthClient through the config.value.centralAuth binding.
+// fallback by every tenant that does not provide its own client. Each field lives
+// under its own core secret as one plain value.
 function MaintainerSetup(props: Props) {
   const { sdk, workspace } = props
   const host = resolveHost(sdk)
@@ -97,11 +98,13 @@ function MaintainerSetup(props: Props) {
         }
         if (!r.ok) throw new Error(t('msg.saveFailed', { status: r.status }))
         const secrets = (await r.json().catch(() => ({}))) || {}
-        const c = (secrets[CENTRAL_OAUTH_SECRET]?.value as { oauthClientId?: string; oauthClientSecret?: string; scopes?: string }) || {}
-        setClientId(c.oauthClientId || '')
-        setClientSecret(c.oauthClientSecret || '')
-        setScopes(c.scopes || '')
-        setHasClient(!!(c.oauthClientId && c.oauthClientSecret))
+        const storedClientId = String(secrets[CENTRAL_OAUTH_CLIENT_ID_SECRET]?.value || '')
+        const storedClientSecret = String(secrets[CENTRAL_OAUTH_CLIENT_SECRET_SECRET]?.value || '')
+        const storedScopes = String(secrets[CENTRAL_OAUTH_SCOPES_SECRET]?.value || '')
+        setClientId(storedClientId)
+        setClientSecret(storedClientSecret)
+        setScopes(storedScopes)
+        setHasClient(!!(storedClientId && storedClientSecret))
       } catch (e: any) {
         setMsg({ kind: 'err', text: e?.message || String(e) })
       } finally {
