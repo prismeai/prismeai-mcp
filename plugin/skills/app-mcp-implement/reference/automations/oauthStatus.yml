@@ -32,6 +32,19 @@ do:
   - conditions:
       '!{{user.salesforceNext.oauth.accessToken}}':
         - break: {}
+  - Custom Code.run:
+      function: makeTokenCacheFingerprint
+      parameters:
+        tenantId: '{{global.workspaceId}}'
+        clientId: '{{config.auth.oauthClientId}}'
+        scopes: '{{config.auth.oauthScopes}}'
+      output: tokenContext
+  - conditions:
+      '{{tokenContext.error}} || {{user.salesforceNext.oauth.cacheFingerprint}} != {{tokenContext.fingerprint}}':
+        - delete:
+            name: user.salesforceNext.oauth
+            scope: user
+        - break: {}
   - comment: Fast path — cached access token still valid (120s skew), no provider round-trip.
   - conditions:
       '{{user.salesforceNext.oauth.expiresAt}} > {% date({{run.date}}).ts + 120000 %}':

@@ -40,15 +40,20 @@ do:
       name: a
       value: '{{config.auth}}'
   - Custom Code.run:
-      function: normalizeLoginHost
+      function: makeTokenCacheFingerprint
       parameters:
-        rawHost: '{{a.loginHost}}'
-      output: lh
-  - set:
-      name: loginHost
-      value: '{{lh.host}}'
+        tenantId: '{{global.workspaceId}}'
+        clientId: '{{a.oauthClientId}}'
+        scopes: '{{a.oauthScopes}}'
+      output: tokenContext
+  - conditions:
+      '{{tokenContext.error}} || !{{a.oauthTokenUrl}}':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message=missing_secret_backed_oauth_config'
+        - break: {}
   - fetch:
-      url: '{{loginHost}}/services/oauth2/token'
+      url: '{{a.oauthTokenUrl}}'
       method: POST
       headers:
         Content-Type: application/x-www-form-urlencoded
@@ -66,7 +71,7 @@ do:
       '{{tokenResp.status}} != 200':
         - set:
             name: redirectTo
-            value: '{{spaBase}}&status=error&message={{tokenResp.body.error}}'
+            value: '{{spaBase}}&status=error&message=token_exchange_rejected'
         - break: {}
   - set:
       name: oauthTtlSec
@@ -78,7 +83,8 @@ do:
         accessToken: '{{tokenResp.body.access_token}}'
         refreshToken: '{{tokenResp.body.refresh_token}}'
         instanceUrl: '{{tokenResp.body.instance_url}}'
-        scopes: '{{tokenResp.body.scope}}'
+        scopes: '{{a.oauthScopes}}'
+        cacheFingerprint: '{{tokenContext.fingerprint}}'
         connectedAt: '{{run.date}}'
         expiresAt: '{% date({{run.date}}).ts + ({{oauthTtlSec}} * 1000) %}'
   - comment: >-
@@ -91,6 +97,7 @@ do:
       function: makeTokenSecretName
       parameters:
         userId: '{{user.id}}'
+        fingerprint: '{{tokenContext.fingerprint}}'
       output: tokName
   - conditions:
       '!{{tokName.error}} && {{tokenResp.body.refresh_token}}':

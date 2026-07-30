@@ -12,16 +12,8 @@ when:
 do:
   - conditions:
       '{{user.salesforceNext.oauth.accessToken}}':
-        - Custom Code.run:
-            function: normalizeLoginHost
-            parameters:
-              rawHost: '{{config.auth.loginHost}}'
-            output: lh
-        - set:
-            name: loginHost
-            value: '{{lh.host}}'
         - fetch:
-            url: '{{loginHost}}/services/oauth2/revoke'
+            url: '{{config.auth.oauthRevokeUrl}}'
             method: POST
             headers:
               Content-Type: application/x-www-form-urlencoded
@@ -37,9 +29,17 @@ do:
   - conditions:
       '{{user.id}}':
         - Custom Code.run:
+            function: makeTokenCacheFingerprint
+            parameters:
+              tenantId: '{{global.workspaceId}}'
+              clientId: '{{config.auth.oauthClientId}}'
+              scopes: '{{config.auth.oauthScopes}}'
+            output: tokenContext
+        - Custom Code.run:
             function: makeTokenSecretName
             parameters:
               userId: '{{user.id}}'
+              fingerprint: '{{tokenContext.fingerprint}}'
             output: tokName
         - conditions:
             '!{{tokName.error}}':

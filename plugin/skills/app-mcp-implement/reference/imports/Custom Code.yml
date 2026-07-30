@@ -40,14 +40,44 @@ config:
       parameters:
         userId:
           type: string
+        fingerprint:
+          type: string
       code: |
         // Workspace-secret name holding a user's Salesforce OAuth refresh token,
-        // used for non-interactive (cron / autonomous) resolution. Reject empty
-        // or unresolved-binding ids so distinct users can never collapse onto the
-        // same secret name (defense-in-depth).
+        // context-bound to tenant + client + scopes so a config change cannot
+        // reuse a token minted under the previous OAuth context.
         var u = (userId === null || userId === undefined) ? '' : String(userId).trim();
-        if (!u || u.indexOf('{' + '{') >= 0) { return { error: 'invalid_user' }; }
-        return { name: 'sfnRefresh_' + u };
+        var f = (fingerprint === null || fingerprint === undefined) ? '' : String(fingerprint).trim();
+        if (!u || !f || u.indexOf('{' + '{') >= 0 || f.indexOf('{' + '{') >= 0) {
+          return { error: 'invalid_token_cache_context' };
+        }
+        return { name: 'sfnRefresh_' + u + '_' + f.slice(0, 24) };
+
+    makeTokenCacheFingerprint:
+      parameters:
+        tenantId:
+          type: string
+        clientId:
+          type: string
+        scopes:
+          type: string
+      code: |
+        const crypto = require('crypto');
+        const clean = function (v) {
+          return (v === null || v === undefined) ? '' : String(v).trim();
+        };
+        const tenant = clean(tenantId);
+        const client = clean(clientId);
+        const normalizedScopes = clean(scopes).split(/[\s,]+/).filter(Boolean).sort().join(' ');
+        if (!tenant || !client || !normalizedScopes ||
+            tenant.indexOf('{' + '{') >= 0 || client.indexOf('{' + '{') >= 0) {
+          return { error: 'invalid_token_cache_context' };
+        }
+        return {
+          fingerprint: crypto.createHash('sha256')
+            .update(tenant + '\n' + client + '\n' + normalizedScopes)
+            .digest('hex')
+        };
 
     normalizeLoginHost:
       parameters:
@@ -56,12 +86,11 @@ config:
       code: |
         // Single source of truth for the Salesforce host rule (used by every
         // OAuth/token flow). Salesforce OAuth/API endpoints live ONLY on
-        // *.my.salesforce.com (or login/test.salesforce.com) — NEVER on the
-        // Lightning UI host. Apply the default fallback + rewrite the Lightning
+        // *.my.salesforce.com (or the configured auth host) — NEVER on the
+        // Lightning UI host. Do not provide a provider-specific runtime default.
         // host (replace-all) so a pasted lightning.force.com URL still works.
-        var h = (rawHost === null || rawHost === undefined || String(rawHost).trim() === '')
-          ? 'https://login.salesforce.com'
-          : String(rawHost).trim();
+        var h = (rawHost === null || rawHost === undefined) ? '' : String(rawHost).trim();
+        if (!h || h.indexOf('{' + '{') >= 0) return { error: 'missing_auth_host' };
         return { host: h.split('.lightning.force.com').join('.my.salesforce.com') };
 
     buildQueryString:
@@ -116,7 +145,7 @@ config:
           'redirect_uri=' + enc(redirectUri || ''),
           'response_type=code',
           'state=' + enc(state || ''),
-          'scope=' + enc(scopes || 'api refresh_token offline_access'),
+          'scope=' + enc(scopes || ''),
           'code_challenge=' + enc(codeChallenge || ''),
           'code_challenge_method=S256'
         ].join('&');

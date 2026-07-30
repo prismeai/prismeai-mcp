@@ -9,6 +9,10 @@ arguments:
     type: string
   scopes:
     type: string
+  authorizeUrl:
+    type: string
+  tokenUrl:
+    type: string
 when:
   endpoint: true
 do:
@@ -43,9 +47,15 @@ do:
       value: '{% {{body.clientSecret}} || {{clientSecret}} %}'
   - set:
       name: csco
-      value: '{% {{body.scopes}} || {{scopes}} || "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar openid email" %}'
+      value: '{% {{body.scopes}} || {{scopes}} %}'
+  - set:
+      name: cauth
+      value: '{% {{body.authorizeUrl}} || {{authorizeUrl}} %}'
+  - set:
+      name: ctok
+      value: '{% {{body.tokenUrl}} || {{tokenUrl}} %}'
   - conditions:
-      '!{{cid}} || !{{csec}}':
+      '!{{cid}} || !{{csec}} || !{{csco}} || !{{cauth}} || !{{ctok}}':
         - set:
             name: $http
             value:
@@ -53,7 +63,7 @@ do:
         - set:
             name: output
             value:
-              error: clientId and clientSecret are required.
+              error: clientId, clientSecret, scopes, authorizeUrl and tokenUrl are required.
         - break: {}
   - auth:
       workspace: true
@@ -71,6 +81,8 @@ do:
             oauthClientId: '{{cid}}'
             oauthClientSecret: '{{csec}}'
             scopes: '{{csco}}'
+            authorizeUrl: '{{cauth}}'
+            tokenUrl: '{{ctok}}'
       output: patchResp
       outputMode: detailed_response
       emitErrors: false
@@ -85,14 +97,9 @@ do:
             value:
               error: Failed to store the central OAuth client ({{patchResp.status}}).
         - break: {}
-  - emit:
-      event: googleWorkspaces.maintainer.oauthClientSet
-      payload:
-        scopes: '{{csco}}'
   - set:
       name: output
       value:
         ok: true
         message: Central Google OAuth client stored.
-        scopes: '{{csco}}'
 output: '{{output}}'

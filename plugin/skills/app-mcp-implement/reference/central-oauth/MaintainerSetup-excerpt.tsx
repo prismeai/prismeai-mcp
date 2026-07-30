@@ -52,19 +52,6 @@ function MaintainerSetup(props: Props) {
   const centralSlug = CENTRAL_SLUG
   const coreMcpEndpoint = `${host}/workspaces/slug:${centralSlug}/webhooks/mcp`
   const centralWh = (s: string) => `${host}/workspaces/slug:${centralSlug}/webhooks/${s}`
-  const catalogAuth: CatalogAuth = {
-    type: 'oauth2',
-    // MUST match the connector's actual webhook slugs (oauthConnect/oauthStatus/
-    // oauthDisconnect) — NOT the legacy initiateOAuth/checkAuthStatus/disconnectOAuth
-    // names. A mismatch makes the catalog entry's connect_url 404 ("no matching
-    // trigger for endpoint initiateOAuth") so agents can't initiate OAuth, even though
-    // the per-agent Install button (which uses wh('oauthConnect')) works. See Gotcha 33.
-    status_url: centralWh('oauthStatus'),
-    connect_url: centralWh('oauthConnect'),
-    disconnect_url: centralWh('oauthDisconnect'),
-    scopes: (scopes || GOOGLE_SCOPES).split(/[\s,]+/).filter(Boolean),
-  }
-
   const [loading, setLoading] = useState(true)
   const [forbidden, setForbidden] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -72,7 +59,16 @@ function MaintainerSetup(props: Props) {
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [scopes, setScopes] = useState('')
+  const [authorizeUrl, setAuthorizeUrl] = useState('')
+  const [tokenUrl, setTokenUrl] = useState('')
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const catalogAuth: CatalogAuth = {
+    type: 'oauth2',
+    status_url: centralWh('oauthStatus'),
+    connect_url: centralWh('oauthConnect'),
+    disconnect_url: centralWh('oauthDisconnect'),
+    scopes: scopes.split(/[\s,]+/).filter(Boolean),
+  }
 
   useEffect(() => {
     void (async () => {
@@ -97,11 +93,19 @@ function MaintainerSetup(props: Props) {
         }
         if (!r.ok) throw new Error(t('msg.saveFailed', { status: r.status }))
         const secrets = (await r.json().catch(() => ({}))) || {}
-        const c = (secrets[CENTRAL_OAUTH_SECRET]?.value as { oauthClientId?: string; oauthClientSecret?: string; scopes?: string }) || {}
+        const c = (secrets[CENTRAL_OAUTH_SECRET]?.value as {
+          oauthClientId?: string
+          oauthClientSecret?: string
+          scopes?: string
+          authorizeUrl?: string
+          tokenUrl?: string
+        }) || {}
         setClientId(c.oauthClientId || '')
         setClientSecret(c.oauthClientSecret || '')
         setScopes(c.scopes || '')
-        setHasClient(!!(c.oauthClientId && c.oauthClientSecret))
+        setAuthorizeUrl(c.authorizeUrl || '')
+        setTokenUrl(c.tokenUrl || '')
+        setHasClient(!!(c.oauthClientId && c.oauthClientSecret && c.scopes && c.authorizeUrl && c.tokenUrl))
       } catch (e: any) {
         setMsg({ kind: 'err', text: e?.message || String(e) })
       } finally {
@@ -116,11 +120,18 @@ function MaintainerSetup(props: Props) {
     try {
       if (!clientId.trim()) throw new Error(t('maint.clientIdRequired'))
       if (!clientSecret.trim()) throw new Error(t('maint.clientSecretRequired'))
+      if (!scopes.trim() || !authorizeUrl.trim() || !tokenUrl.trim()) throw new Error(t('maint.providerConfigRequired'))
       const r = await fetch(setClientUrl, {
         method: 'POST',
         headers: apiHeaders(sdk),
         credentials: 'include',
-        body: JSON.stringify({ clientId: clientId.trim(), clientSecret: clientSecret.trim(), scopes: scopes.trim() || GOOGLE_SCOPES }),
+        body: JSON.stringify({
+          clientId: clientId.trim(),
+          clientSecret: clientSecret.trim(),
+          scopes: scopes.trim(),
+          authorizeUrl: authorizeUrl.trim(),
+          tokenUrl: tokenUrl.trim(),
+        }),
       })
       const d = await r.json().catch(() => ({}))
       if (!r.ok || !d?.ok) throw new Error(d?.error || (r.status === 403 ? t('msg.forbidden') : t('msg.saveFailed', { status: r.status })))
@@ -193,16 +204,24 @@ function MaintainerSetup(props: Props) {
               />
               <div className="space-y-1.5">
                 <Label htmlFor="m-cid">{t('field.oauthClientId')}</Label>
-                <Input id="m-cid" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="…apps.googleusercontent.com" />
+                <Input id="m-cid" value={clientId} onChange={(e) => setClientId(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="m-csec">{t('field.oauthClientSecret')}</Label>
-                <SecretInput id="m-csec" value={clientSecret} onChange={setClientSecret} placeholder="GOCSPX-…" />
+                <SecretInput id="m-csec" value={clientSecret} onChange={setClientSecret} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="m-csco">{t('field.scopes')}</Label>
-                <Input id="m-csco" value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder={GOOGLE_SCOPES} />
+                <Input id="m-csco" value={scopes} onChange={(e) => setScopes(e.target.value)} />
                 <p className="text-xs text-muted-foreground">{t('maint.scopesHint')}</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="m-auth-url">{t('field.oauthAuthorizeUrl')}</Label>
+                <Input id="m-auth-url" value={authorizeUrl} onChange={(e) => setAuthorizeUrl(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="m-token-url">{t('field.oauthTokenUrl')}</Label>
+                <Input id="m-token-url" value={tokenUrl} onChange={(e) => setTokenUrl(e.target.value)} />
               </div>
               <Button disabled={busy} onClick={save}>
                 {t('maint.save')}

@@ -16,6 +16,7 @@ do:
               configured: true
               clientId: '{{c.oauthClientId}}'
               scopes: '{{c.scopes}}'
+              authorizeUrl: '{{c.authorizeUrl}}'
         - break: {}
   - set:
       name: output

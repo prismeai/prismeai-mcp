@@ -1,6 +1,6 @@
 slug: oauthCallback
 name: OAuth/oauthCallback
-description: 'OAuth2 authorization-code callback — dual role. (1) PROXY (core workspace, central client): when the state carries a packed tenant callback and no local oauthPending matches, redirect code+state verbatim to that tenant callback (validated against our own api host — no open redirect). (2) EXCHANGE (tenant instance, or core for its own connect): validates state, exchanges the code at https://oauth2.googleapis.com/token (client via resolveOAuthClient + stored code_verifier + pending.redirectUri), stores the token in user scope + the refresh token as a workspace secret keyed by userId (for cron), then redirects (meta-refresh, CSP-safe) to the config SPA callback view (?view=oauthCallback&status=…).'
+description: 'OAuth2 authorization-code callback — dual role. The provider token URL, client and scopes are resolved from secret-backed configuration. Tokens are cached with a tenant/client/scope fingerprint and credential-bearing fetch failures are not emitted.'
 private: true
 when:
   endpoint: true
@@ -59,6 +59,19 @@ do:
             name: redirectTo
             value: '{{spaBase}}&status=error&message=oauth_client_not_configured'
         - break: {}
+  - Custom Code.run:
+      function: makeTokenCacheFingerprint
+      parameters:
+        tenantId: '{{global.workspaceId}}'
+        clientId: '{{oc.oauthClientId}}'
+        scopes: '{{oc.scopes}}'
+      output: tokenContext
+  - conditions:
+      '{{tokenContext.error}}':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message=invalid_oauth_cache_context'
+        - break: {}
   - comment: 'oc.tokenUrl = Google direct (tenant client / core context) or the core centralTokenExchange proxy (tenant on the central client — the proxy injects the central client_id/secret, the empty creds below are ignored).'
   - fetch:
       url: '{{oc.tokenUrl}}'
@@ -79,7 +92,7 @@ do:
       '{{tokenResp.status}} != 200':
         - set:
             name: redirectTo
-            value: '{{spaBase}}&status=error&message={{tokenResp.body.error}}'
+            value: '{{spaBase}}&status=error&message=token_exchange_rejected'
         - break: {}
   - set:
       name: oauthTtlSec
@@ -90,7 +103,8 @@ do:
       value:
         accessToken: '{{tokenResp.body.access_token}}'
         refreshToken: '{% {{tokenResp.body.refresh_token}} || {{user.googleWorkspaces.oauth.refreshToken}} %}'
-        scopes: '{{tokenResp.body.scope}}'
+        scopes: '{{oc.scopes}}'
+        cacheFingerprint: '{{tokenContext.fingerprint}}'
         connectedAt: '{{run.date}}'
         expiresAt: '{% date({{run.date}}).ts + ({{oauthTtlSec}} * 1000) %}'
   - comment: 'Best-effort: persist the refresh token as a workspace secret keyed by user so cron / autonomous automations can resolve this user via buildAppAuth(targetUserId). Requires the connecting user to be a workspace editor/owner (the config app is) — silently skipped (RBAC) otherwise; the interactive user-scope path above still works for everyone. Google only returns a refresh_token on first consent / prompt=consent — guarded below.'
@@ -98,6 +112,7 @@ do:
       function: makeTokenSecretName
       parameters:
         userId: '{{user.id}}'
+        fingerprint: '{{tokenContext.fingerprint}}'
       output: tokName
   - conditions:
       '!{{tokName.error}} && {{tokenResp.body.refresh_token}}':

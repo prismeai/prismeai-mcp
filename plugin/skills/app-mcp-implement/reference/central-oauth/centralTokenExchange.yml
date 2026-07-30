@@ -1,6 +1,6 @@
 slug: centralTokenExchange
 name: 00_Maintainer/centralTokenExchange
-description: 'CORE webhook — token endpoint proxy for the central platform OAuth client. Accepts the same form fields as https://oauth2.googleapis.com/token (grant_type=authorization_code: code, code_verifier, redirect_uri | grant_type=refresh_token: refresh_token), injects the central client_id/client_secret (which NEVER leave the core workspace), forwards to Google and passes the response through (status + body). Tenant instances hit this URL as their tokenUrl when running on the central client (resolveOAuthClient). Safe by construction: it returns tokens only to callers presenting a valid one-time code+PKCE verifier or an existing refresh token — the client secret itself is never disclosed.'
+description: 'CORE webhook — token endpoint proxy for the central platform OAuth client. The provider token URL is read from the central secret alongside the client credentials. Injects client_id/client_secret server-side and never logs or emits the request.'
 private: true
 when:
   endpoint: true
@@ -9,7 +9,7 @@ do:
       name: c
       value: '{{config.centralAuth}}'
   - conditions:
-      '!{{c.oauthClientId}} || !{{c.oauthClientSecret}}':
+      '!{{c.oauthClientId}} || !{{c.oauthClientSecret}} || !{{c.tokenUrl}}':
         - set:
             name: $http
             value:
@@ -50,7 +50,7 @@ do:
               client_id: '{{c.oauthClientId}}'
               client_secret: '{{c.oauthClientSecret}}'
   - fetch:
-      url: https://oauth2.googleapis.com/token
+      url: '{{c.tokenUrl}}'
       method: POST
       headers:
         Content-Type: application/x-www-form-urlencoded

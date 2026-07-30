@@ -24,14 +24,14 @@ do:
       name: a
       value: '{{config.auth}}'
   - conditions:
-      '!{{a.oauthClientId}} || !{{a.oauthClientSecret}}':
+      '!{{a.oauthClientId}} || !{{a.oauthClientSecret}} || !{{a.oauthAuthorizeUrl}} || !{{a.oauthScopes}}':
         - set:
             name: $http
             value:
               status: 400
         - set:
             name: output
-            value: Salesforce OAuth is not configured. Set OAuth mode + Consumer Key/Secret in the config app and Save before connecting.
+            value: Salesforce OAuth is incomplete. Configure the client, authorize URL and scopes in the config app before connecting.
         - break: {}
   - comment: OAuth endpoints live on *.my.salesforce.com, never on the Lightning UI host.
   - Custom Code.run:
@@ -58,10 +58,10 @@ do:
   - Custom Code.run:
       function: buildAuthorizeUrl
       parameters:
-        authorizeUrl: '{{loginHost}}/services/oauth2/authorize'
+        authorizeUrl: '{{a.oauthAuthorizeUrl}}'
         clientId: '{{a.oauthClientId}}'
         redirectUri: '{{config.oauthCallbackUrl}}'
-        scopes: '{% {{a.scopes}} || "api refresh_token offline_access" %}'
+        scopes: '{{a.oauthScopes}}'
         state: '{{stateResult.state}}'
         codeChallenge: '{{pkce.codeChallenge}}'
       output: urlResult

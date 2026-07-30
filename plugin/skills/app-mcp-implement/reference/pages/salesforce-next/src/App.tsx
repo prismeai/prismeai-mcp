@@ -36,7 +36,11 @@ interface AuthConfig {
   jwtPrivateKey?: string
   accessToken?: string
   instanceUrl?: string
-  scopes?: string
+  oauthAuthorizeUrl?: string
+  oauthTokenUrl?: string
+  oauthRevokeUrl?: string
+  oauthScopes?: string
+  apiVersion?: string
 }
 interface Agent {
   id: string
@@ -59,24 +63,34 @@ const MODES: { value: Mode }[] = [
 const FIELDS: Record<Mode, { key: keyof AuthConfig; secret?: boolean; area?: boolean; placeholder?: string }[]> = {
   jwt: [
     { key: 'loginHost', placeholder: 'https://login.salesforce.com' },
+    { key: 'oauthTokenUrl', placeholder: 'https://login.salesforce.com/services/oauth2/token' },
+    { key: 'oauthScopes', placeholder: 'api refresh_token offline_access' },
+    { key: 'apiVersion', placeholder: 'v00.0' },
     { key: 'jwtUsername', placeholder: 'integration@org.com' },
     { key: 'oauthClientId', secret: true, placeholder: '3MVG9…' },
     { key: 'jwtPrivateKey', secret: true, area: true, placeholder: '-----BEGIN RSA PRIVATE KEY-----' },
   ],
   clientCredentials: [
     { key: 'loginHost', placeholder: 'https://login.salesforce.com' },
+    { key: 'oauthTokenUrl', placeholder: 'https://login.salesforce.com/services/oauth2/token' },
+    { key: 'apiVersion', placeholder: 'v00.0' },
     { key: 'oauthClientId', secret: true, placeholder: '3MVG9…' },
     { key: 'oauthClientSecret', secret: true, placeholder: '••••••' },
   ],
   oauth: [
     { key: 'loginHost', placeholder: 'https://login.salesforce.com' },
+    { key: 'oauthAuthorizeUrl', placeholder: 'https://login.salesforce.com/services/oauth2/authorize' },
+    { key: 'oauthTokenUrl', placeholder: 'https://login.salesforce.com/services/oauth2/token' },
+    { key: 'oauthRevokeUrl', placeholder: 'https://login.salesforce.com/services/oauth2/revoke' },
     { key: 'oauthClientId', secret: true, placeholder: '3MVG9…' },
     { key: 'oauthClientSecret', secret: true, placeholder: '••••••' },
-    { key: 'scopes', placeholder: 'api refresh_token offline_access' },
+    { key: 'oauthScopes', placeholder: 'api refresh_token offline_access' },
+    { key: 'apiVersion', placeholder: 'v00.0' },
   ],
   accessToken: [
     { key: 'instanceUrl', placeholder: 'https://myorg.my.salesforce.com' },
     { key: 'accessToken', secret: true, placeholder: '00D…' },
+    { key: 'apiVersion', placeholder: 'v00.0' },
   ],
 }
 
@@ -442,7 +456,7 @@ function ConfigApp(props: Props) {
           status_url: wh('oauthStatus'),
           connect_url: wh('oauthConnect'),
           disconnect_url: wh('oauthDisconnect'),
-          scopes: (auth.scopes || 'api refresh_token offline_access').split(/[\s,]+/).filter(Boolean),
+      scopes: (auth.oauthScopes || '').split(/[\s,]+/).filter(Boolean),
         }
       }
       const tr = await fetch(`${agentFactory}/agents/${a.id}/tools`, {
@@ -496,7 +510,7 @@ function ConfigApp(props: Props) {
           status_url: wh('oauthStatus'),
           connect_url: wh('oauthConnect'),
           disconnect_url: wh('oauthDisconnect'),
-          scopes: (auth.scopes || 'api refresh_token offline_access').split(/[\s,]+/).filter(Boolean),
+        scopes: (auth.oauthScopes || '').split(/[\s,]+/).filter(Boolean),
         }
       : null
 

@@ -36,7 +36,7 @@ import dotenv from 'dotenv'
 import { readFile, readdir, stat, writeFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
@@ -44,6 +44,31 @@ import yaml from 'js-yaml'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
 const BUNDLE_PATH = path.join(ROOT, 'dist/bundle.js')
+
+function firstExisting(candidates) {
+  return candidates.find(p => p && existsSync(p)) || ''
+}
+
+// Mandatory fail-closed audit before any deployment-side effect.
+const WORKSPACE_PATH = firstExisting([
+  process.env.PRISMEAI_WORKSPACE_PATH,
+  path.resolve(ROOT, '../../workspaces', path.basename(ROOT)),
+  path.resolve(ROOT, '../..'),
+])
+const CONFIG_AUDIT_SCRIPT = firstExisting([
+  process.env.PRISMEAI_CONFIG_AUDIT_SCRIPT,
+  path.resolve(ROOT, '../../scripts/audit-secret-backed-config.py'),
+  path.resolve(ROOT, '../../../scripts/audit-secret-backed-config.py'),
+])
+if (!WORKSPACE_PATH || !existsSync(path.join(WORKSPACE_PATH, 'index.yml'))) {
+  throw new Error('Secret-backed config audit blocked deploy: workspace index.yml not found. Set PRISMEAI_WORKSPACE_PATH.')
+}
+if (!CONFIG_AUDIT_SCRIPT) {
+  throw new Error('Secret-backed config audit blocked deploy: audit script not found. Copy scripts/audit-secret-backed-config.py or set PRISMEAI_CONFIG_AUDIT_SCRIPT.')
+}
+execFileSync('python3', [CONFIG_AUDIT_SCRIPT, WORKSPACE_PATH, ROOT], {
+  stdio: 'inherit',
+})
 
 // Multi-env: pick .env.<name> if --env=<name> or PRISMEAI_ENV is set, else .env.
 // Print which file we loaded so you never accidentally deploy to prod thinking
