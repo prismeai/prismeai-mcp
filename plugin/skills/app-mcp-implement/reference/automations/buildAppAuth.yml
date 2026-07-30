@@ -48,27 +48,27 @@ do:
       name: normHost
       value: '{{lh.host}}'
   - Custom Code.run:
-      function: makeTokenCacheFingerprint
+      function: makeTokenCacheKey
       parameters:
         tenantId: '{{global.workspaceId}}'
         clientId: '{{auth.oauthClientId}}'
         scopes: '{{auth.oauthScopes}}'
-      output: tokenContext
+      output: tokenCache
   - conditions:
-      '({{mode}} == "oauth" || {{mode}} == "jwt") && {{tokenContext.error}}':
+      '({{mode}} == "oauth" or {{mode}} == "jwt") and {{tokenCache.error}}':
         - set:
             name: output
             value:
               error: OAuth cache context is incomplete. Configure tenant client ID and scopes in the config app.
         - break: {}
   - conditions:
-      '{{mode}} == "oauth" && {{user.salesforceNext.oauth.cacheFingerprint}} && {{user.salesforceNext.oauth.cacheFingerprint}} != {{tokenContext.fingerprint}}':
+      '{{mode}} == "oauth" and {{user.salesforceNext.oauth.cacheKey}} and {{user.salesforceNext.oauth.cacheKey}} != {{tokenCache.key}}':
         - delete:
             name: user.salesforceNext.oauth
             scope: user
   - comment: Priority 0 — caller passed an explicit accessToken + instanceUrl.
   - conditions:
-      '{{accessToken}} && {{instanceUrl}}':
+      '{{accessToken}} and {{instanceUrl}}':
         - set:
             name: output
             value:
@@ -79,7 +79,7 @@ do:
   - conditions:
       '{{mode}} == "accessToken"':
         - conditions:
-            '{{auth.accessToken}} && {{auth.instanceUrl}}':
+            '{{auth.accessToken}} and {{auth.instanceUrl}}':
               - set:
                   name: output
                   value:
@@ -100,7 +100,7 @@ do:
                   function: makeTokenSecretName
                   parameters:
                     userId: '{{targetUserId}}'
-                    fingerprint: '{{tokenContext.fingerprint}}'
+                    cacheKey: '{{tokenCache.key}}'
                   output: tokName
               - conditions:
                   '{{tokName.error}}':
@@ -173,7 +173,7 @@ do:
                     - break: {}
         - comment: Interactive — use the cached access token while still valid (120s skew); otherwise refresh it proactively from the stored refresh token and update the user-scope cache.
         - conditions:
-            '{{user.salesforceNext.oauth.cacheFingerprint}} == {{tokenContext.fingerprint}} && {{user.salesforceNext.oauth.accessToken}} and {{user.salesforceNext.oauth.expiresAt}} > {% date({{run.date}}).ts + 120000 %}':
+            '{{user.salesforceNext.oauth.cacheKey}} == {{tokenCache.key}} and {{user.salesforceNext.oauth.accessToken}} and {{user.salesforceNext.oauth.expiresAt}} > {% date({{run.date}}).ts + 120000 %}':
               - set:
                   name: output
                   value:
@@ -181,7 +181,7 @@ do:
                     baseUrl: '{{user.salesforceNext.oauth.instanceUrl}}/services/data/{{effectiveApiVersion}}'
               - break: {}
         - conditions:
-            '{{user.salesforceNext.oauth.cacheFingerprint}} == {{tokenContext.fingerprint}} && {{user.salesforceNext.oauth.refreshToken}}':
+            '{{user.salesforceNext.oauth.cacheKey}} == {{tokenCache.key}} and {{user.salesforceNext.oauth.refreshToken}}':
               - fetch:
                   url: '{{auth.oauthTokenUrl}}'
                   method: POST
@@ -217,9 +217,9 @@ do:
                         scope: user
                         value: '{% date({{run.date}}).ts + ({{refTtlSec}} * 1000) %}'
                     - set:
-                        name: user.salesforceNext.oauth.cacheFingerprint
+                        name: user.salesforceNext.oauth.cacheKey
                         scope: user
-                        value: '{{tokenContext.fingerprint}}'
+                        value: '{{tokenCache.key}}'
                     - set:
                         name: output
                         value:
@@ -245,7 +245,7 @@ do:
                           transient: true
                     - break: {}
         - conditions:
-            '{{user.salesforceNext.oauth.cacheFingerprint}} == {{tokenContext.fingerprint}} && {{user.salesforceNext.oauth.accessToken}}':
+            '{{user.salesforceNext.oauth.cacheKey}} == {{tokenCache.key}} and {{user.salesforceNext.oauth.accessToken}}':
               - comment: No refresh token available (legacy connection) — fall back to the stored token; may be stale.
               - set:
                   name: output
@@ -263,10 +263,7 @@ do:
   - conditions:
       '{{mode}} == "clientCredentials"':
         - conditions:
-            '{{auth.oauthClientId}} && {{auth.oauthClientSecret}}':
-              - set:
-                  name: ccHost
-                  value: '{{normHost}}'
+            '{{auth.oauthClientId}} and {{auth.oauthClientSecret}}':
               - fetch:
                   url: '{{auth.oauthTokenUrl}}'
                   method: POST
@@ -297,7 +294,7 @@ do:
   - conditions:
       '{{mode}} == "jwt"':
         - conditions:
-            '{{auth.jwtUsername}} && {{auth.jwtPrivateKey}}':
+            '{{auth.jwtUsername}} and {{auth.jwtPrivateKey}}':
               - exchangeJwtBearer:
                   username: '{{auth.jwtUsername}}'
                   privateKey: '{{auth.jwtPrivateKey}}'
@@ -307,7 +304,7 @@ do:
                   scopes: '{{auth.oauthScopes}}'
                   output: jwtResult
               - conditions:
-                  '!{{jwtResult.error}} && {{jwtResult.accessToken}} && {{jwtResult.instanceUrl}}':
+                  '!{{jwtResult.error}} and {{jwtResult.accessToken}} and {{jwtResult.instanceUrl}}':
                     - set:
                         name: output
                         value:

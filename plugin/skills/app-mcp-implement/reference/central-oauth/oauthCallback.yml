@@ -26,7 +26,7 @@ do:
       name: pending
       value: '{{user.googleWorkspaces.oauthPending}}'
   - conditions:
-      '!{{query.code}} || !{{query.state}}':
+      '!{{query.code}} or !{{query.state}}':
         - set:
             name: redirectTo
             value: '{{spaBase}}&status=error&message=invalid_state'
@@ -60,14 +60,14 @@ do:
             value: '{{spaBase}}&status=error&message=oauth_client_not_configured'
         - break: {}
   - Custom Code.run:
-      function: makeTokenCacheFingerprint
+      function: makeTokenCacheKey
       parameters:
         tenantId: '{{global.workspaceId}}'
         clientId: '{{oc.oauthClientId}}'
         scopes: '{{oc.scopes}}'
-      output: tokenContext
+      output: tokenCache
   - conditions:
-      '{{tokenContext.error}}':
+      '{{tokenCache.error}}':
         - set:
             name: redirectTo
             value: '{{spaBase}}&status=error&message=invalid_oauth_cache_context'
@@ -104,7 +104,7 @@ do:
         accessToken: '{{tokenResp.body.access_token}}'
         refreshToken: '{% {{tokenResp.body.refresh_token}} || {{user.googleWorkspaces.oauth.refreshToken}} %}'
         scopes: '{{oc.scopes}}'
-        cacheFingerprint: '{{tokenContext.fingerprint}}'
+        cacheKey: '{{tokenCache.key}}'
         connectedAt: '{{run.date}}'
         expiresAt: '{% date({{run.date}}).ts + ({{oauthTtlSec}} * 1000) %}'
   - comment: 'Best-effort: persist the refresh token as a workspace secret keyed by user so cron / autonomous automations can resolve this user via buildAppAuth(targetUserId). Requires the connecting user to be a workspace editor/owner (the config app is) — silently skipped (RBAC) otherwise; the interactive user-scope path above still works for everyone. Google only returns a refresh_token on first consent / prompt=consent — guarded below.'
@@ -112,10 +112,10 @@ do:
       function: makeTokenSecretName
       parameters:
         userId: '{{user.id}}'
-        fingerprint: '{{tokenContext.fingerprint}}'
+        cacheKey: '{{tokenCache.key}}'
       output: tokName
   - conditions:
-      '!{{tokName.error}} && {{tokenResp.body.refresh_token}}':
+      '!{{tokName.error}} and {{tokenResp.body.refresh_token}}':
         - try:
             do:
               - run:

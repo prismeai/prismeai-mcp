@@ -40,20 +40,17 @@ config:
       parameters:
         userId:
           type: string
-        fingerprint:
+        cacheKey:
           type: string
       code: |
-        // Workspace-secret name holding a user's Salesforce OAuth refresh token,
-        // context-bound to tenant + client + scopes so a config change cannot
-        // reuse a token minted under the previous OAuth context.
         var u = (userId === null || userId === undefined) ? '' : String(userId).trim();
-        var f = (fingerprint === null || fingerprint === undefined) ? '' : String(fingerprint).trim();
-        if (!u || !f || u.indexOf('{' + '{') >= 0 || f.indexOf('{' + '{') >= 0) {
+        var k = (cacheKey === null || cacheKey === undefined) ? '' : String(cacheKey).trim();
+        if (!u || !k || u.indexOf('{' + '{') >= 0 || k.indexOf('{' + '{') >= 0) {
           return { error: 'invalid_token_cache_context' };
         }
-        return { name: 'sfnRefresh_' + u + '_' + f.slice(0, 24) };
+        return { name: 'sfnRefresh_' + u + '_' + k.slice(0, 24) };
 
-    makeTokenCacheFingerprint:
+    makeTokenCacheKey:
       parameters:
         tenantId:
           type: string
@@ -62,22 +59,16 @@ config:
         scopes:
           type: string
       code: |
+        // A config change produces a different key, so old tokens are never reused.
         const crypto = require('crypto');
-        const clean = function (v) {
-          return (v === null || v === undefined) ? '' : String(v).trim();
-        };
-        const tenant = clean(tenantId);
-        const client = clean(clientId);
-        const normalizedScopes = clean(scopes).split(/[\s,]+/).filter(Boolean).sort().join(' ');
-        if (!tenant || !client || !normalizedScopes ||
-            tenant.indexOf('{' + '{') >= 0 || client.indexOf('{' + '{') >= 0) {
+        const values = [tenantId, clientId, scopes].map(function (value) {
+          return value === null || value === undefined ? '' : String(value).trim();
+        });
+        values[2] = values[2].split(/[\s,]+/).filter(Boolean).sort().join(' ');
+        if (values.some(function (value) { return !value || value.indexOf('{' + '{') >= 0; })) {
           return { error: 'invalid_token_cache_context' };
         }
-        return {
-          fingerprint: crypto.createHash('sha256')
-            .update(tenant + '\n' + client + '\n' + normalizedScopes)
-            .digest('hex')
-        };
+        return { key: crypto.createHash('sha256').update(values.join('\n')).digest('hex') };
 
     normalizeLoginHost:
       parameters:

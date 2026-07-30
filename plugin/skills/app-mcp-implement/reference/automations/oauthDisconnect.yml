@@ -29,17 +29,17 @@ do:
   - conditions:
       '{{user.id}}':
         - Custom Code.run:
-            function: makeTokenCacheFingerprint
+            function: makeTokenCacheKey
             parameters:
               tenantId: '{{global.workspaceId}}'
               clientId: '{{config.auth.oauthClientId}}'
               scopes: '{{config.auth.oauthScopes}}'
-            output: tokenContext
+            output: tokenCache
         - Custom Code.run:
             function: makeTokenSecretName
             parameters:
               userId: '{{user.id}}'
-              fingerprint: '{{tokenContext.fingerprint}}'
+              cacheKey: '{{tokenCache.key}}'
             output: tokName
         - conditions:
             '!{{tokName.error}}':

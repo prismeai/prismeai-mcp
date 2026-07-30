@@ -29,11 +29,7 @@ SUSPICIOUS_VALUE = re.compile(
     r"\b(?:sandbox|staging|production|prod|dev|qa)\b|^v\d+(?:\.\d+)+$)"
 )
 ASSIGNMENT = re.compile(
-    r"^\s*(?:[-]\s*)?(?P<key>[A-Za-z0-9_.-]*(?:tenant|subscription|resource.?group|"
-    r"resource.?id|connection.?id|client.?id|client.?secret|api.?key|token|certificate|"
-    r"audience|scopes?|api.?version|base.?url|endpoint|deployment|project.?id|account.?id)"
-    r"[A-Za-z0-9_.-]*)\s*[:=]\s*(?P<value>.+?)\s*$",
-    re.IGNORECASE,
+    r"^\s*(?:-\s*)?(?P<key>[A-Za-z0-9_.-]+)\s*[:=]\s*(?P<value>.+?)\s*$"
 )
 TEXT_SUFFIXES = {
     ".yml", ".yaml", ".json", ".md", ".mdx", ".ts", ".tsx", ".js", ".mjs",
@@ -137,16 +133,14 @@ def main():
             candidates += [match.group(1) for match in SHORT_RESOURCE_ID.finditer(line)]
             stripped = line.strip()
             assignment = ASSIGNMENT.match(stripped)
-            if assignment:
+            if assignment and SUSPICIOUS_KEY.search(assignment.group("key")):
                 rhs = assignment.group("value").strip().rstrip(",")
                 is_runtime_expression = (
                     "{{" in rhs
                     or rhs in {"{}", "[]", "true", "false", "null"}
                     or rhs.startswith(("t(", "centralWh(", "useState(", "clean(", "String(", "scope.", "(auth."))
                 )
-                if not candidates and not is_runtime_expression and (
-                    URL.search(rhs) or UUID.search(rhs) or SUSPICIOUS_VALUE.search(rhs)
-                ):
+                if not candidates and not is_runtime_expression and SUSPICIOUS_VALUE.search(rhs):
                     candidates.append(stripped)
             for candidate in dict.fromkeys(candidates):
                 why = allowed(entries, rel, candidate)
@@ -166,11 +160,11 @@ def main():
         "SPA secret write": "/security/secrets" in "\n".join(
             p.read_text(errors="replace") for r in roots[1:] for p in r.rglob("*.tsx")
         ) if len(roots) > 1 else True,
-        "token context fingerprint": all(
+        "context-bound token cache key": all(
             marker in (workspace / "imports/Custom Code.yml").read_text()
-            for marker in ("makeTokenCacheFingerprint", "tenantId", "clientId", "scopes")
+            for marker in ("makeTokenCacheKey", "tenantId", "clientId", "scopes")
         ),
-        "cache mismatch invalidation": "cacheFingerprint" in (workspace / "automations/buildAppAuth.yml").read_text(),
+        "cache mismatch invalidation": "cacheKey" in (workspace / "automations/buildAppAuth.yml").read_text(),
     }
     auth_schema = ((secret_schema.get("salesforceNextAuth") or {}).get("properties") or {})
     referenced_auth_fields = set()

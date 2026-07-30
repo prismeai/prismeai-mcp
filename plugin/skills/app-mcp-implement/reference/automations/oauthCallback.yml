@@ -31,7 +31,7 @@ do:
       name: pending
       value: '{{user.salesforceNext.oauthPending}}'
   - conditions:
-      '!{{query.code}} || !{{query.state}} || {{query.state}} != {{pending.state}}':
+      '!{{query.code}} or !{{query.state}} or {{query.state}} != {{pending.state}}':
         - set:
             name: redirectTo
             value: '{{spaBase}}&status=error&message=invalid_state'
@@ -40,14 +40,14 @@ do:
       name: a
       value: '{{config.auth}}'
   - Custom Code.run:
-      function: makeTokenCacheFingerprint
+      function: makeTokenCacheKey
       parameters:
         tenantId: '{{global.workspaceId}}'
         clientId: '{{a.oauthClientId}}'
         scopes: '{{a.oauthScopes}}'
-      output: tokenContext
+      output: tokenCache
   - conditions:
-      '{{tokenContext.error}} || !{{a.oauthTokenUrl}}':
+      '{{tokenCache.error}} or !{{a.oauthTokenUrl}}':
         - set:
             name: redirectTo
             value: '{{spaBase}}&status=error&message=missing_secret_backed_oauth_config'
@@ -84,7 +84,7 @@ do:
         refreshToken: '{{tokenResp.body.refresh_token}}'
         instanceUrl: '{{tokenResp.body.instance_url}}'
         scopes: '{{a.oauthScopes}}'
-        cacheFingerprint: '{{tokenContext.fingerprint}}'
+        cacheKey: '{{tokenCache.key}}'
         connectedAt: '{{run.date}}'
         expiresAt: '{% date({{run.date}}).ts + ({{oauthTtlSec}} * 1000) %}'
   - comment: >-
@@ -97,10 +97,10 @@ do:
       function: makeTokenSecretName
       parameters:
         userId: '{{user.id}}'
-        fingerprint: '{{tokenContext.fingerprint}}'
+        cacheKey: '{{tokenCache.key}}'
       output: tokName
   - conditions:
-      '!{{tokName.error}} && {{tokenResp.body.refresh_token}}':
+      '!{{tokName.error}} and {{tokenResp.body.refresh_token}}':
         - try:
             do:
               - run:

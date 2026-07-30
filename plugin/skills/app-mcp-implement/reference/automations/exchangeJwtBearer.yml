@@ -17,7 +17,7 @@ arguments:
     type: string
 do:
   - conditions:
-      '!{{username}} || !{{privateKey}} || !{{clientId}} || !{{loginHost}} || !{{tenantId}} || !{{scopes}}':
+      '!{{username}} or !{{privateKey}} or !{{clientId}} or !{{loginHost}} or !{{tenantId}} or !{{scopes}}':
         - set:
             name: jwtResult
             value:
@@ -27,7 +27,7 @@ do:
       name: effectiveHost
       value: '{{loginHost}}'
   - Custom Code.run:
-      function: makeTokenCacheFingerprint
+      function: makeTokenCacheKey
       parameters:
         tenantId: '{{tenantId}}'
         clientId: '{{clientId}}'
@@ -43,9 +43,9 @@ do:
   - comment: Cache key includes tenant ID, client ID and scopes; host and user further partition it.
   - set:
       name: cacheKey
-      value: '{{cacheContext.fingerprint}}|{{username}}|{{effectiveHost}}'
+      value: '{{cacheContext.key}}|{{username}}|{{effectiveHost}}'
   - conditions:
-      '{{session.salesforceJwt[{{cacheKey}}].accessToken}} && {{session.salesforceJwt[{{cacheKey}}].expiresAt}} > {% date({{run.date}}).ts %}':
+      '{{session.salesforceJwt[{{cacheKey}}].accessToken}} and {{session.salesforceJwt[{{cacheKey}}].expiresAt}} > {% date({{run.date}}).ts %}':
         - set:
             name: jwtResult
             value:
@@ -82,7 +82,7 @@ do:
         - set:
             name: jwtResult
             value:
-              error: 'JWT exchange failed ({{tokenResponse.status}}): {{tokenResponse.body.error_description}}'
+              error: 'JWT exchange failed (status {{tokenResponse.status}}). Check the secret-backed JWT configuration.'
         - break: {}
   - set:
       name: session.salesforceJwt[{{cacheKey}}]

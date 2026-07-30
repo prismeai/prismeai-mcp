@@ -33,14 +33,14 @@ do:
       '!{{user.salesforceNext.oauth.accessToken}}':
         - break: {}
   - Custom Code.run:
-      function: makeTokenCacheFingerprint
+      function: makeTokenCacheKey
       parameters:
         tenantId: '{{global.workspaceId}}'
         clientId: '{{config.auth.oauthClientId}}'
         scopes: '{{config.auth.oauthScopes}}'
-      output: tokenContext
+      output: tokenCache
   - conditions:
-      '{{tokenContext.error}} || {{user.salesforceNext.oauth.cacheFingerprint}} != {{tokenContext.fingerprint}}':
+      '{{tokenCache.error}} or {{user.salesforceNext.oauth.cacheKey}} != {{tokenCache.key}}':
         - delete:
             name: user.salesforceNext.oauth
             scope: user
