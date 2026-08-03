@@ -66,6 +66,19 @@ do:
         - set:
             name: fetchHeaders.Content-Type
             value: '{% {{contentType}} || "application/json" %}'
+  - comment: >-
+      Activity Feed redaction (Gotcha 35). Register outbound free-text content
+      BEFORE the request: parents emit their executed event only once this child
+      returns, so registering here covers the whole call chain. Replace the paths
+      below with the provider's actual content fields — keep ids and metadata out
+      of the Set so the feed stays debuggable, and never register binary blobs.
+  - conditions:
+      '{{body}}':
+        - MCP Core.registerSecretValues:
+            values:
+              v0: '{{body.Description}}'
+              v1: '{{body.Subject}}'
+              v2: '{{body.Body}}'
   - conditions:
       '{{effectiveMethod}} == "GET" || {{effectiveMethod}} == "DELETE"':
         - fetch:
@@ -104,6 +117,19 @@ do:
                   output: response
                   outputMode: detailed_response
                   emitErrors: false
+  - comment: >-
+      Register response content before handleApiError or this automation can
+      emit it. Collections need one call per item (findSecretPaths never walks
+      arrays) — put that repeat in a private per-connector adapter automation,
+      NOT inline here. Never route the raw payload through a Custom Code
+      function first: its executed event carries its parameters.
+  - conditions:
+      '{{response.body}}':
+        - MCP Core.registerSecretValues:
+            values:
+              v0: '{{response.body.Description}}'
+              v1: '{{response.body.Subject}}'
+              v2: '{{response.body.Body}}'
   - handleApiError:
       response: '{{response}}'
       operation: '{{operation}}'
