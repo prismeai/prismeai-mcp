@@ -1,0 +1,52 @@
+slug: listTools
+name: /MCP/listTools
+description: >-
+  Build the MCP tools manifest at request time from the `mcpRegistry` Custom Code
+  registry — the connector's single source of truth for entities, actions and REST
+  specs. Nothing is stored in config.value.mcpTools nor in the MCP Core instance
+  config any more, so the manifest can never drift from the routing table. `ctx`
+  lets a tenant hide entities/actions it must not see (auth mode, disabled
+  features) instead of post-filtering the tools/list response.
+private: true
+arguments:
+  ctx:
+    type: object
+    description: >-
+      Optional visibility context — {hideTools: [entity], hideActions: {entity: [action]}}.
+do:
+  - Custom Code.run:
+      function: mcpRegistry
+      parameters:
+        mode: tools
+        ctx: '{{ctx}}'
+      output: registryResult
+  - comment: >-
+      Custom Code returns an error OBJECT when the module fails to load (the
+      "Function not found" negative cache). Serving an empty list here would be far
+      worse than failing: agent-factory and ai-knowledge PERSIST the tools/list
+      response into the agent's config, so an empty array silently strips every tool
+      from every agent using this connector. Fail loudly instead.
+  - conditions:
+      '{{registryResult.error}}':
+        - set:
+            name: output
+            value:
+              error: >-
+                Tool registry unavailable: {{registryResult.error}}. The `mcpRegistry`
+                Custom Code function did not run — check the Custom Code module loaded
+                (a single invalid parameter type breaks every function in the instance).
+        - break: {}
+  - conditions:
+      '!{{registryResult.tools.length}}':
+        - set:
+            name: output
+            value:
+              error: >-
+                Tool registry returned no tools. Refusing to serve an empty tools/list —
+                consumers persist it and would drop every tool from their agents.
+        - break: {}
+  - set:
+      name: output
+      value:
+        tools: '{{registryResult.tools}}'
+output: '{{output}}'

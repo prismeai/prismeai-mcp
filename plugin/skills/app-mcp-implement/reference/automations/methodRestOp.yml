@@ -16,8 +16,9 @@ arguments:
     type: string
 do:
   - Custom Code.run:
-      function: buildSalesforceRequest
+      function: mcpRegistry
       parameters:
+        mode: request
         operationName: '{{operationName}}'
         args: '{{args}}'
       output: req

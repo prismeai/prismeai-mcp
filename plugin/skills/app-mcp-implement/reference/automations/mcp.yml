@@ -92,8 +92,40 @@ do:
               jsonrpc: '2.0'
               id: '{{body.id}}'
               result: '{{toolResult}}'
+      '{{body.method}} == "tools/list"':
+        - comment: >-
+            The manifest is COMPUTED from the mcpRegistry registry, never stored. MCP
+            Core still builds the JSON-RPC envelope — it just takes the list as its
+            `tools` argument instead of reading its own config.mcpTools.
+        - listTools:
+            output: manifest
+        - comment: >-
+            Error envelope built inline rather than via MCP Core.buildJsonRpcError —
+            that helper is `private: true` in the MCP Core app, so it is NOT callable
+            as an App-mode instruction from a consumer workspace.
+        - conditions:
+            '{{manifest.error}}':
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    error:
+                      code: -32603
+                      message: '{{manifest.error}}'
+              - break: {}
+        - MCP Core.handleMcpMethod:
+            body: '{{body}}'
+            serverName: salesforce-next-mcp
+            serverVersion: 1.0.0
+            headers: '{{headers}}'
+            tools: '{{manifest.tools}}'
+            output: mcpResult
+        - set:
+            name: response
+            value: '{{mcpResult.response}}'
       default:
-        - comment: tools/list, initialize, notifications/* — delegate to MCP Core.
+        - comment: initialize, notifications/* — delegate to MCP Core.
         - MCP Core.handleMcpMethod:
             body: '{{body}}'
             serverName: salesforce-next-mcp

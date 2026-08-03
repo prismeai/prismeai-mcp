@@ -9,9 +9,10 @@ arguments:
     type: object
 do:
   - Custom Code.run:
-      function: resolveToolAction
+      function: mcpRegistry
       parameters:
-        toolName: '{{toolName}}'
+        mode: resolve
+        entity: '{{toolName}}'
         action: '{{toolArgs.arguments.action}}'
       output: resolved
   - conditions:
@@ -22,8 +23,9 @@ do:
       default:
         - comment: Backward-compat — toolName might already be a direct operationId
         - Custom Code.run:
-            function: getOperation
+            function: mcpRegistry
             parameters:
+              mode: operation
               operationName: '{{toolName}}'
             output: directOp
         - conditions:
@@ -40,8 +42,9 @@ do:
             name: operationName
             value: '{{toolName}}'
   - Custom Code.run:
-      function: getOperation
+      function: mcpRegistry
       parameters:
+        mode: operation
         operationName: '{{operationName}}'
       output: opMeta
   - conditions:
