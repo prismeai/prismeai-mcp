@@ -26,6 +26,12 @@ do:
         haltOnError: '{{haltOnError}}'
         batchRequests: '{{batchRequests}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /composite/batch
+        bodyParams:
+          - haltOnError
+          - batchRequests
       operationName: runCompositeBatch
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

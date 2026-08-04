@@ -1,0 +1,206 @@
+slug: compositeRecords
+name: MCP/tools/compositeRecords
+labels:
+  - mcp:tool
+private: true
+description: |-
+  Bulk records via the composite/sobjects collection — create/update/delete up to 200 records of mixed sObject types in a single call.
+
+  Available actions:
+  - **createMany** (createRecords): Create up to 200 records (mixed sObjects) in one call — params: body: allOrNone, records
+  - **createManyForType** (createRecordsForType): Create up to 200 records of the same sObject type — params: path: sObjectName; body: allOrNone, records
+  - **deleteMany** (deleteRecords): Delete up to 200 records (mixed sObjects) in one call — params: query: ids, allOrNone
+  - **getMany** (getRecordsCollection): Retrieve up to 2000 records of mixed sObjects in one call — params: query: ids, fields
+  - **updateMany** (updateRecords): Update up to 200 records (mixed sObjects) in one call — params: body: allOrNone, records
+  - **upsertManyForType** (upsertRecordsForType): Upsert up to 200 records of the same sObject by external ID — params: path: sObjectName, externalIdField; body: allOrNone, records
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on compositeRecords.
+    enum:
+      - createMany
+      - createManyForType
+      - deleteMany
+      - getMany
+      - updateMany
+      - upsertManyForType
+    required: true
+  ids:
+    type: string
+    description: Query parameter `ids`.
+  fields:
+    type: string
+    description: Query parameter `fields`.
+  allOrNone:
+    type: object
+    additionalProperties: true
+    description: Body field `allOrNone` (shape varies per action).
+  records:
+    type: object
+    additionalProperties: true
+    description: Body field `records` (shape varies per action).
+  sObjectName:
+    type: string
+    description: Salesforce path parameter `sObjectName`.
+  externalIdField:
+    type: string
+    description: Salesforce path parameter `externalIdField`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `compositeRecords`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `compositeRecords`. Available: createMany, createManyForType, deleteMany, getMany, updateMany, upsertManyForType'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "createMany"':
+        - toolRestOp:
+            toolName: createRecords
+            spec:
+              method: POST
+              path: /composite/sobjects
+              bodyParams:
+                - allOrNone
+                - records
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "createManyForType"':
+        - toolRestOp:
+            toolName: createRecordsForType
+            spec:
+              method: POST
+              path: /composite/sobjects/{sObjectName}
+              pathParams:
+                - sObjectName
+              bodyParams:
+                - allOrNone
+                - records
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "deleteMany"':
+        - toolRestOp:
+            toolName: deleteRecords
+            spec:
+              method: DELETE
+              path: /composite/sobjects
+              queryParams:
+                - ids
+                - allOrNone
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getMany"':
+        - toolRestOp:
+            toolName: getRecordsCollection
+            spec:
+              method: GET
+              path: /composite/sobjects/{sObjectName}
+              pathParams:
+                - sObjectName
+              queryParams:
+                - ids
+                - fields
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "updateMany"':
+        - toolRestOp:
+            toolName: updateRecords
+            spec:
+              method: PATCH
+              path: /composite/sobjects
+              bodyParams:
+                - allOrNone
+                - records
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "upsertManyForType"':
+        - toolRestOp:
+            toolName: upsertRecordsForType
+            spec:
+              method: PATCH
+              path: /composite/sobjects/{sObjectName}/{externalIdField}
+              pathParams:
+                - sObjectName
+                - externalIdField
+              bodyParams:
+                - allOrNone
+                - records
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `compositeRecords`. Available: createMany, createManyForType, deleteMany, getMany, updateMany, upsertManyForType'
+              isError: true
+output: '{{result}}'

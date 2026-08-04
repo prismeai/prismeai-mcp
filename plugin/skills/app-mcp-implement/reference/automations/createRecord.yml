@@ -25,6 +25,12 @@ do:
         sObjectName: '{{sObjectName}}'
         body: '{{body}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /sobjects/{sObjectName}
+        pathParams:
+          - sObjectName
+        bodyPassthrough: true
       operationName: createRecord
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

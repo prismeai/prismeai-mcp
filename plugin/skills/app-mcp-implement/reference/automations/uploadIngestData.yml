@@ -24,6 +24,13 @@ do:
         jobId: '{{jobId}}'
         rawBody: '{{rawBody}}'
   - methodRestOp:
+      spec:
+        method: PUT
+        path: /jobs/ingest/{jobId}/batches
+        pathParams:
+          - jobId
+        rawBodyParam: rawBody
+        contentType: text/csv
       operationName: uploadIngestData
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

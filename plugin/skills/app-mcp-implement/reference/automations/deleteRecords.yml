@@ -24,6 +24,12 @@ do:
         ids: '{{ids}}'
         allOrNone: '{{allOrNone}}'
   - methodRestOp:
+      spec:
+        method: DELETE
+        path: /composite/sobjects
+        queryParams:
+          - ids
+          - allOrNone
       operationName: deleteRecords
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

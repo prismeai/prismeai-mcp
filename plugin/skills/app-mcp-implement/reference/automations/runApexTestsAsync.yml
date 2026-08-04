@@ -51,6 +51,17 @@ do:
         testLevel: '{{testLevel}}'
         tests: '{{tests}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /tooling/runTestsAsynchronous
+        bodyParams:
+          - classNames
+          - classids
+          - suiteNames
+          - suiteids
+          - maxFailedTests
+          - testLevel
+          - tests
       operationName: runApexTestsAsync
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

@@ -28,6 +28,14 @@ do:
         locator: '{{locator}}'
         maxRecords: '{{maxRecords}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /jobs/query/{jobId}/results
+        pathParams:
+          - jobId
+        queryParams:
+          - locator
+          - maxRecords
       operationName: getQueryJobResults
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

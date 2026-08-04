@@ -1,0 +1,179 @@
+slug: composite
+name: MCP/tools/composite
+labels:
+  - mcp:tool
+private: true
+description: |-
+  Composite endpoints — execute up to 25 sub-requests in order (with refs), a batch (no refs), a graph (multiple in one transaction), or a parent+children tree insert.
+
+  Available actions:
+  - **batch** (runCompositeBatch): Execute up to 25 independent sub-requests (no refs) — params: body: haltOnError, batchRequests
+  - **graph** (runCompositeGraph): Execute multiple composite graphs in a single transaction — params: body: graphs
+  - **request** (runComposite): Execute up to 25 sub-requests in order, with refs between them — params: body: allOrNone, collateSubrequests, compositeRequest
+  - **tree** (createSObjectTree): Insert a parent record and related children in a single transaction — params: path: sObjectName; body: records
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on composite.
+    enum:
+      - batch
+      - graph
+      - request
+      - tree
+    required: true
+  allOrNone:
+    type: object
+    additionalProperties: true
+    description: Body field `allOrNone` (shape varies per action).
+  collateSubrequests:
+    type: object
+    additionalProperties: true
+    description: Body field `collateSubrequests` (shape varies per action).
+  compositeRequest:
+    type: object
+    additionalProperties: true
+    description: Body field `compositeRequest` (shape varies per action).
+  haltOnError:
+    type: object
+    additionalProperties: true
+    description: Body field `haltOnError` (shape varies per action).
+  batchRequests:
+    type: object
+    additionalProperties: true
+    description: Body field `batchRequests` (shape varies per action).
+  graphs:
+    type: object
+    additionalProperties: true
+    description: Body field `graphs` (shape varies per action).
+  sObjectName:
+    type: string
+    description: Salesforce path parameter `sObjectName`.
+  records:
+    type: object
+    additionalProperties: true
+    description: Body field `records` (shape varies per action).
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `composite`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `composite`. Available: batch, graph, request, tree'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "batch"':
+        - toolRestOp:
+            toolName: runCompositeBatch
+            spec:
+              method: POST
+              path: /composite/batch
+              bodyParams:
+                - haltOnError
+                - batchRequests
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "graph"':
+        - toolRestOp:
+            toolName: runCompositeGraph
+            spec:
+              method: POST
+              path: /composite/graph
+              bodyParams:
+                - graphs
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "request"':
+        - toolRestOp:
+            toolName: runComposite
+            spec:
+              method: POST
+              path: /composite
+              bodyParams:
+                - allOrNone
+                - collateSubrequests
+                - compositeRequest
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "tree"':
+        - toolRestOp:
+            toolName: createSObjectTree
+            spec:
+              method: POST
+              path: /composite/tree/{sObjectName}
+              pathParams:
+                - sObjectName
+              bodyParams:
+                - records
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `composite`. Available: batch, graph, request, tree'
+              isError: true
+output: '{{result}}'

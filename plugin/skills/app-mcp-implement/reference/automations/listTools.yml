@@ -1,52 +1,116 @@
 slug: listTools
 name: /MCP/listTools
 description: >-
-  Build the MCP tools manifest at request time from the `mcpRegistry` Custom Code
-  registry — the connector's single source of truth for entities, actions and REST
-  specs. Nothing is stored in config.value.mcpTools nor in the MCP Core instance
-  config any more, so the manifest can never drift from the routing table. `ctx`
-  lets a tenant hide entities/actions it must not see (auth mode, disabled
-  features) instead of post-filtering the tools/list response.
+  Build the MCP tools manifest by INTROSPECTING this connector's own automations —
+  nothing is stored, neither in config.value.mcpTools, nor in the MCP Core instance
+  config, nor in a Custom Code constant. A tool IS an automation labelled
+  `mcp:tool`: its description is the tool description and its arguments are the
+  inputSchema. Adding, editing or deleting such an automation changes tools/list on
+  the spot, with nothing else to edit.
 private: true
-arguments:
-  ctx:
-    type: object
-    description: >-
-      Optional visibility context — {hideTools: [entity], hideActions: {entity: [action]}}.
 do:
-  - Custom Code.run:
-      function: mcpRegistry
-      parameters:
-        mode: tools
-        ctx: '{{ctx}}'
-      output: registryResult
+  - set:
+      name: tools
+      value: []
+  - repeat:
+      'on': '{{$workspace.automations}}'
+      do:
+        - comment: >-
+            Capture the outer item FIRST: the inner repeat over arguments rebinds
+            `item`, so the tool slug would be lost afterwards.
+        - set:
+            name: toolSlug
+            value: '{{item.key}}'
+        - set:
+            name: toolAuto
+            value: '{{item.value}}'
+        - comment: >-
+            `matches` does NOT work against a raw array, so join the labels first.
+            Two runtime constraints, both hit for real: an expression cannot START
+            with a string-literal concatenation, and join on an undefined value
+            throws — hence the plain join, guarded by a length check. NB: never write
+            expression delimiters inside a comment, the runtime parses them.
+        - set:
+            name: labelStr
+            value: ''
+        - conditions:
+            '{{toolAuto.labels.length}}':
+              - set:
+                  name: labelStr
+                  value: '{% join({{toolAuto.labels}}, ",") %}'
+        - conditions:
+            '{{labelStr}} matches "mcp:tool"':
+              - comment: >-
+                  The map is raw — it contains disabled automations too. And a tool is only
+                  usable if it is actually reachable: tools/call resolves it through
+                  global.endpoints, so an automation without `when.endpoint` would be
+                  announced and then answer "Unknown tool".
+              - conditions:
+                  '!{{toolAuto.disabled}} && {{toolAuto.when.endpoint}}':
+                    - comment: >-
+                        `required` is carried per-argument (the DSUL convention); MCP
+                        expects it as a list at the schema root, so lift it out and
+                        strip it from the property itself.
+                    - set:
+                        name: required
+                        value: []
+                    - set:
+                        name: properties
+                        value: {}
+                    - repeat:
+                        'on': '{{toolAuto.arguments}}'
+                        do:
+                          - set:
+                              name: prop
+                              value: '{{item.value}}'
+                          - delete:
+                              name: prop.required
+                          - set:
+                              name: properties[{{item.key}}]
+                              value: '{{prop}}'
+                          - conditions:
+                              '{{item.value.required}}':
+                                - set:
+                                    name: required
+                                    type: push
+                                    value: '{{item.key}}'
+                    - set:
+                        name: schema
+                        value:
+                          type: object
+                          required: '{{required}}'
+                          properties: '{{properties}}'
+                    - comment: >-
+                        A root-level additionalProperties cannot be expressed through
+                        `arguments`, so it travels as a label.
+                    - conditions:
+                        '{{labelStr}} matches "mcp:additionalProperties"':
+                          - set:
+                              name: schema.additionalProperties
+                              value: true
+                    - set:
+                        name: tools
+                        type: push
+                        value:
+                          name: '{{toolSlug}}'
+                          description: '{{toolAuto.description}}'
+                          inputSchema: '{{schema}}'
   - comment: >-
-      Custom Code returns an error OBJECT when the module fails to load (the
-      "Function not found" negative cache). Serving an empty list here would be far
-      worse than failing: agent-factory and ai-knowledge PERSIST the tools/list
-      response into the agent's config, so an empty array silently strips every tool
-      from every agent using this connector. Fail loudly instead.
+      Refuse to serve an empty list: agent-factory and ai-knowledge PERSIST the
+      tools/list response into the agent's config, so an empty array would silently
+      strip every tool from every agent using this connector.
   - conditions:
-      '{{registryResult.error}}':
+      '!{{tools.length}}':
         - set:
             name: output
             value:
               error: >-
-                Tool registry unavailable: {{registryResult.error}}. The `mcpRegistry`
-                Custom Code function did not run — check the Custom Code module loaded
-                (a single invalid parameter type breaks every function in the instance).
-        - break: {}
-  - conditions:
-      '!{{registryResult.tools.length}}':
-        - set:
-            name: output
-            value:
-              error: >-
-                Tool registry returned no tools. Refusing to serve an empty tools/list —
-                consumers persist it and would drop every tool from their agents.
+                No automation labelled `mcp:tool` found in this connector. Refusing to
+                serve an empty tools/list — consumers persist it and would drop every
+                tool from their agents.
         - break: {}
   - set:
       name: output
       value:
-        tools: '{{registryResult.tools}}'
+        tools: '{{tools}}'
 output: '{{output}}'

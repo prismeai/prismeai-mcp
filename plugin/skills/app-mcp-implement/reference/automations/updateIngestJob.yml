@@ -25,6 +25,13 @@ do:
         jobId: '{{jobId}}'
         state: '{{state}}'
   - methodRestOp:
+      spec:
+        method: PATCH
+        path: /jobs/ingest/{jobId}
+        pathParams:
+          - jobId
+        bodyParams:
+          - state
       operationName: updateIngestJob
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

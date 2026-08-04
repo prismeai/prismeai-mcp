@@ -20,6 +20,11 @@ do:
       value:
         sObjectName: '{{sObjectName}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /sobjects/{sObjectName}
+        pathParams:
+          - sObjectName
       operationName: describeSObjectBasic
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

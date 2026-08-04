@@ -32,6 +32,13 @@ do:
         jobType: '{{jobType}}'
         queryLocator: '{{queryLocator}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /jobs/ingest
+        queryParams:
+          - isPkChunkingEnabled
+          - jobType
+          - queryLocator
       operationName: listIngestJobs
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

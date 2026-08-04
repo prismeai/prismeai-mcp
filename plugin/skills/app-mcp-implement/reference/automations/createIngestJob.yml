@@ -51,6 +51,17 @@ do:
         columnDelimiter: '{{columnDelimiter}}'
         assignmentRuleId: '{{assignmentRuleId}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /jobs/ingest
+        bodyParams:
+          - object
+          - operation
+          - externalIdFieldName
+          - contentType
+          - lineEnding
+          - columnDelimiter
+          - assignmentRuleId
       operationName: createIngestJob
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

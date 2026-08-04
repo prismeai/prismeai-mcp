@@ -20,6 +20,11 @@ do:
       value:
         jobId: '{{jobId}}'
   - methodRestOp:
+      spec:
+        method: DELETE
+        path: /jobs/query/{jobId}
+        pathParams:
+          - jobId
       operationName: deleteQueryJob
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

@@ -1,0 +1,130 @@
+slug: metadata
+name: MCP/tools/metadata
+labels:
+  - mcp:tool
+private: true
+description: |-
+  Metadata REST deploy — submit a zipped metadata package and poll the deploy status (recommended over SOAP Metadata API for new integrations).
+
+  Available actions:
+  - **deploy** (deployMetadata): Deploy a zipped metadata package (Metadata REST) — params: body: deployOptions, file
+  - **getDeployStatus** (getMetadataDeployStatus): Get status + details of a metadata deploy request — params: path: requestId; query: includeDetails
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on metadata.
+    enum:
+      - deploy
+      - getDeployStatus
+    required: true
+  deployOptions:
+    type: object
+    additionalProperties: true
+    description: Body field `deployOptions` (shape varies per action).
+  file:
+    type: object
+    additionalProperties: true
+    description: Body field `file` (shape varies per action).
+  requestId:
+    type: string
+    description: Salesforce path parameter `requestId`.
+  includeDetails:
+    type: boolean
+    description: Query parameter `includeDetails`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `metadata`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `metadata`. Available: deploy, getDeployStatus'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "deploy"':
+        - toolRestOp:
+            toolName: deployMetadata
+            spec:
+              method: POST
+              path: /metadata/deployRequest
+              bodyParams:
+                - deployOptions
+                - file
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getDeployStatus"':
+        - toolRestOp:
+            toolName: getMetadataDeployStatus
+            spec:
+              method: GET
+              path: /metadata/deployRequest/{requestId}
+              pathParams:
+                - requestId
+              queryParams:
+                - includeDetails
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `metadata`. Available: deploy, getDeployStatus'
+              isError: true
+output: '{{result}}'

@@ -21,6 +21,11 @@ do:
       value:
         tests: '{{tests}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /tooling/runTestsSynchronous
+        bodyParams:
+          - tests
       operationName: runApexTestsSync
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

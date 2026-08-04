@@ -1,0 +1,281 @@
+slug: bulkIngest
+name: MCP/tools/bulkIngest
+labels:
+  - mcp:tool
+private: true
+description: |-
+  Bulk API 2.0 ingest jobs — upload CSV data for insert/update/upsert/delete of large record sets. Asynchronous: poll `get` until state=JobComplete.
+
+  Available actions:
+  - **create** (createIngestJob): Create a new bulk ingest job (operation + sObject + lineEnding + columnDelimiter) — params: body: object, operation, externalIdFieldName, contentType, lineEnding, columnDelimiter, assignmentRuleId
+  - **delete** (deleteIngestJob): Delete a bulk ingest job (only after JobComplete/Aborted/Failed) — params: path: jobId
+  - **get** (getIngestJob): Get bulk ingest job state and metrics — params: path: jobId
+  - **getFailed** (getIngestFailed): Download CSV of failed rows with error messages — params: path: jobId
+  - **getSuccessful** (getIngestSuccessful): Download CSV of successfully processed rows — params: path: jobId
+  - **getUnprocessed** (getIngestUnprocessed): Download CSV of rows not processed (job aborted before completion) — params: path: jobId
+  - **list** (listIngestJobs): List bulk ingest jobs — params: query: isPkChunkingEnabled, jobType, queryLocator
+  - **update** (updateIngestJob): Update job state (UploadComplete to start processing, Aborted to stop) — params: path: jobId; body: state
+  - **uploadData** (uploadIngestData): Upload CSV data to an Open ingest job — params: path: jobId; rawBody: rawBody (text/csv)
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on bulkIngest.
+    enum:
+      - create
+      - delete
+      - get
+      - getFailed
+      - getSuccessful
+      - getUnprocessed
+      - list
+      - update
+      - uploadData
+    required: true
+  isPkChunkingEnabled:
+    type: boolean
+    description: Query parameter `isPkChunkingEnabled`.
+  jobType:
+    type: string
+    description: Query parameter `jobType`.
+    enum:
+      - BigObjectIngest
+      - Classic
+      - V2Ingest
+  queryLocator:
+    type: string
+    description: Query parameter `queryLocator`.
+  object:
+    type: object
+    additionalProperties: true
+    description: Body field `object` (shape varies per action).
+  operation:
+    type: object
+    additionalProperties: true
+    description: Body field `operation` (shape varies per action).
+  externalIdFieldName:
+    type: object
+    additionalProperties: true
+    description: Body field `externalIdFieldName` (shape varies per action).
+  contentType:
+    type: object
+    additionalProperties: true
+    description: Body field `contentType` (shape varies per action).
+  lineEnding:
+    type: object
+    additionalProperties: true
+    description: Body field `lineEnding` (shape varies per action).
+  columnDelimiter:
+    type: object
+    additionalProperties: true
+    description: Body field `columnDelimiter` (shape varies per action).
+  assignmentRuleId:
+    type: object
+    additionalProperties: true
+    description: Body field `assignmentRuleId` (shape varies per action).
+  jobId:
+    type: string
+    description: Salesforce path parameter `jobId`.
+  state:
+    type: object
+    additionalProperties: true
+    description: Body field `state` (shape varies per action).
+  rawBody:
+    type: string
+    description: 'Raw request body (CSV / other text). Content-Type: text/csv.'
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `bulkIngest`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `bulkIngest`. Available: create, delete, get, getFailed, getSuccessful, getUnprocessed, list, update, uploadData'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "create"':
+        - toolRestOp:
+            toolName: createIngestJob
+            spec:
+              method: POST
+              path: /jobs/ingest
+              bodyParams:
+                - object
+                - operation
+                - externalIdFieldName
+                - contentType
+                - lineEnding
+                - columnDelimiter
+                - assignmentRuleId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "delete"':
+        - toolRestOp:
+            toolName: deleteIngestJob
+            spec:
+              method: DELETE
+              path: /jobs/ingest/{jobId}
+              pathParams:
+                - jobId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "get"':
+        - toolRestOp:
+            toolName: getIngestJob
+            spec:
+              method: GET
+              path: /jobs/ingest/{jobId}
+              pathParams:
+                - jobId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getFailed"':
+        - toolRestOp:
+            toolName: getIngestFailed
+            spec:
+              method: GET
+              path: /jobs/ingest/{jobId}/failedResults
+              pathParams:
+                - jobId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getSuccessful"':
+        - toolRestOp:
+            toolName: getIngestSuccessful
+            spec:
+              method: GET
+              path: /jobs/ingest/{jobId}/successfulResults
+              pathParams:
+                - jobId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getUnprocessed"':
+        - toolRestOp:
+            toolName: getIngestUnprocessed
+            spec:
+              method: GET
+              path: /jobs/ingest/{jobId}/unprocessedRecords
+              pathParams:
+                - jobId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "list"':
+        - toolRestOp:
+            toolName: listIngestJobs
+            spec:
+              method: GET
+              path: /jobs/ingest
+              queryParams:
+                - isPkChunkingEnabled
+                - jobType
+                - queryLocator
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "update"':
+        - toolRestOp:
+            toolName: updateIngestJob
+            spec:
+              method: PATCH
+              path: /jobs/ingest/{jobId}
+              pathParams:
+                - jobId
+              bodyParams:
+                - state
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "uploadData"':
+        - toolRestOp:
+            toolName: uploadIngestData
+            spec:
+              method: PUT
+              path: /jobs/ingest/{jobId}/batches
+              pathParams:
+                - jobId
+              rawBodyParam: rawBody
+              contentType: text/csv
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `bulkIngest`. Available: create, delete, get, getFailed, getSuccessful, getUnprocessed, list, update, uploadData'
+              isError: true
+output: '{{result}}'

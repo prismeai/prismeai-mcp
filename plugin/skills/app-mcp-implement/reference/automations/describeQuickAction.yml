@@ -20,6 +20,11 @@ do:
       value:
         actionName: '{{actionName}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /quickActions/{actionName}
+        pathParams:
+          - actionName
       operationName: describeQuickAction
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

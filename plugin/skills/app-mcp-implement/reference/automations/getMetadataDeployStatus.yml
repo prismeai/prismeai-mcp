@@ -24,6 +24,13 @@ do:
         requestId: '{{requestId}}'
         includeDetails: '{{includeDetails}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /metadata/deployRequest/{requestId}
+        pathParams:
+          - requestId
+        queryParams:
+          - includeDetails
       operationName: getMetadataDeployStatus
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

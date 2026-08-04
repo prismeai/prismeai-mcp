@@ -1,0 +1,140 @@
+slug: versions
+name: MCP/tools/versions
+labels:
+  - mcp:tool
+private: true
+description: |-
+  Discovery — REST API versions, available resources, org limits and recently-viewed items.
+
+  Available actions:
+  - **getLimits** (getLimits): Get org limits (DailyApiRequests, DataStorageMB, ...)
+  - **getRecent** (getRecentItems): Most recently viewed items — params: query: limit
+  - **listResources** (listResources): List available resources for the current API version
+  - **listVersions** (listVersions): List available REST API versions
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on versions.
+    enum:
+      - getLimits
+      - getRecent
+      - listResources
+      - listVersions
+    required: true
+  limit:
+    type: number
+    description: Query parameter `limit`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `versions`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `versions`. Available: getLimits, getRecent, listResources, listVersions'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "getLimits"':
+        - toolRestOp:
+            toolName: getLimits
+            spec:
+              method: GET
+              path: /limits
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getRecent"':
+        - toolRestOp:
+            toolName: getRecentItems
+            spec:
+              method: GET
+              path: /recent
+              queryParams:
+                - limit
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "listResources"':
+        - toolRestOp:
+            toolName: listResources
+            spec:
+              method: GET
+              path: /resources
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "listVersions"':
+        - toolRestOp:
+            toolName: listVersions
+            spec:
+              method: GET
+              path: /
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `versions`. Available: getLimits, getRecent, listResources, listVersions'
+              isError: true
+output: '{{result}}'

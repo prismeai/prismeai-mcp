@@ -26,6 +26,12 @@ do:
         deployOptions: '{{deployOptions}}'
         file: '{{file}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /metadata/deployRequest
+        bodyParams:
+          - deployOptions
+          - file
       operationName: deployMetadata
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

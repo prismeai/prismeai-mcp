@@ -25,6 +25,13 @@ do:
         jobId: '{{jobId}}'
         state: '{{state}}'
   - methodRestOp:
+      spec:
+        method: PATCH
+        path: /jobs/query/{jobId}
+        pathParams:
+          - jobId
+        bodyParams:
+          - state
       operationName: updateQueryJob
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

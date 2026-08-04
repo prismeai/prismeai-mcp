@@ -29,6 +29,14 @@ do:
         ruleId: '{{ruleId}}'
         contextIds: '{{contextIds}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /process/rules/{sObjectName}/{ruleId}
+        pathParams:
+          - sObjectName
+          - ruleId
+        bodyParams:
+          - contextIds
       operationName: triggerProcessRule
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

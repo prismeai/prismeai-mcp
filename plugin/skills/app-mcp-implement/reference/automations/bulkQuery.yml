@@ -1,0 +1,232 @@
+slug: bulkQuery
+name: MCP/tools/bulkQuery
+labels:
+  - mcp:tool
+private: true
+description: |-
+  Bulk API 2.0 query jobs — run a SOQL query asynchronously and download CSV results (handles >2000 records that SOQL caps).
+
+  Available actions:
+  - **create** (createQueryJob): Create a bulk SOQL query job (returns jobId for polling) — params: body: operation, query, contentType, lineEnding, columnDelimiter
+  - **delete** (deleteQueryJob): Delete a bulk query job (only after completion/abort) — params: path: jobId
+  - **get** (getQueryJob): Get bulk query job state and metrics — params: path: jobId
+  - **getResults** (getQueryJobResults): Download CSV results of a completed bulk query job — params: path: jobId; query: locator, maxRecords
+  - **list** (listQueryJobs): List bulk query jobs — params: query: isPkChunkingEnabled, jobType, concurrencyMode
+  - **update** (updateQueryJob): Update query job state (Aborted only) — params: path: jobId; body: state
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on bulkQuery.
+    enum:
+      - create
+      - delete
+      - get
+      - getResults
+      - list
+      - update
+    required: true
+  isPkChunkingEnabled:
+    type: boolean
+    description: Query parameter `isPkChunkingEnabled`.
+  jobType:
+    type: string
+    description: Query parameter `jobType`.
+    enum:
+      - Classic
+      - V2Query
+  concurrencyMode:
+    type: string
+    description: Query parameter `concurrencyMode`.
+    enum:
+      - Parallel
+      - Serial
+  operation:
+    type: object
+    additionalProperties: true
+    description: Body field `operation` (shape varies per action).
+  query:
+    type: object
+    additionalProperties: true
+    description: Body field `query` (shape varies per action).
+  contentType:
+    type: object
+    additionalProperties: true
+    description: Body field `contentType` (shape varies per action).
+  lineEnding:
+    type: object
+    additionalProperties: true
+    description: Body field `lineEnding` (shape varies per action).
+  columnDelimiter:
+    type: object
+    additionalProperties: true
+    description: Body field `columnDelimiter` (shape varies per action).
+  jobId:
+    type: string
+    description: Salesforce path parameter `jobId`.
+  state:
+    type: object
+    additionalProperties: true
+    description: Body field `state` (shape varies per action).
+  locator:
+    type: string
+    description: Query parameter `locator`.
+  maxRecords:
+    type: number
+    description: Query parameter `maxRecords`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `bulkQuery`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `bulkQuery`. Available: create, delete, get, getResults, list, update'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "create"':
+        - toolRestOp:
+            toolName: createQueryJob
+            spec:
+              method: POST
+              path: /jobs/query
+              bodyParams:
+                - operation
+                - query
+                - contentType
+                - lineEnding
+                - columnDelimiter
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "delete"':
+        - toolRestOp:
+            toolName: deleteQueryJob
+            spec:
+              method: DELETE
+              path: /jobs/query/{jobId}
+              pathParams:
+                - jobId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "get"':
+        - toolRestOp:
+            toolName: getQueryJob
+            spec:
+              method: GET
+              path: /jobs/query/{jobId}
+              pathParams:
+                - jobId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getResults"':
+        - toolRestOp:
+            toolName: getQueryJobResults
+            spec:
+              method: GET
+              path: /jobs/query/{jobId}/results
+              pathParams:
+                - jobId
+              queryParams:
+                - locator
+                - maxRecords
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "list"':
+        - toolRestOp:
+            toolName: listQueryJobs
+            spec:
+              method: GET
+              path: /jobs/query
+              queryParams:
+                - isPkChunkingEnabled
+                - jobType
+                - concurrencyMode
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "update"':
+        - toolRestOp:
+            toolName: updateQueryJob
+            spec:
+              method: PATCH
+              path: /jobs/query/{jobId}
+              pathParams:
+                - jobId
+              bodyParams:
+                - state
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `bulkQuery`. Available: create, delete, get, getResults, list, update'
+              isError: true
+output: '{{result}}'

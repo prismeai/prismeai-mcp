@@ -20,6 +20,11 @@ do:
       value:
         queryLocator: '{{queryLocator}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /query/{queryLocator}
+        pathParams:
+          - queryLocator
       operationName: getQueryNext
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

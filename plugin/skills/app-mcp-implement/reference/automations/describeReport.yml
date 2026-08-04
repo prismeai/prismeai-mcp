@@ -24,6 +24,13 @@ do:
         reportId: '{{reportId}}'
         includeDetails: '{{includeDetails}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /analytics/reports/{reportId}
+        pathParams:
+          - reportId
+        queryParams:
+          - includeDetails
       operationName: describeReport
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

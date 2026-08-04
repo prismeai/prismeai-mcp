@@ -1,7 +1,7 @@
 slug: listReports
 name: listReports
 description: List all reports accessible to the current user (GET /analytics/reports). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.listReports:` directly from their own automations.
-arguments:
+arguments: null
 do:
   - buildAppAuth:
       output: auth
@@ -17,6 +17,9 @@ do:
       value:
         _unused: ''
   - methodRestOp:
+      spec:
+        method: GET
+        path: /analytics/reports
       operationName: listReports
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

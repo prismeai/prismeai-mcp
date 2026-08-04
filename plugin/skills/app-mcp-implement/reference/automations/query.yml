@@ -1,0 +1,167 @@
+slug: query
+name: MCP/tools/query
+labels:
+  - mcp:tool
+private: true
+description: |-
+  SOQL queries (database language), SOSL searches (cross-object text search), parameterized search and query pagination.
+
+  Available actions:
+  - **next** (getQueryNext): Retrieve the next batch of a paginated SOQL query — params: path: queryLocator
+  - **parameterizedSearch** (runParameterizedSearch): Structured parameterized search (richer than SOSL string)
+  - **soql** (runQuery): Run a SOQL query (excludes deleted/archived) — params: query: q
+  - **soqlAll** (runQueryAll): Run a SOQL query including deleted/archived records — params: query: q
+  - **sosl** (runSearch): Run a SOSL search across multiple sObjects — params: query: q
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on query.
+    enum:
+      - next
+      - parameterizedSearch
+      - soql
+      - soqlAll
+      - sosl
+    required: true
+  q:
+    type: string
+    description: Query parameter `q`.
+  queryLocator:
+    type: string
+    description: Salesforce path parameter `queryLocator`.
+  body:
+    type: object
+    additionalProperties: true
+    description: 'JSON request body. Required for actions: parameterizedSearch.'
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `query`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `query`. Available: next, parameterizedSearch, soql, soqlAll, sosl'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "next"':
+        - toolRestOp:
+            toolName: getQueryNext
+            spec:
+              method: GET
+              path: /query/{queryLocator}
+              pathParams:
+                - queryLocator
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "parameterizedSearch"':
+        - toolRestOp:
+            toolName: runParameterizedSearch
+            spec:
+              method: POST
+              path: /parameterizedSearch
+              bodyPassthrough: true
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "soql"':
+        - toolRestOp:
+            toolName: runQuery
+            spec:
+              method: GET
+              path: /query
+              queryParams:
+                - q
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "soqlAll"':
+        - toolRestOp:
+            toolName: runQueryAll
+            spec:
+              method: GET
+              path: /queryAll
+              queryParams:
+                - q
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "sosl"':
+        - toolRestOp:
+            toolName: runSearch
+            spec:
+              method: GET
+              path: /search
+              queryParams:
+                - q
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `query`. Available: next, parameterizedSearch, soql, soqlAll, sosl'
+              isError: true
+output: '{{result}}'

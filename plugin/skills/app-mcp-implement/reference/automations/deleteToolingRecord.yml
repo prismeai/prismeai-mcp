@@ -24,6 +24,12 @@ do:
         sObjectName: '{{sObjectName}}'
         recordId: '{{recordId}}'
   - methodRestOp:
+      spec:
+        method: DELETE
+        path: /tooling/sobjects/{sObjectName}/{recordId}
+        pathParams:
+          - sObjectName
+          - recordId
       operationName: deleteToolingRecord
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

@@ -20,6 +20,11 @@ do:
       value:
         jobId: '{{jobId}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /jobs/ingest/{jobId}/successfulResults
+        pathParams:
+          - jobId
       operationName: getIngestSuccessful
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

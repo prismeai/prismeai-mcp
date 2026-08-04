@@ -20,6 +20,11 @@ do:
       value:
         q: '{{q}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /search
+        queryParams:
+          - q
       operationName: runSearch
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

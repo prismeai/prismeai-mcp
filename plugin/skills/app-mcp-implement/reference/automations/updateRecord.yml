@@ -29,6 +29,13 @@ do:
         recordId: '{{recordId}}'
         body: '{{body}}'
   - methodRestOp:
+      spec:
+        method: PATCH
+        path: /sobjects/{sObjectName}/{recordId}
+        pathParams:
+          - sObjectName
+          - recordId
+        bodyPassthrough: true
       operationName: updateRecord
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

@@ -23,6 +23,11 @@ do:
       value:
         type: '{{type}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /tooling/completions
+        queryParams:
+          - type
       operationName: getApexCompletions
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

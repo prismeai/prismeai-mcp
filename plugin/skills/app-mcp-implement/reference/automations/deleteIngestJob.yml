@@ -20,6 +20,11 @@ do:
       value:
         jobId: '{{jobId}}'
   - methodRestOp:
+      spec:
+        method: DELETE
+        path: /jobs/ingest/{jobId}
+        pathParams:
+          - jobId
       operationName: deleteIngestJob
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

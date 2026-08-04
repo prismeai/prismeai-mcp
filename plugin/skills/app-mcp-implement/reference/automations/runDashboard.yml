@@ -20,6 +20,11 @@ do:
       value:
         dashboardId: '{{dashboardId}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /analytics/dashboards/{dashboardId}
+        pathParams:
+          - dashboardId
       operationName: runDashboard
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

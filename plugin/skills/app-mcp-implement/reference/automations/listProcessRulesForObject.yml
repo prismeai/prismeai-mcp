@@ -20,6 +20,11 @@ do:
       value:
         sObjectName: '{{sObjectName}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /process/rules/{sObjectName}
+        pathParams:
+          - sObjectName
       operationName: listProcessRulesForObject
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

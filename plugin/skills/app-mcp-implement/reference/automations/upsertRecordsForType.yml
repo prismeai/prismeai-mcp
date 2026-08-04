@@ -34,6 +34,15 @@ do:
         allOrNone: '{{allOrNone}}'
         records: '{{records}}'
   - methodRestOp:
+      spec:
+        method: PATCH
+        path: /composite/sobjects/{sObjectName}/{externalIdField}
+        pathParams:
+          - sObjectName
+          - externalIdField
+        bodyParams:
+          - allOrNone
+          - records
       operationName: upsertRecordsForType
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

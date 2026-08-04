@@ -370,7 +370,7 @@ def extract(ws, manifest_override=None):
                 # Short-circuited in routeToolCall (custom automation, not a REST op).
                 op["virtual"] = True
             else:
-                # Copied verbatim — no key dropped, not even empty lists: connectors
+                # Copied verbatim — no key dropped (base/baseUrl/host included): connectors
                 # carry their own extra keys (bodyKeys, queryKeys, aliases, itemType…)
                 # and `operation` must round-trip byte-for-byte.
                 for k, v in spec.items():
@@ -531,6 +531,10 @@ function buildRequest(operationName, args) {
     }
   }
   const result = { method: op.method, path: path, query: query };
+  // Multi-host connectors carry a per-operation base under one of these names, and
+  // their methodRestOp reads it (`{{req.base}}`). Dropping it leaves executeApiCall
+  // with an empty baseUrl — the whole connector then fails on every call.
+  if (op.base) result.base = op.base;
   if (op.baseUrl) result.baseUrl = op.baseUrl;
   if (op.host) result.host = op.host;
   if (op.rawBodyParam && a[op.rawBodyParam] !== undefined && a[op.rawBodyParam] !== null && a[op.rawBodyParam] !== '') {

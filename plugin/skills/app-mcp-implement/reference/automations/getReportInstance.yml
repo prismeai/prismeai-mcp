@@ -24,6 +24,12 @@ do:
         reportId: '{{reportId}}'
         instanceId: '{{instanceId}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /analytics/reports/{reportId}/instances/{instanceId}
+        pathParams:
+          - reportId
+          - instanceId
       operationName: getReportInstance
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

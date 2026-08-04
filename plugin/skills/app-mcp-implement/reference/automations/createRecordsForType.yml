@@ -30,6 +30,14 @@ do:
         allOrNone: '{{allOrNone}}'
         records: '{{records}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /composite/sobjects/{sObjectName}
+        pathParams:
+          - sObjectName
+        bodyParams:
+          - allOrNone
+          - records
       operationName: createRecordsForType
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

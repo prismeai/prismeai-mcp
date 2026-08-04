@@ -1,6 +1,6 @@
 slug: methodRestOp
 name: /Methods/methodRestOp
-description: Generic REST dispatcher for Salesforce. Looks up the operation in the Custom Code registry (`buildSalesforceRequest`), substitutes path placeholders, then calls executeApiCall. Returns the raw apiResult; the caller (toolRestOp or App-mode wrapper) is responsible for formatting.
+description: Generic REST dispatcher. The operation spec is supplied by the CALLER (tool facade or App-mode wrapper); this automation only builds the request from it via the pure `buildRequest` helper — no registry.
 private: true
 arguments:
   operationName:
@@ -14,12 +14,14 @@ arguments:
     description: Full Salesforce REST base — `{instance_url}/services/data/{apiVersion}`.
   apiVersion:
     type: string
+  spec:
+    type: object
+    description: 'REST spec: {method, path, pathParams, queryParams, bodyPassthrough...}'
 do:
   - Custom Code.run:
-      function: mcpRegistry
+      function: buildRequest
       parameters:
-        mode: request
-        operationName: '{{operationName}}'
+        spec: '{{spec}}'
         args: '{{args}}'
       output: req
   - conditions:

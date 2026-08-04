@@ -25,6 +25,12 @@ do:
         sObjectName: '{{sObjectName}}'
         body: '{{body}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /tooling/sobjects/{sObjectName}
+        pathParams:
+          - sObjectName
+        bodyPassthrough: true
       operationName: createToolingRecord
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

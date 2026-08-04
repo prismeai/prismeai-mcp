@@ -1,0 +1,236 @@
+slug: analytics
+name: MCP/tools/analytics
+labels:
+  - mcp:tool
+private: true
+description: |-
+  Reports & Dashboards — list, describe, run reports/dashboards async, fetch async-instance results.
+
+  Available actions:
+  - **describeDashboard** (describeDashboard): Describe a dashboard (components, filters, cache state) — params: path: dashboardId
+  - **describeReport** (describeReport): Describe a report (metadata + reportFactWithDetails when ?includeDetails=true) — params: path: reportId; query: includeDetails
+  - **getDashboardStatus** (getDashboardStatus): Get the current refresh status of a dashboard — params: path: dashboardId
+  - **getReportInstance** (getReportInstance): Get the results of a specific report instance — params: path: reportId, instanceId
+  - **listDashboards** (listDashboards): List all dashboards accessible to the current user
+  - **listReportInstances** (listReportInstances): List async report instances for a report — params: path: reportId
+  - **listReports** (listReports): List all reports accessible to the current user
+  - **runDashboard** (runDashboard): Refresh a dashboard (async) — params: path: dashboardId
+  - **runReport** (runReport): Execute a report asynchronously and return a report instance — params: path: reportId; query: includeDetails
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on analytics.
+    enum:
+      - describeDashboard
+      - describeReport
+      - getDashboardStatus
+      - getReportInstance
+      - listDashboards
+      - listReportInstances
+      - listReports
+      - runDashboard
+      - runReport
+    required: true
+  reportId:
+    type: string
+    description: Salesforce path parameter `reportId`.
+  includeDetails:
+    type: boolean
+    description: Query parameter `includeDetails`.
+  instanceId:
+    type: string
+    description: Salesforce path parameter `instanceId`.
+  dashboardId:
+    type: string
+    description: Salesforce path parameter `dashboardId`.
+  body:
+    type: object
+    additionalProperties: true
+    description: 'JSON request body. Required for actions: runReport.'
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `analytics`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `analytics`. Available: describeDashboard, describeReport, getDashboardStatus, getReportInstance, listDashboards, listReportInstances, listReports, runDashboard, runReport'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "describeDashboard"':
+        - toolRestOp:
+            toolName: describeDashboard
+            spec:
+              method: GET
+              path: /analytics/dashboards/{dashboardId}
+              pathParams:
+                - dashboardId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "describeReport"':
+        - toolRestOp:
+            toolName: describeReport
+            spec:
+              method: GET
+              path: /analytics/reports/{reportId}
+              pathParams:
+                - reportId
+              queryParams:
+                - includeDetails
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getDashboardStatus"':
+        - toolRestOp:
+            toolName: getDashboardStatus
+            spec:
+              method: GET
+              path: /analytics/dashboards/{dashboardId}/status
+              pathParams:
+                - dashboardId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getReportInstance"':
+        - toolRestOp:
+            toolName: getReportInstance
+            spec:
+              method: GET
+              path: /analytics/reports/{reportId}/instances/{instanceId}
+              pathParams:
+                - reportId
+                - instanceId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "listDashboards"':
+        - toolRestOp:
+            toolName: listDashboards
+            spec:
+              method: GET
+              path: /analytics/dashboards
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "listReportInstances"':
+        - toolRestOp:
+            toolName: listReportInstances
+            spec:
+              method: GET
+              path: /analytics/reports/{reportId}/instances
+              pathParams:
+                - reportId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "listReports"':
+        - toolRestOp:
+            toolName: listReports
+            spec:
+              method: GET
+              path: /analytics/reports
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "runDashboard"':
+        - toolRestOp:
+            toolName: runDashboard
+            spec:
+              method: POST
+              path: /analytics/dashboards/{dashboardId}
+              pathParams:
+                - dashboardId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "runReport"':
+        - toolRestOp:
+            toolName: runReport
+            spec:
+              method: POST
+              path: /analytics/reports/{reportId}
+              pathParams:
+                - reportId
+              queryParams:
+                - includeDetails
+              bodyPassthrough: true
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `analytics`. Available: describeDashboard, describeReport, getDashboardStatus, getReportInstance, listDashboards, listReportInstances, listReports, runDashboard, runReport'
+              isError: true
+output: '{{result}}'

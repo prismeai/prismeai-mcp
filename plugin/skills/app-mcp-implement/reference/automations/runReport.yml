@@ -29,6 +29,14 @@ do:
         includeDetails: '{{includeDetails}}'
         body: '{{body}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /analytics/reports/{reportId}
+        pathParams:
+          - reportId
+        queryParams:
+          - includeDetails
+        bodyPassthrough: true
       operationName: runReport
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

@@ -24,6 +24,12 @@ do:
         sObjectName: '{{sObjectName}}'
         recordId: '{{recordId}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /tooling/sobjects/{sObjectName}/{recordId}
+        pathParams:
+          - sObjectName
+          - recordId
       operationName: getToolingRecord
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

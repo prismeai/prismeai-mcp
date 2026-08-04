@@ -20,6 +20,11 @@ do:
       value:
         jobId: '{{jobId}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /jobs/ingest/{jobId}/unprocessedRecords
+        pathParams:
+          - jobId
       operationName: getIngestUnprocessed
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

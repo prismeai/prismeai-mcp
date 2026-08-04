@@ -20,6 +20,11 @@ do:
       value:
         q: '{{q}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /queryAll
+        queryParams:
+          - q
       operationName: runQueryAll
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

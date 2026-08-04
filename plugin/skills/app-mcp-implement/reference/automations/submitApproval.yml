@@ -21,6 +21,11 @@ do:
       value:
         requests: '{{requests}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /process/approvals
+        bodyParams:
+          - requests
       operationName: submitApproval
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

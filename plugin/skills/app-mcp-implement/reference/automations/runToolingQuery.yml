@@ -20,6 +20,11 @@ do:
       value:
         q: '{{q}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /tooling/query
+        queryParams:
+          - q
       operationName: runToolingQuery
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

@@ -1,7 +1,7 @@
 slug: getLimits
 name: getLimits
 description: Get org limits (DailyApiRequests, DataStorageMB, ...) (GET /limits). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.getLimits:` directly from their own automations.
-arguments:
+arguments: null
 do:
   - buildAppAuth:
       output: auth
@@ -17,6 +17,9 @@ do:
       value:
         _unused: ''
   - methodRestOp:
+      spec:
+        method: GET
+        path: /limits
       operationName: getLimits
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

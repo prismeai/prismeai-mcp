@@ -1,0 +1,129 @@
+slug: sobjects
+name: MCP/tools/sobjects
+labels:
+  - mcp:tool
+private: true
+description: |-
+  Salesforce sObject metadata — describe global (all objects) or per-object (fields, picklists, relationships).
+
+  Available actions:
+  - **describe** (describeSObject): Full describe of a single sObject (fields, picklists, child relationships) — params: path: sObjectName
+  - **describeBasic** (describeSObjectBasic): Basic metadata for a single sObject (URLs + recent items) — params: path: sObjectName
+  - **describeGlobal** (describeGlobal): List all available sObjects and basic metadata for each
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on sobjects.
+    enum:
+      - describe
+      - describeBasic
+      - describeGlobal
+    required: true
+  sObjectName:
+    type: string
+    description: Salesforce path parameter `sObjectName`.
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `sobjects`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `sobjects`. Available: describe, describeBasic, describeGlobal'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "describe"':
+        - toolRestOp:
+            toolName: describeSObject
+            spec:
+              method: GET
+              path: /sobjects/{sObjectName}/describe
+              pathParams:
+                - sObjectName
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "describeBasic"':
+        - toolRestOp:
+            toolName: describeSObjectBasic
+            spec:
+              method: GET
+              path: /sobjects/{sObjectName}
+              pathParams:
+                - sObjectName
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "describeGlobal"':
+        - toolRestOp:
+            toolName: describeGlobal
+            spec:
+              method: GET
+              path: /sobjects
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `sobjects`. Available: describe, describeBasic, describeGlobal'
+              isError: true
+output: '{{result}}'

@@ -1,0 +1,307 @@
+slug: tooling
+name: MCP/tools/tooling
+labels:
+  - mcp:tool
+private: true
+description: |-
+  Tooling API — query/CRUD metadata (ApexClass, CustomField, FlexiPage, …), run Apex synchronously or asynchronously, execute anonymous Apex, code completions.
+
+  Available actions:
+  - **completions** (getApexCompletions): Apex / VisualForce code completions — params: query: type
+  - **createRecord** (createToolingRecord): Create a Tooling API record (e.g. ApexClass, CustomField) — params: path: sObjectName
+  - **deleteRecord** (deleteToolingRecord): Delete a Tooling API record — params: path: sObjectName, recordId
+  - **describeGlobal** (describeToolingGlobal): List Tooling API sObjects
+  - **describeSObject** (describeToolingSObject): Describe a Tooling API sObject — params: path: sObjectName
+  - **executeAnonymous** (executeAnonymousApex): Run a one-off Apex code block as the current user — params: query: anonymousBody
+  - **getRecord** (getToolingRecord): Retrieve a Tooling API record — params: path: sObjectName, recordId
+  - **query** (runToolingQuery): Run a Tooling SOQL query (CustomField, ApexClass, FlexiPage, ...) — params: query: q
+  - **runTestsAsync** (runApexTestsAsync): Schedule async Apex test execution — params: body: classNames, classids, suiteNames, suiteids, maxFailedTests, testLevel, tests
+  - **runTestsSync** (runApexTestsSync): Run Apex tests synchronously (small scope only) — params: body: tests
+  - **updateRecord** (updateToolingRecord): Update a Tooling API record — params: path: sObjectName, recordId
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on tooling.
+    enum:
+      - completions
+      - createRecord
+      - deleteRecord
+      - describeGlobal
+      - describeSObject
+      - executeAnonymous
+      - getRecord
+      - query
+      - runTestsAsync
+      - runTestsSync
+      - updateRecord
+    required: true
+  sObjectName:
+    type: string
+    description: Salesforce path parameter `sObjectName`.
+  q:
+    type: string
+    description: Query parameter `q`.
+  anonymousBody:
+    type: string
+    description: Query parameter `anonymousBody`.
+  classNames:
+    type: object
+    additionalProperties: true
+    description: Body field `classNames` (shape varies per action).
+  classids:
+    type: object
+    additionalProperties: true
+    description: Body field `classids` (shape varies per action).
+  suiteNames:
+    type: object
+    additionalProperties: true
+    description: Body field `suiteNames` (shape varies per action).
+  suiteids:
+    type: object
+    additionalProperties: true
+    description: Body field `suiteids` (shape varies per action).
+  maxFailedTests:
+    type: object
+    additionalProperties: true
+    description: Body field `maxFailedTests` (shape varies per action).
+  testLevel:
+    type: object
+    additionalProperties: true
+    description: Body field `testLevel` (shape varies per action).
+  tests:
+    type: object
+    additionalProperties: true
+    description: Body field `tests` (shape varies per action).
+  type:
+    type: string
+    description: Query parameter `type`.
+    enum:
+      - apex
+      - visualforce
+  recordId:
+    type: string
+    description: Salesforce path parameter `recordId`.
+  body:
+    type: object
+    additionalProperties: true
+    description: 'JSON request body. Required for actions: createRecord, updateRecord.'
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `tooling`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `tooling`. Available: completions, createRecord, deleteRecord, describeGlobal, describeSObject, executeAnonymous, getRecord, query, runTestsAsync, runTestsSync, updateRecord'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "completions"':
+        - toolRestOp:
+            toolName: getApexCompletions
+            spec:
+              method: GET
+              path: /tooling/completions
+              queryParams:
+                - type
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "createRecord"':
+        - toolRestOp:
+            toolName: createToolingRecord
+            spec:
+              method: POST
+              path: /tooling/sobjects/{sObjectName}
+              pathParams:
+                - sObjectName
+              bodyPassthrough: true
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "deleteRecord"':
+        - toolRestOp:
+            toolName: deleteToolingRecord
+            spec:
+              method: DELETE
+              path: /tooling/sobjects/{sObjectName}/{recordId}
+              pathParams:
+                - sObjectName
+                - recordId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "describeGlobal"':
+        - toolRestOp:
+            toolName: describeToolingGlobal
+            spec:
+              method: GET
+              path: /tooling/sobjects
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "describeSObject"':
+        - toolRestOp:
+            toolName: describeToolingSObject
+            spec:
+              method: GET
+              path: /tooling/sobjects/{sObjectName}/describe
+              pathParams:
+                - sObjectName
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "executeAnonymous"':
+        - toolRestOp:
+            toolName: executeAnonymousApex
+            spec:
+              method: GET
+              path: /tooling/executeAnonymous
+              queryParams:
+                - anonymousBody
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getRecord"':
+        - toolRestOp:
+            toolName: getToolingRecord
+            spec:
+              method: GET
+              path: /tooling/sobjects/{sObjectName}/{recordId}
+              pathParams:
+                - sObjectName
+                - recordId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "query"':
+        - toolRestOp:
+            toolName: runToolingQuery
+            spec:
+              method: GET
+              path: /tooling/query
+              queryParams:
+                - q
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "runTestsAsync"':
+        - toolRestOp:
+            toolName: runApexTestsAsync
+            spec:
+              method: POST
+              path: /tooling/runTestsAsynchronous
+              bodyParams:
+                - classNames
+                - classids
+                - suiteNames
+                - suiteids
+                - maxFailedTests
+                - testLevel
+                - tests
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "runTestsSync"':
+        - toolRestOp:
+            toolName: runApexTestsSync
+            spec:
+              method: POST
+              path: /tooling/runTestsSynchronous
+              bodyParams:
+                - tests
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "updateRecord"':
+        - toolRestOp:
+            toolName: updateToolingRecord
+            spec:
+              method: PATCH
+              path: /tooling/sobjects/{sObjectName}/{recordId}
+              pathParams:
+                - sObjectName
+                - recordId
+              bodyPassthrough: true
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `tooling`. Available: completions, createRecord, deleteRecord, describeGlobal, describeSObject, executeAnonymous, getRecord, query, runTestsAsync, runTestsSync, updateRecord'
+              isError: true
+output: '{{result}}'

@@ -26,6 +26,12 @@ do:
         allOrNone: '{{allOrNone}}'
         records: '{{records}}'
   - methodRestOp:
+      spec:
+        method: PATCH
+        path: /composite/sobjects
+        bodyParams:
+          - allOrNone
+          - records
       operationName: updateRecords
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

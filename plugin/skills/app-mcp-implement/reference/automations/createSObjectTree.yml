@@ -25,6 +25,13 @@ do:
         sObjectName: '{{sObjectName}}'
         records: '{{records}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /composite/tree/{sObjectName}
+        pathParams:
+          - sObjectName
+        bodyParams:
+          - records
       operationName: createSObjectTree
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

@@ -21,6 +21,10 @@ do:
       value:
         body: '{{body}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /parameterizedSearch
+        bodyPassthrough: true
       operationName: runParameterizedSearch
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

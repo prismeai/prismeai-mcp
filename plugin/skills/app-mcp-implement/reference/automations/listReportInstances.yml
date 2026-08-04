@@ -20,6 +20,11 @@ do:
       value:
         reportId: '{{reportId}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /analytics/reports/{reportId}/instances
+        pathParams:
+          - reportId
       operationName: listReportInstances
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

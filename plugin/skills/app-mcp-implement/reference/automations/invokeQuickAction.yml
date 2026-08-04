@@ -25,6 +25,12 @@ do:
         actionName: '{{actionName}}'
         body: '{{body}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /quickActions/{actionName}
+        pathParams:
+          - actionName
+        bodyPassthrough: true
       operationName: invokeQuickAction
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

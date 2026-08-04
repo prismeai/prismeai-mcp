@@ -7,11 +7,15 @@ arguments:
     type: string
   body:
     type: object
+  spec:
+    type: object
+    description: REST spec supplied by the caller (method, path, params) — no registry lookup.
 do:
   - set:
       name: outputFormat
       value: '{% {{body.arguments.outputFormat}} || "verbose" %}'
   - methodRestOp:
+      spec: '{{spec}}'
       operationName: '{{toolName}}'
       args: '{{body.arguments}}'
       accessToken: '{{body.accessToken}}'

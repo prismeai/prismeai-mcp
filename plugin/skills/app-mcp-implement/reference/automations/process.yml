@@ -1,0 +1,171 @@
+slug: process
+name: MCP/tools/process
+labels:
+  - mcp:tool
+private: true
+description: |-
+  Process Rules and Approval Processes — list, trigger, submit records for approval.
+
+  Available actions:
+  - **listApprovals** (listApprovals): List approval requests visible to the current user
+  - **listRules** (listProcessRules): List active process rules across the org
+  - **listRulesForObject** (listProcessRulesForObject): Process rules for a given sObject — params: path: sObjectName
+  - **submitApproval** (submitApproval): Submit a record into an approval process or act on an existing one — params: body: requests
+  - **triggerRule** (triggerProcessRule): Trigger a specific process rule against record IDs — params: path: sObjectName, ruleId; body: contextIds
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on process.
+    enum:
+      - listApprovals
+      - listRules
+      - listRulesForObject
+      - submitApproval
+      - triggerRule
+    required: true
+  requests:
+    type: object
+    additionalProperties: true
+    description: Body field `requests` (shape varies per action).
+  sObjectName:
+    type: string
+    description: Salesforce path parameter `sObjectName`.
+  ruleId:
+    type: string
+    description: Salesforce path parameter `ruleId`.
+  contextIds:
+    type: object
+    additionalProperties: true
+    description: Body field `contextIds` (shape varies per action).
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `process`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `process`. Available: listApprovals, listRules, listRulesForObject, submitApproval, triggerRule'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "listApprovals"':
+        - toolRestOp:
+            toolName: listApprovals
+            spec:
+              method: GET
+              path: /process/approvals
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "listRules"':
+        - toolRestOp:
+            toolName: listProcessRules
+            spec:
+              method: GET
+              path: /process/rules
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "listRulesForObject"':
+        - toolRestOp:
+            toolName: listProcessRulesForObject
+            spec:
+              method: GET
+              path: /process/rules/{sObjectName}
+              pathParams:
+                - sObjectName
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "submitApproval"':
+        - toolRestOp:
+            toolName: submitApproval
+            spec:
+              method: POST
+              path: /process/approvals
+              bodyParams:
+                - requests
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "triggerRule"':
+        - toolRestOp:
+            toolName: triggerProcessRule
+            spec:
+              method: POST
+              path: /process/rules/{sObjectName}/{ruleId}
+              pathParams:
+                - sObjectName
+                - ruleId
+              bodyParams:
+                - contextIds
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `process`. Available: listApprovals, listRules, listRulesForObject, submitApproval, triggerRule'
+              isError: true
+output: '{{result}}'

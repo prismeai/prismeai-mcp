@@ -28,6 +28,13 @@ do:
         recordId: '{{recordId}}'
         fieldName: '{{fieldName}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /sobjects/{sObjectName}/{recordId}/{fieldName}
+        pathParams:
+          - sObjectName
+          - recordId
+          - fieldName
       operationName: getRecordField
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

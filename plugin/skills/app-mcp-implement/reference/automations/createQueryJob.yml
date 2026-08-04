@@ -41,6 +41,15 @@ do:
         lineEnding: '{{lineEnding}}'
         columnDelimiter: '{{columnDelimiter}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /jobs/query
+        bodyParams:
+          - operation
+          - query
+          - contentType
+          - lineEnding
+          - columnDelimiter
       operationName: createQueryJob
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

@@ -20,6 +20,11 @@ do:
       value:
         limit: '{{limit}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /recent
+        queryParams:
+          - limit
       operationName: getRecentItems
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

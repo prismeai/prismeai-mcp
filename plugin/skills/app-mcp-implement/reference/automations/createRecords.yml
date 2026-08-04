@@ -26,6 +26,12 @@ do:
         allOrNone: '{{allOrNone}}'
         records: '{{records}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /composite/sobjects
+        bodyParams:
+          - allOrNone
+          - records
       operationName: createRecords
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

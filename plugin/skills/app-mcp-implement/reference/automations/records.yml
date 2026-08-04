@@ -1,0 +1,249 @@
+slug: records
+name: MCP/tools/records
+labels:
+  - mcp:tool
+private: true
+description: |-
+  CRUD on individual Salesforce records (Accounts, Contacts, Leads, Opportunities, …). One record per call.
+
+  Available actions:
+  - **create** (createRecord): Create a new record — params: path: sObjectName
+  - **delete** (deleteRecord): Delete a record by ID — params: path: sObjectName, recordId
+  - **get** (getRecord): Retrieve a single record by ID — params: path: sObjectName, recordId; query: fields
+  - **getDeleted** (getDeletedRecords): Records deleted within a time window (recycle bin) — params: path: sObjectName; query: start, end
+  - **getField** (getRecordField): Get a single field on a record (incl. blob/document body) — params: path: sObjectName, recordId, fieldName
+  - **getUpdated** (getUpdatedRecords): Records updated within a time window — params: path: sObjectName; query: start, end
+  - **update** (updateRecord): Update fields on an existing record — params: path: sObjectName, recordId
+  - **upsert** (upsertRecord): Upsert a record by external ID field — params: path: sObjectName, externalIdField, externalIdValue
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: Operation to perform on records.
+    enum:
+      - create
+      - delete
+      - get
+      - getDeleted
+      - getField
+      - getUpdated
+      - update
+      - upsert
+    required: true
+  sObjectName:
+    type: string
+    description: Salesforce path parameter `sObjectName`.
+  recordId:
+    type: string
+    description: Salesforce path parameter `recordId`.
+  fields:
+    type: string
+    description: Query parameter `fields`.
+  externalIdField:
+    type: string
+    description: Salesforce path parameter `externalIdField`.
+  externalIdValue:
+    type: string
+    description: Salesforce path parameter `externalIdValue`.
+  fieldName:
+    type: string
+    description: Salesforce path parameter `fieldName`.
+  start:
+    type: string
+    description: Query parameter `start`.
+  end:
+    type: string
+    description: Query parameter `end`.
+  body:
+    type: object
+    additionalProperties: true
+    description: 'JSON request body. Required for actions: create, update, upsert.'
+  outputFormat:
+    type: string
+    enum:
+      - structured
+      - verbose
+      - both
+    default: verbose
+    description: Response format for the MCP client.
+do:
+  - comment: 'Facade for the MCP tool `records`: it IS the tool. Its description and arguments are what tools/list serves, read straight from this file, and the action -> operation mapping lives here explicitly rather than in a central table.'
+  - comment: 'Endpoint reachable ONLY through the MCP dispatch. `when.endpoint` makes it a public webhook and `private` does NOT close that (the trigger registry ignores it), so require a marker header: the runtime strips incoming x-* headers, so an external caller cannot forge it, while the internal dispatch fetch forwards it. Without this, tools/call could be reached anonymously, bypassing validateAgent entirely.'
+  - conditions:
+      '!{{headers["x-mcp-dispatch"]}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: Direct calls are not allowed — use the MCP endpoint.
+              isError: true
+        - break: {}
+  - comment: A webhook delivers its payload in the body WITHOUT mapping it onto the declared arguments. The facade is MCP-only (see the guard above), so the body is the source of truth.
+  - set:
+      name: act
+      value: '{{body.action}}'
+  - set:
+      name: args
+      value: '{{body}}'
+  - comment: Reject invalid input BEFORE any network call.
+  - conditions:
+      '!{{act}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Missing required argument `action` for `records`. Available: create, delete, get, getDeleted, getField, getUpdated, update, upsert'
+              isError: true
+        - break: {}
+  - comment: 'Self-contained: the facade resolves its own auth, so the tool works from MCP, from a webhook or in App-mode alike.'
+  - buildAppAuth:
+      output: auth
+  - conditions:
+      '{{auth.error}}':
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: '{{auth.error}}'
+              isError: true
+        - break: {}
+  - conditions:
+      '{{act}} == "create"':
+        - toolRestOp:
+            toolName: createRecord
+            spec:
+              method: POST
+              path: /sobjects/{sObjectName}
+              pathParams:
+                - sObjectName
+              bodyPassthrough: true
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "delete"':
+        - toolRestOp:
+            toolName: deleteRecord
+            spec:
+              method: DELETE
+              path: /sobjects/{sObjectName}/{recordId}
+              pathParams:
+                - sObjectName
+                - recordId
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "get"':
+        - toolRestOp:
+            toolName: getRecord
+            spec:
+              method: GET
+              path: /sobjects/{sObjectName}/{recordId}
+              pathParams:
+                - sObjectName
+                - recordId
+              queryParams:
+                - fields
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getDeleted"':
+        - toolRestOp:
+            toolName: getDeletedRecords
+            spec:
+              method: GET
+              path: /sobjects/{sObjectName}/deleted
+              pathParams:
+                - sObjectName
+              queryParams:
+                - start
+                - end
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getField"':
+        - toolRestOp:
+            toolName: getRecordField
+            spec:
+              method: GET
+              path: /sobjects/{sObjectName}/{recordId}/{fieldName}
+              pathParams:
+                - sObjectName
+                - recordId
+                - fieldName
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "getUpdated"':
+        - toolRestOp:
+            toolName: getUpdatedRecords
+            spec:
+              method: GET
+              path: /sobjects/{sObjectName}/updated
+              pathParams:
+                - sObjectName
+              queryParams:
+                - start
+                - end
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "update"':
+        - toolRestOp:
+            toolName: updateRecord
+            spec:
+              method: PATCH
+              path: /sobjects/{sObjectName}/{recordId}
+              pathParams:
+                - sObjectName
+                - recordId
+              bodyPassthrough: true
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      '{{act}} == "upsert"':
+        - toolRestOp:
+            toolName: upsertRecord
+            spec:
+              method: PATCH
+              path: /sobjects/{sObjectName}/{externalIdField}/{externalIdValue}
+              pathParams:
+                - sObjectName
+                - externalIdField
+                - externalIdValue
+              bodyPassthrough: true
+            body:
+              arguments: '{{args}}'
+              accessToken: '{{auth.accessToken}}'
+              baseUrl: '{{auth.baseUrl}}'
+            output: result
+      default:
+        - set:
+            name: result
+            value:
+              content:
+                - type: text
+                  text: 'Unknown action `{{act}}` for `records`. Available: create, delete, get, getDeleted, getField, getUpdated, update, upsert'
+              isError: true
+output: '{{result}}'

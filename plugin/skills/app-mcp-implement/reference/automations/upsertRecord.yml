@@ -33,6 +33,14 @@ do:
         externalIdValue: '{{externalIdValue}}'
         body: '{{body}}'
   - methodRestOp:
+      spec:
+        method: PATCH
+        path: /sobjects/{sObjectName}/{externalIdField}/{externalIdValue}
+        pathParams:
+          - sObjectName
+          - externalIdField
+          - externalIdValue
+        bodyPassthrough: true
       operationName: upsertRecord
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

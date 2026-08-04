@@ -20,6 +20,11 @@ do:
       value:
         anonymousBody: '{{anonymousBody}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /tooling/executeAnonymous
+        queryParams:
+          - anonymousBody
       operationName: executeAnonymousApex
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

@@ -21,6 +21,11 @@ do:
       value:
         graphs: '{{graphs}}'
   - methodRestOp:
+      spec:
+        method: POST
+        path: /composite/graph
+        bodyParams:
+          - graphs
       operationName: runCompositeGraph
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'

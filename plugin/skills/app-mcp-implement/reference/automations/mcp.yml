@@ -1,19 +1,10 @@
 slug: mcp
 name: MCP/endpoint
-description: >-
-  MCP JSON-RPC 2.0 endpoint for Salesforce Next. Runs in the TENANT app-instance
-  context (`config.*` = this tenant's credentials, `{{global.workspaceId}}` = the
-  tenant). `tools/call` authorizes the calling agent against the tenant allowlist
-  + agent-factory identity check (`validateAgent`), resolves Salesforce
-  service-to-service auth via `buildAppAuth`, then routes. `tools/list` /
-  `initialize` are delegated to MCP Core. No central endpoint, no HMAC key.
+description: MCP JSON-RPC 2.0 endpoint for Salesforce Next. Runs in the TENANT app-instance context (`config.*` = this tenant's credentials, `{{global.workspaceId}}` = the tenant). `tools/call` authorizes the calling agent against the tenant allowlist + agent-factory identity check (`validateAgent`), resolves Salesforce service-to-service auth via `buildAppAuth`, then routes. `tools/list` / `initialize` are delegated to MCP Core. No central endpoint, no HMAC key.
 when:
   endpoint: true
 do:
-  - comment: >-
-      MCP notifications (no JSON-RPC id, e.g. notifications/initialized) MUST get
-      202 Accepted with an empty body — never a JSON-RPC object — or strict MCP
-      clients (agent-factory) fail the handshake and never register the tools.
+  - comment: MCP notifications (no JSON-RPC id, e.g. notifications/initialized) MUST get 202 Accepted with an empty body — never a JSON-RPC object — or strict MCP clients (agent-factory) fail the handshake and never register the tools.
   - conditions:
       '!{{body.id}}':
         - set:
@@ -29,10 +20,7 @@ do:
         - set:
             name: toolName
             value: '{{body.params.name}}'
-        - comment: >-
-            Agent identity = agent_id injected server-side by agent-factory via
-            the MCP capability `scope` (falls back to an agent-id header). The
-            capability only needs the endpoint URL — no key.
+        - comment: Agent identity = agent_id injected server-side by agent-factory via the MCP capability `scope` (falls back to an agent-id header). The capability only needs the endpoint URL — no key.
         - set:
             name: agentId
             value: '{% {{headers["agent-id"]}} || {{body.params.arguments.agent_id}} %}'
@@ -49,7 +37,7 @@ do:
                   '{{agentCheck.reason}} == "missing_agent_id"':
                     - set:
                         name: deniedMsg
-                        value: 'The calling agent could not be identified, so it cannot be authorized. The MCP capability must declare Scope "context_id,agent_id,user_id" (this is separate from the OAuth scopes) so agent-factory injects the agent id. Fix the capability Scope, then allow this agent in the connector config app.'
+                        value: The calling agent could not be identified, so it cannot be authorized. The MCP capability must declare Scope "context_id,agent_id,user_id" (this is separate from the OAuth scopes) so agent-factory injects the agent id. Fix the capability Scope, then allow this agent in the connector config app.
               - set:
                   name: response
                   value:
@@ -62,11 +50,12 @@ do:
                       isError: true
               - break: {}
         - comment: Resolve Salesforce service auth from tenant config (JWT Bearer / OAuth client).
-        - buildAppAuth:
-            output: auth
+        - comment: Dispatch to the tool's own automation. An instruction name is never interpolated, so the tool is reached through its endpoint URL — the runtime short-circuits this into a direct in-process call. global.endpoints already carries the appInstance prefix when installed in a tenant.
+        - set:
+            name: toolUrl
+            value: '{{global.endpoints[{{toolName}}]}}'
         - conditions:
-            '{{auth.error}}':
-              - comment: Pass the buildAppAuth error through verbatim — it already distinguishes "user must reconnect" (dead refresh token), "transient provider outage" and "admin must configure credentials". A generic message here misleads the LLM into blaming the workspace config.
+            '!{{toolUrl}}':
               - set:
                   name: response
                   value:
@@ -75,17 +64,34 @@ do:
                     result:
                       content:
                         - type: text
-                          text: '{{auth.error}}'
+                          text: Unknown tool `{{toolName}}`.
                       isError: true
               - break: {}
-        - routeToolCall:
-            toolName: '{{toolName}}'
-            toolArgs:
-              arguments: '{{body.params.arguments}}'
-              accessToken: '{{auth.accessToken}}'
-              baseUrl: '{{auth.baseUrl}}'
-              apiVersion: '{{config.apiVersion}}'
-            output: toolResult
+        - fetch:
+            url: '{{toolUrl}}'
+            method: post
+            headers:
+              x-mcp-dispatch: '1'
+            body: '{{body.params.arguments}}'
+            outputMode: detailed_response
+            output: toolResp
+        - comment: 'The short-circuited call does NOT rethrow: on failure the body carries the error and the status is >= 400. Without this check the client would get a result with neither content[] nor isError, and the agent would loop or hallucinate.'
+        - conditions:
+            '{{toolResp.status}} >= 400':
+              - set:
+                  name: response
+                  value:
+                    jsonrpc: '2.0'
+                    id: '{{body.id}}'
+                    result:
+                      content:
+                        - type: text
+                          text: 'Tool `{{toolName}}` failed ({{toolResp.status}}): {{toolResp.body.message}}'
+                      isError: true
+              - break: {}
+        - set:
+            name: toolResult
+            value: '{{toolResp.body}}'
         - set:
             name: response
             value:
@@ -93,16 +99,10 @@ do:
               id: '{{body.id}}'
               result: '{{toolResult}}'
       '{{body.method}} == "tools/list"':
-        - comment: >-
-            The manifest is COMPUTED from the mcpRegistry registry, never stored. MCP
-            Core still builds the JSON-RPC envelope — it just takes the list as its
-            `tools` argument instead of reading its own config.mcpTools.
+        - comment: The manifest is DERIVED from this workspace's own automations (those labelled mcp:tool), never stored anywhere. MCP Core still builds the JSON-RPC envelope — it just takes the list as its `tools` argument instead of reading its own config.mcpTools.
         - listTools:
             output: manifest
-        - comment: >-
-            Error envelope built inline rather than via MCP Core.buildJsonRpcError —
-            that helper is `private: true` in the MCP Core app, so it is NOT callable
-            as an App-mode instruction from a consumer workspace.
+        - comment: 'Error envelope built inline rather than via MCP Core.buildJsonRpcError — that helper is `private: true` in the MCP Core app, so it is NOT callable as an App-mode instruction from a consumer workspace.'
         - conditions:
             '{{manifest.error}}':
               - set:

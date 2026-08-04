@@ -28,6 +28,14 @@ do:
         start: '{{start}}'
         end: '{{end}}'
   - methodRestOp:
+      spec:
+        method: GET
+        path: /sobjects/{sObjectName}/updated
+        pathParams:
+          - sObjectName
+        queryParams:
+          - start
+          - end
       operationName: getUpdatedRecords
       args: '{{methodArgs}}'
       accessToken: '{{auth.accessToken}}'
