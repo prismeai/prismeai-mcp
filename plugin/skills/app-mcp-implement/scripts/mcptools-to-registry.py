@@ -412,8 +412,8 @@ def extract(ws, manifest_override=None):
 
 JS_RUNTIME = r"""
 // <<GENERATED>> single source of truth — entity/action surface, REST specs and the
-// tools/list manifest all derive from REGISTRY below. Regenerate with
-// scripts/mcptools-to-registry.py; never hand-edit one of the derived forms.
+// tools/list manifest all derive from REGISTRY below. Never hand-edit one of
+// the derived forms.
 //
 // modes:
 //   tools     -> { tools: [...] }        manifest served by tools/list (via listTools)
@@ -472,9 +472,8 @@ function buildTools(ctx) {
       description = lines.join('\n');
     }
     // Providers reject descriptions over 1024 chars (Gotcha 21). NOT truncated here:
-    // cutting mid-sentence corrupts the action list the LLM relies on. The generator
-    // (scripts/mcptools-to-registry.py) and the Phase 8 live audit both flag overruns
-    // so a human shortens the summaries at the source.
+    // cutting mid-sentence corrupts the action list the LLM relies on. Overruns are
+    // flagged by the Phase 8 live audit so a human shortens the summaries at source.
 
     const actionProp = { type: 'string' };
     for (const k of Object.keys(e.actionProp || {})) actionProp[k] = e.actionProp[k];
