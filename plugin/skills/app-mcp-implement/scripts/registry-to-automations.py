@@ -344,7 +344,11 @@ def can_rewrite_mcp(ws):
             if "tools/call" in key and any("routeToolCall" in i for i in block):
                 return True, None
     return False, ("tools/call does not dispatch through a top-level routeToolCall — "
-                   "older HMAC/central model, migrate by hand")
+                   "central HMAC model. Do NOT migrate by hand either: there the tenant "
+                   "credentials are decoded from the mcp-api-key in mcp.yml and passed to "
+                   "the tool, while a facade calls buildAppAuth and would resolve the "
+                   "CENTRAL workspace's own config instead. tools/list would look fine and "
+                   "tools/call would break. Leave the connector on the static model.")
 
 
 def drop_redundant_auth(block):
