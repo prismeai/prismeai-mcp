@@ -1,0 +1,1237 @@
+openapi: '3.0.3'
+info:
+  version: 1.0.0
+  title: LLM Gateway API
+  description: |
+    Public REST API for the Prisme.ai LLM Gateway - OpenAI-compatible
+    chat completions and embeddings, plus a managed model catalogue
+    with governance overrides per organization.
+
+    The gateway abstracts multi-provider LLM access (OpenAI, Azure OpenAI,
+    Anthropic, Google Vertex, AWS Bedrock, OpenAI-compatible providers) behind
+    an OpenAI-compatible request/response shape. It enforces per-tenant
+    governance (allowed models, default models, quotas) and emits analytics
+    events (`analytics.llm.completion`) usable for cost and carbon reporting.
+
+    This spec documents only the public REST surface (endpoints exposed via
+    Prisme.ai workspace webhooks). Internal helpers (private automations
+    prefixed with `_`) and load-test mocks are not part of the public contract.
+  contact:
+    name: Prisme.ai
+    url: https://prisme.ai
+servers:
+  - url: https://{host}/v2/workspaces/slug:llm-gateway/webhooks
+    description: Prisme.ai workspace webhooks
+    variables:
+      host:
+        default: api.studio.prisme.ai
+        description: API host (override for self-hosted or sandbox)
+security:
+  - BearerAuth: []
+  - WorkspaceApiKeyAuth: []
+tags:
+  - name: Completions
+    description: OpenAI-compatible chat completions (with optional SSE streaming).
+  - name: Embeddings
+    description: OpenAI-compatible text embeddings.
+  - name: Models
+    description: Model catalogue (CRUD + bulk replace + governance-aware listing).
+  - name: Defaults
+    description: Resolved default models for completions / embeddings / image generation / file parsing.
+  - name: Test
+    description: Smoke-test reachability of a model through the gateway.
+paths:
+  /v1/chat/completions:
+    post:
+      tags: [Completions]
+      operationId: createChatCompletion
+      summary: Create a chat completion
+      description: |
+        OpenAI-compatible chat completions. Routes the request through the
+        gateway's provider layer (OpenAI, Azure OpenAI, Anthropic, Vertex,
+        Bedrock, OpenAI-compatible) based on the resolved model spec.
+
+        **Streaming.** When `stream: true`, the response is a `text/event-stream`
+        of OpenAI-compatible delta chunks (`ChatCompletionChunk`) terminated by
+        a literal `data: [DONE]` payload. Provider-native stream shapes
+        (Anthropic, Bedrock, Vertex) are normalised to OpenAI deltas before
+        being forwarded. Provider errors mid-stream are emitted as a synthetic
+        chunk with a `content` message followed by `[DONE]`.
+
+        When `stream: false` (default), the response is a single JSON
+        `ChatCompletionResponse`. The non-streaming response is enriched with
+        `usage.cost`, `usage.duration_ms`, and `usage.carbon` (Prisme.ai
+        extensions over the standard OpenAI shape).
+
+        **Prisme.ai extensions** in the request body:
+        - `task_id` - opaque correlation identifier for A2A flows.
+        - `analytics_context` - caller-supplied context (`orgSlug`, `agent_id`,
+          `user_id`, `context_id`, `agent_allowed_models`, `call_type`,
+          `message_turn`) used to enrich `analytics.llm.completion` events.
+
+        **Rate limiting.** 100 requests per 60 seconds per consumer
+        (`auth.user_id` or `session.id`).
+
+        **Governance.** Calls may be rejected with `403 MODEL_NOT_ALLOWED` or
+        `429` quota errors based on the caller's organization governance
+        (resolved via `ai-governance-v2`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+      responses:
+        '200':
+          description: |
+            Successful completion. Content type depends on `request.stream`:
+            - `application/json`: non-streaming `ChatCompletionResponse`.
+            - `text/event-stream`: SSE stream of `ChatCompletionChunk` payloads
+              terminated by `data: [DONE]`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+            text/event-stream:
+              schema:
+                description: |
+                  Server-Sent Events stream. Each `data:` line carries a JSON
+                  `ChatCompletionChunk` (delta), and the final `data:` line is
+                  the literal string `[DONE]`. The schema below describes the
+                  per-chunk JSON payload.
+                allOf:
+                  - $ref: '#/components/schemas/ChatCompletionChunk'
+        '400':
+          description: Validation error (validateArguments rejected the body shape).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: |
+            Model not allowed for this caller (governance overlay).
+            `error.code` is typically `MODEL_NOT_ALLOWED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: |
+            Rate limit exceeded (`code: RATE_LIMITED`, 100 req / 60 s per
+            consumer) or governance quota exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/embeddings:
+    post:
+      tags: [Embeddings]
+      operationId: createEmbedding
+      summary: Create text embeddings
+      description: |
+        OpenAI-compatible embeddings endpoint. Accepts a single string or an
+        array of strings as `input` and routes through the gateway's provider
+        layer. Returns the standard OpenAI `EmbeddingResponse`. When the input
+        is a single string, the response also exposes a flat `embedding` field
+        (Prisme.ai convenience extension) in addition to `data[0].embedding`.
+
+        `analytics_context` is a Prisme.ai extension used to enrich analytics
+        events.
+
+        Governance overlays may reject the call (forwarded as 403 / 429 with
+        the upstream `result.status`, e.g. `MODEL_NOT_ALLOWED`,
+        `INVALID_DIMENSIONS`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbeddingRequest'
+      responses:
+        '200':
+          description: Successful embedding response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingResponse'
+        '400':
+          description: |
+            Invalid request. Includes governance/provider rejections forwarded
+            from the inner worker (e.g. `INVALID_DIMENSIONS`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Model not allowed for this caller (governance overlay).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Governance quota exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/defaults:
+    get:
+      tags: [Defaults]
+      operationId: getDefaults
+      summary: Get resolved default models
+      description: |
+        Returns the resolved default models for the calling org, merging
+        platform defaults (`config.defaults.*`) with the org's governance
+        overrides. The embedding default is enriched with `dimensions` and
+        `supported_dimensions` looked up from the model catalogue.
+      responses:
+        '200':
+          description: Resolved defaults.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Defaults'
+        '401':
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only `GET` is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/models:
+    get:
+      tags: [Models]
+      operationId: listModels
+      summary: List models from the catalogue
+      description: |
+        Returns a paginated, filterable list of models from the gateway
+        catalogue.
+
+        **Note.** The response uses Prisme.ai's standard pagination envelope
+        (`{ items, total, page, limit }`), **not** OpenAI's
+        `{ object: "list", data: [...] }` shape - this endpoint is the
+        management catalogue, not the OpenAI-compatible model listing.
+
+        Per-org availability filter:
+        - No `orgSlug` query → restrict to models reachable from the current
+          session (no `org_slugs` constraint, or the session's org is listed).
+        - `orgSlug=all` (admin only) → returns the full catalogue regardless of
+          per-model `org_slugs`.
+        - `orgSlug=<slug>` (admin only) → impersonate that org's view.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: string }
+          description: Page size (capped server-side at 100, default 100).
+        - in: query
+          name: page
+          schema: { type: string }
+          description: Zero-based page index.
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum: [completion, embeddings, image_generation]
+          description: Filter by model type.
+        - in: query
+          name: enabled
+          schema:
+            type: string
+            enum: ["true", "false"]
+          description: Filter by enabled flag.
+        - in: query
+          name: model_ids
+          schema: { type: string }
+          description: Comma-separated list of model IDs.
+        - in: query
+          name: tags
+          schema: { type: string }
+          description: Comma-separated list of tags (matches any).
+        - in: query
+          name: visible_only
+          schema:
+            type: string
+            enum: ["true", "false"]
+          description: When `"true"`, exclude models with `display.hidden = true`.
+        - in: query
+          name: brand
+          schema: { type: string }
+          description: Exact match on `display.brand`.
+        - in: query
+          name: search
+          schema: { type: string }
+          description: Case-insensitive search across `model_id`, `display.name`, `display.brand`.
+        - in: query
+          name: capability
+          schema:
+            type: string
+            enum: [vision, audio, text, image]
+          description: Filter to models declaring the given capability.
+        - in: query
+          name: orgSlug
+          schema: { type: string }
+          description: |
+            Admin-only override for the per-org availability filter. Use `all`
+            to bypass the filter, or a slug to impersonate that org's view.
+            Ignored for non-admin callers.
+      responses:
+        '200':
+          description: Paginated list of models.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelsListResponse'
+        '401':
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Models]
+      operationId: createModel
+      summary: Create a model in the catalogue
+      description: |
+        Inserts a new model entry. `model_id` and `type` are required. Returns
+        409 if a model with the same `model_id` already exists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelCreateInput'
+      responses:
+        '200':
+          description: Model created. Returns the inserted document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+        '400':
+          description: |
+            Validation error. Codes: `MISSING_MODEL_ID`, `MISSING_TYPE`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: 'A model with the same `model_id` already exists (`code: MODEL_EXISTS`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [Models]
+      operationId: replaceModels
+      summary: Bulk-replace the entire model catalogue
+      description: |
+        **Destructive.** Deletes the entire models collection and inserts the
+        provided list. Used by the platform Models page "Import" flow.
+
+        - Body must be `{ "models": [...] }` (max 500 items). Each item must
+          carry at least `model_id` and `type`.
+        - Per-key cache (`global.models_cache`) is fully invalidated.
+        - Emits a `model.bulk_replaced` audit event.
+        - Rate-limited: 5 calls per 3600 seconds per consumer
+          (`ModelsBulkReplace`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [models]
+              properties:
+                models:
+                  type: array
+                  description: Replacement catalogue (max 500 items).
+                  maxItems: 500
+                  items:
+                    $ref: '#/components/schemas/ModelCreateInput'
+      responses:
+        '200':
+          description: Bulk replace summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, inserted]
+                properties:
+                  deleted:
+                    type: integer
+                    description: Number of documents removed before the insert.
+                  inserted:
+                    type: integer
+                    description: Number of documents inserted.
+        '400':
+          description: |
+            Validation error. Codes: `INVALID_BODY` (missing or non-array
+            `models`), `INVALID_ITEMS` (one or more items missing `model_id` or
+            `type` - `details` lists the offending entries),
+            `PAYLOAD_TOO_LARGE` (more than 500 items).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 'Rate limit exceeded (`code: RATE_LIMITED`, 5 req / 3600 s per consumer).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/models/{modelId}:
+    parameters:
+      - in: path
+        name: modelId
+        required: true
+        schema:
+          type: string
+        description: |
+          Identifier of the model document. Model IDs may contain forward
+          slashes (e.g. `bedrock/anthropic.claude-3-haiku`,
+          `eu.anthropic.claude-sonnet-4-20250514-v1:0`); the workspace router
+          declares this parameter as a catch-all so consumers SHOULD send the
+          slashes unencoded in the path.
+    get:
+      tags: [Models]
+      operationId: getModel
+      summary: Get a model by ID
+      responses:
+        '200':
+          description: Model document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+        '401':
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 'Model not found (`code: MODEL_NOT_FOUND`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags: [Models]
+      operationId: updateModel
+      summary: Update a model
+      description: |
+        Partial update - only fields present in the request body are applied.
+        Updatable fields: `type`, `display`, `capabilities`, `limits`,
+        `failover`, `region`, `dimensions`, `supported_dimensions`, `metrics`,
+        `provider_config`, `tags`, `enabled`, `pricing`, `org_slugs`. Emits a
+        `model.updated` audit event and invalidates the per-key cache.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelUpdateInput'
+      responses:
+        '200':
+          description: Updated model document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+        '401':
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 'Model not found (`code: MODEL_NOT_FOUND`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Models]
+      operationId: deleteModel
+      summary: Delete a model
+      description: |
+        Removes the model from the catalogue. Emits a `model.deleted` audit
+        event and invalidates the per-key cache.
+      responses:
+        '200':
+          description: Deletion confirmation.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, model_id]
+                properties:
+                  deleted:
+                    type: boolean
+                    description: Always `true` on success.
+                  model_id:
+                    type: string
+                    description: Identifier of the deleted model.
+        '401':
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 'Model not found (`code: MODEL_NOT_FOUND`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/test:
+    post:
+      tags: [Test]
+      operationId: runModelTest
+      summary: Smoke-test a model through the gateway
+      description: |
+        Calls the gateway with a minimal request to verify a model is
+        reachable. Used by the platform Models admin page (Test button).
+
+        - `type: "embeddings"` → calls `OpenAI.embeddings` with `input: "Salut"`
+          and returns `{ ok, dimensions, response }`.
+        - `type: "completions"` (default) → calls `OpenAI.chat-completion` with
+          a single-turn user message and a `get_weather` tool definition,
+          returns `{ ok, response }`.
+
+        On error, the call is wrapped in a `try`/`catch` and returns
+        `{ ok: false, response: <error> }`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestRequest'
+      responses:
+        '200':
+          description: Test result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestResponse'
+        '400':
+          description: 'Missing `modelId` (`code: INVALID_BODY`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid authentication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only `POST` accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        User session JWT or instance API key (`iak_*`). Send as
+        `Authorization: Bearer <token>`.
+    WorkspaceApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-prismeai-api-key
+      description: Workspace-scoped API key.
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      description: |
+        Standard error envelope. `error` carries either a stable PascalCase
+        identifier or a free-text label (legacy endpoints) - `code` is the
+        canonical machine-readable identifier going forward.
+      properties:
+        error:
+          type: string
+          description: Stable PascalCase identifier or short error label.
+        message:
+          type: string
+          description: Human-readable error message.
+        code:
+          type: string
+          description: |
+            Machine-readable error code. Observed values include
+            `RATE_LIMITED`, `MODEL_NOT_ALLOWED`, `MODEL_NOT_FOUND`,
+            `MODEL_EXISTS`, `MISSING_MODEL_ID`, `MISSING_TYPE`, `INVALID_BODY`,
+            `INVALID_ITEMS`, `INVALID_DIMENSIONS`, `PAYLOAD_TOO_LARGE`,
+            `METHOD_NOT_ALLOWED`, `PROVIDER_ERROR`, `PROVIDER_NO_RESPONSE`.
+        details:
+          description: Optional structured context (e.g. list of invalid items).
+          additionalProperties: true
+        status:
+          type: integer
+          description: HTTP status mirror, when present.
+        retryAfter:
+          type: integer
+          description: Seconds to wait before retrying (rate-limit responses).
+        provider:
+          type: string
+          description: Upstream provider name (provider-error responses).
+        model:
+          type: string
+          description: Model id involved in the error (provider-error responses).
+        provider_error_type:
+          type: string
+          description: Upstream provider's own error class name.
+
+    ChatMessage:
+      type: object
+      required: [role]
+      description: A single message in a chat completion request or response.
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+          description: Author role.
+        content:
+          description: |
+            Message content. Either a plain string, or an array of typed parts
+            (e.g. text + image) for multimodal inputs.
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
+        name:
+          type: string
+          description: Optional author name (e.g. function name for tool messages).
+        tool_call_id:
+          type: string
+          description: 'For `role: tool`, the id of the tool call this message responds to.'
+        tool_calls:
+          type: array
+          description: Tool calls emitted by an assistant message.
+          items:
+            $ref: '#/components/schemas/ToolCall'
+
+    ToolCall:
+      type: object
+      required: [id, type, function]
+      properties:
+        id:
+          type: string
+          description: Provider-issued tool call identifier.
+        type:
+          type: string
+          enum: [function]
+          description: Tool kind. Currently always `function`.
+        function:
+          type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+              description: Function name.
+            arguments:
+              type: string
+              description: |
+                JSON-encoded arguments. Sent as a string (matches OpenAI's
+                wire format).
+
+    ChatCompletionRequest:
+      type: object
+      required: [model, messages]
+      description: |
+        OpenAI-compatible chat completion request. Only the fields actually
+        accepted by the gateway are documented here.
+      properties:
+        model:
+          type: string
+          maxLength: 256
+          description: |
+            Model id from the catalogue (e.g. `gpt-4o`,
+            `eu.anthropic.claude-sonnet-4-20250514-v1:0`,
+            `vertex-gemini-2.5-flash`).
+        messages:
+          type: array
+          description: Conversation history (system + user/assistant/tool turns).
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        temperature:
+          description: Sampling temperature (provider-dependent range, typically 0–2).
+        max_tokens:
+          description: Max tokens to generate.
+        top_p:
+          description: Nucleus sampling parameter.
+        frequency_penalty:
+          description: OpenAI-style frequency penalty.
+        presence_penalty:
+          description: OpenAI-style presence penalty.
+        stop:
+          description: One or more stop sequences (string or array of strings).
+        stream:
+          type: boolean
+          description: |
+            When `true`, the response is a `text/event-stream` of
+            `ChatCompletionChunk` deltas terminating with `data: [DONE]`.
+        tools:
+          type: array
+          description: |
+            Tool/function definitions made available to the model. Forwarded to
+            providers that support tool calling.
+          items:
+            type: object
+            additionalProperties: true
+        tool_choice:
+          description: |
+            Tool selection hint: `"auto"`, `"none"`, `"required"`, or
+            `{ type: "function", function: { name } }`.
+        response_format:
+          description: |
+            OpenAI-style structured output hint
+            (e.g. `{ "type": "json_object" }`).
+          type: object
+          additionalProperties: true
+        seed:
+          description: Provider seed for reproducible sampling (where supported).
+        task_id:
+          type: string
+          maxLength: 128
+          description: |
+            **Prisme.ai extension.** Opaque correlation id propagated to A2A
+            (agent-to-agent) flows.
+        analytics_context:
+          type: object
+          description: |
+            **Prisme.ai extension.** Caller-supplied analytics context merged
+            into the `analytics.llm.completion` event.
+          additionalProperties: true
+          properties:
+            orgSlug:
+              type: string
+            agent_id:
+              type: string
+            user_id:
+              type: string
+            context_id:
+              type: string
+            agent_allowed_models:
+              type: array
+              items:
+                type: string
+            call_type:
+              type: string
+            message_turn:
+              type: number
+
+    ChatCompletionResponse:
+      type: object
+      description: |
+        Non-streaming chat completion response. Mirrors OpenAI's shape with
+        Prisme.ai extensions on `usage` (`cost`, `duration_ms`, `carbon`).
+      required: [id, object, created, model, choices]
+      properties:
+        id:
+          type: string
+          description: Generated id (`chatcmpl-<correlationId>`).
+        object:
+          type: string
+          enum: [chat.completion]
+        created:
+          type: integer
+          description: Unix timestamp (seconds).
+        model:
+          type: string
+          description: Resolved model id used to serve the request.
+        choices:
+          type: array
+          items:
+            type: object
+            required: [index, message]
+            properties:
+              index:
+                type: integer
+              message:
+                $ref: '#/components/schemas/ChatMessage'
+              finish_reason:
+                type: string
+                description: |
+                  `stop`, `length`, `tool_calls`, `content_filter`, or another
+                  provider-specific value.
+        usage:
+          type: object
+          description: Token, cost, and carbon accounting.
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+            cost:
+              type: number
+              format: double
+              description: |
+                **Prisme.ai extension.** Estimated USD cost computed from
+                `pricing.input_per_1m_tokens` / `pricing.output_per_1m_tokens`
+                on the model document.
+            duration_ms:
+              type: integer
+              description: '**Prisme.ai extension.** Wall-clock duration of the call.'
+            carbon:
+              type: object
+              description: |
+                **Prisme.ai extension.** Carbon-footprint estimate produced by
+                `_compute-carbon-footprint`.
+              additionalProperties: true
+
+    ChatCompletionChunk:
+      type: object
+      description: |
+        Single chunk in a streaming chat completion. Forwarded as the JSON
+        payload of an SSE `data:` line. The final SSE payload of a stream is
+        the literal string `[DONE]` (not JSON).
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+        created:
+          type: integer
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            required: [index]
+            properties:
+              index:
+                type: integer
+              delta:
+                type: object
+                description: Incremental message delta.
+                properties:
+                  role:
+                    type: string
+                  content:
+                    type: string
+                  tool_calls:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+              finish_reason:
+                type: string
+        usage:
+          type: object
+          additionalProperties: true
+
+    EmbeddingRequest:
+      type: object
+      required: [model, input]
+      properties:
+        model:
+          type: string
+          maxLength: 256
+          description: Embedding model id from the catalogue.
+        input:
+          description: Either a single string or an array of strings to embed.
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+        dimensions:
+          description: |
+            Requested output dimensionality. Must be one of the model's
+            `supported_dimensions` when set; otherwise rejected with
+            `INVALID_DIMENSIONS`.
+        analytics_context:
+          type: object
+          description: '**Prisme.ai extension.** Caller-supplied analytics context.'
+          additionalProperties: true
+
+    Embedding:
+      type: object
+      required: [object, index, embedding]
+      properties:
+        object:
+          type: string
+          enum: [embedding]
+        index:
+          type: integer
+        embedding:
+          type: array
+          items:
+            type: number
+            format: float
+
+    EmbeddingResponse:
+      type: object
+      description: |
+        OpenAI-compatible embeddings response. When `input` was a single
+        string, the response also exposes a flat root-level `embedding` field
+        (Prisme.ai convenience extension) in addition to `data[0].embedding`.
+      required: [object, model, data]
+      properties:
+        object:
+          type: string
+          enum: [list]
+        model:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Embedding'
+        usage:
+          type: object
+          properties:
+            prompt_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+        embedding:
+          type: array
+          description: |
+            **Prisme.ai extension.** Convenience copy of `data[0].embedding`
+            present only when the request `input` was a single string.
+          items:
+            type: number
+            format: float
+
+    Model:
+      type: object
+      description: |
+        Model catalogue document. The catalogue is the source of truth for
+        provider routing, capabilities, pricing, and per-org availability.
+      required: [model_id, type]
+      properties:
+        model_id:
+          type: string
+          maxLength: 128
+          description: Stable identifier (matches the value sent in `request.model`).
+        type:
+          type: string
+          maxLength: 64
+          enum: [completion, embeddings, image_generation]
+          description: Model family.
+        display:
+          type: object
+          description: Display metadata (label, brand, hidden flag).
+          properties:
+            name:
+              type: string
+            brand:
+              type: string
+            hidden:
+              type: boolean
+        capabilities:
+          type: object
+          description: Flags advertising what the model supports.
+          properties:
+            vision:
+              type: boolean
+            audio:
+              type: boolean
+            text:
+              type: boolean
+            image:
+              type: boolean
+        limits:
+          type: object
+          description: Provider-side limits (e.g. context window, max tokens).
+          additionalProperties: true
+        failover:
+          type: string
+          maxLength: 128
+          description: Optional `model_id` to route to when the primary fails.
+        region:
+          type: string
+          maxLength: 64
+          description: Hosting region (free-text).
+        dimensions:
+          description: Default embedding dimensionality (embeddings models only).
+        supported_dimensions:
+          type: array
+          description: Allowed values for the request `dimensions` parameter.
+          items:
+            type: number
+        metrics:
+          description: Free-form metrics block (latency, throughput hints, …).
+        provider_config:
+          type: object
+          description: Provider-specific configuration (batch size, parallelism, …).
+          additionalProperties: true
+        pricing:
+          type: object
+          description: Cost configuration used to compute `usage.cost`.
+          properties:
+            input_per_1m_tokens:
+              type: number
+              format: double
+            output_per_1m_tokens:
+              type: number
+              format: double
+        tags:
+          type: array
+          description: Free-form tags used by the search/filter UI.
+          items:
+            type: string
+        org_slugs:
+          type: array
+          description: |
+            When set and non-empty, restricts the model to the listed
+            organizations. Empty / missing means the model is available to all
+            orgs (subject to governance overlays).
+          items:
+            type: string
+        enabled:
+          type: boolean
+          description: When `false`, the model is hidden from routing.
+
+    ModelCreateInput:
+      type: object
+      description: |
+        Write-shape for `POST /v1/models` and each item of `PUT /v1/models`.
+        `model_id` and `type` are required.
+      required: [model_id, type]
+      properties:
+        model_id:
+          type: string
+          maxLength: 128
+        type:
+          type: string
+          maxLength: 64
+          enum: [completion, embeddings, image_generation]
+        display:
+          type: object
+        capabilities:
+          type: object
+        limits:
+          type: object
+        failover:
+          type: string
+          maxLength: 128
+        region:
+          type: string
+          maxLength: 64
+        dimensions: {}
+        supported_dimensions: {}
+        metrics: {}
+        provider_config: {}
+        pricing: {}
+        tags: {}
+        org_slugs: {}
+        enabled: {}
+
+    ModelUpdateInput:
+      type: object
+      description: |
+        Partial-update shape for `PATCH /v1/models/{modelId}`. Only fields
+        present in the body are applied. `model_id` is taken from the path,
+        not the body.
+      properties:
+        type:
+          type: string
+          maxLength: 64
+          enum: [completion, embeddings, image_generation]
+        display:
+          type: object
+        capabilities:
+          type: object
+        limits:
+          type: object
+        failover:
+          type: string
+          maxLength: 128
+        region:
+          type: string
+          maxLength: 64
+        dimensions: {}
+        supported_dimensions: {}
+        metrics: {}
+        provider_config: {}
+        pricing: {}
+        tags: {}
+        org_slugs: {}
+        enabled: {}
+
+    ModelsListResponse:
+      type: object
+      description: |
+        Pagination envelope used by `GET /v1/models` (Prisme.ai standard, not
+        OpenAI's `{ object: "list", data: [...] }`).
+      required: [items, total, page, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Model'
+        total:
+          type: integer
+          description: Total number of matching documents (ignoring pagination).
+        page:
+          type: integer
+          description: Zero-based page index.
+        limit:
+          type: integer
+          description: Effective page size (server-capped at 100).
+
+    Defaults:
+      type: object
+      description: Resolved default models per concern.
+      properties:
+        completions:
+          type: object
+          required: [model_id]
+          properties:
+            model_id:
+              type: string
+        embeddings:
+          type: object
+          required: [model_id]
+          properties:
+            model_id:
+              type: string
+            dimensions:
+              type: number
+              description: Default embedding dimensionality (when known).
+            supported_dimensions:
+              type: array
+              items:
+                type: number
+        image_generation:
+          type: object
+          required: [model_id]
+          properties:
+            model_id:
+              type: string
+        file_parsing:
+          type: object
+          description: Per-input-kind defaults for file-parsing flows.
+          properties:
+            image:
+              type: object
+              properties:
+                model_id:
+                  type: string
+            audio:
+              type: object
+              properties:
+                model_id:
+                  type: string
+            document:
+              type: object
+              properties:
+                model_id:
+                  type: string
+
+    TestRequest:
+      type: object
+      required: [modelId]
+      properties:
+        modelId:
+          type: string
+          maxLength: 256
+          description: Model id to test.
+        type:
+          type: string
+          maxLength: 32
+          enum: [embeddings, completions]
+          description: |
+            Kind of test to run. Defaults to `completions` when omitted.
+
+    TestResponse:
+      type: object
+      required: [ok, response]
+      properties:
+        ok:
+          type: boolean
+          description: '`true` when the underlying provider call succeeded.'
+        dimensions:
+          type: integer
+          description: 'Returned only for `type: "embeddings"` (length of the embedding vector).'
+        response:
+          description: |
+            Raw provider payload on success, or the captured `$error` object on
+            failure (free-form).
+          type: object
+          additionalProperties: true
