@@ -3,8 +3,9 @@ name: MCP/onInstall
 description: >-
   Provision the tenant app-instance on install/configure (tenant-context model,
   NO HMAC key). Sets the MCP endpoint (this instance's own webhook) + the config
-  app link, provisions two tenant secrets — `salesforceAuth` (object: auth
-  mode + credentials) and `salesforceAuthorizedAgents` (agent allowlist) —
+  app link, provisions two tenant secrets — `salesforceNextAuth` (object:
+  provider endpoints/version/scopes + auth mode + credentials) and
+  `salesforceNextAuthorizedAgents` (agent allowlist) —
   and writes the two-hop bindings so `config.auth` / `config.authorizedAgents`
   resolve. Exposed URLs use `slug:<slug>` by default (re-import / rename stable);
   the raw id is used only for `/config` + `/security/secrets` (don't resolve slug)
@@ -88,7 +89,7 @@ do:
             name: toProvision.salesforceAuth
             value:
               value: {}
-              description: 'Salesforce auth config (managed by the connector config app): { mode, loginHost, jwtUsername, oauthClientId, oauthClientSecret, jwtPrivateKey, accessToken, instanceUrl }.'
+              description: 'Salesforce secret-backed provider/auth config (managed by the connector config app): { mode, loginHost, oauthAuthorizeUrl, oauthTokenUrl, oauthRevokeUrl, oauthScopes, apiVersion, jwtUsername, oauthClientId, oauthClientSecret, jwtPrivateKey, accessToken, instanceUrl }.'
         - set:
             name: provisionCount
             value: '{% {{provisionCount}} + 1 %}'
@@ -167,7 +168,6 @@ do:
   - emit:
       event: salesforce.onInstall.completed
       payload:
-        configAppUrl: '{{configAppUrl}}'
         secretsProvisioned: '{{provisionCount}}'
   - comment: >-
       Binding A (terminal merge) — instance config keys point at the tenant

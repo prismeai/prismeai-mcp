@@ -1,10 +1,15 @@
 # Central platform OAuth client — token-service pattern
 
-Lifted verbatim from the validated `google-workspaces` connector (xjROdh7, sandbox;
-E2E-verified on tenant w6UiyHw, 2026-06-12). Gives every OAuth connector a
+Lifted from the validated `google-workspaces` connector and validated E2E.
+Gives every OAuth connector a
 zero-config tenant mode (`oauthCentral`, default): the platform maintainer
 provisions ONE provider OAuth client from the core workspace Builder, tenants
 just click Connect.
+
+All central-client and provider configuration is secret-backed. The declared
+central secret contains `{oauthClientId, oauthClientSecret, scopes, authorizeUrl,
+tokenUrl}`. The maintainer SPA writes every field to the secret store; no
+provider endpoint or default scope is versioned in these templates.
 
 ## Why a token service (read first)
 
@@ -14,7 +19,8 @@ App instances inherit the source workspace's `config.value` as defaults, BUT
 every tenant — the central client secret can never reach tenants through config.
 So the core serves it **operationally**:
 
-- `getOAuthClientPublic` — public webhook: `{configured, clientId, scopes}`. Never the secret.
+- `getOAuthClientPublic` — public webhook: `{configured, clientId, scopes,
+  authorizeUrl}`. Never the client secret or provider token URL.
 - `centralTokenExchange` — proxies the provider token endpoint, injecting the
   central `client_id`/`client_secret` server-side (grants: `authorization_code`+PKCE,
   `refresh_token`). The secret never leaves the core. `emitErrors: false` on its
@@ -54,8 +60,11 @@ code cannot exchange it (no verifier).
 
 ## Wiring checklist (placeholders: `google-workspaces` → `<slug>`, `googleWorkspaces` → `<camel>`, `gws` → `<pfx>`)
 
-1. `index.yml config.value`: `centralAuth: '{{secret.<camel>CentralOAuth}}'`.
-2. Copy the 7 automations; swap the Google token/authorize URLs for the provider's.
+1. Merge `index-secret-schema.yml.snippet`: it declares the full central object
+   in `secrets.schema` and adds
+   `index.yml config.value.centralAuth: '{{secret.<camel>CentralOAuth}}'`.
+2. Copy the 7 automations; provider token/authorize URLs and scopes come only
+   from the central secret or tenant auth secret, never from template literals.
 3. Custom Code: add `packOAuthState`/`unpackOAuthState` (see
    `customcode-packOAuthState.yml.snippet`).
 4. `buildAppAuth`: alias `oauthCentral` → `oauth` early; `resolveOAuthClient`
@@ -75,13 +84,15 @@ code cannot exchange it (no verifier).
    (Gotcha 26/29).
 8. Re-`publish_app` after any core config/automation change — instances run the
    published snapshot (Gotcha 26 / 18-cache).
+9. Run `scripts/audit-secret-backed-config.py` before validation/push and verify
+   token caches use the tenant/client/scope fingerprint.
 
 ## One-click publish to the Capabilities catalog (`CatalogPublish`)
 
 The maintainer view also exposes an **"Add to catalog"** button
 (`src/CatalogPublish.tsx`, copied from the salesforce-next reference) that
 registers the connector in the org-wide **Capabilities catalog** (workspace
-`capabilities`, `3ueUyns`) — the registry Agent Factory reads when a builder adds
+`capabilities`) — the registry Agent Factory reads when a builder adds
 a catalog-backed tool. The platform's own central-OAuth connectors (Figma, Gitlab,
 Google Search) ARE exactly such entries.
 

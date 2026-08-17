@@ -2,8 +2,9 @@ slug: buildAppAuth
 name: /Helpers/buildAppAuth
 description: >-
   Resolve Salesforce auth from the tenant config object `config.auth`
-  (`{mode, loginHost, jwtUsername, oauthClientId, oauthClientSecret,
-  jwtPrivateKey, accessToken, instanceUrl}`). Supported modes:
+  (`{mode, loginHost, oauthTokenUrl, oauthScopes, apiVersion, jwtUsername,
+  oauthClientId, oauthClientSecret, jwtPrivateKey, accessToken, instanceUrl}`).
+  Every provider/tenant value is secret-backed. Supported modes:
   - `jwt` (default): OAuth2 JWT Bearer (Connected App + service-account user).
   - `clientCredentials`: OAuth2 client_credentials grant (Connected App run-as user).
   - `accessToken`: caller-managed access token + instance URL (no exchange).
@@ -29,11 +30,11 @@ arguments:
       cron automation) — NEVER from inbound/LLM tool arguments.
 do:
   - set:
-      name: effectiveApiVersion
-      value: '{% {{apiVersion}} || {{config.apiVersion}} || "v62.0" %}'
-  - set:
       name: auth
       value: '{{config.auth}}'
+  - set:
+      name: effectiveApiVersion
+      value: '{% {{apiVersion}} || {{auth.apiVersion}} %}'
   - set:
       name: mode
       value: '{% {{auth.mode}} || "jwt" %}'
@@ -46,9 +47,28 @@ do:
   - set:
       name: normHost
       value: '{{lh.host}}'
+  - Custom Code.run:
+      function: makeTokenCacheKey
+      parameters:
+        tenantId: '{{global.workspaceId}}'
+        clientId: '{{auth.oauthClientId}}'
+        scopes: '{{auth.oauthScopes}}'
+      output: tokenCache
+  - conditions:
+      '({{mode}} == "oauth" or {{mode}} == "jwt") and {{tokenCache.error}}':
+        - set:
+            name: output
+            value:
+              error: OAuth cache context is incomplete. Configure tenant client ID and scopes in the config app.
+        - break: {}
+  - conditions:
+      '{{mode}} == "oauth" and {{user.salesforceNext.oauth.cacheKey}} and {{user.salesforceNext.oauth.cacheKey}} != {{tokenCache.key}}':
+        - delete:
+            name: user.salesforceNext.oauth
+            scope: user
   - comment: Priority 0 — caller passed an explicit accessToken + instanceUrl.
   - conditions:
-      '{{accessToken}} && {{instanceUrl}}':
+      '{{accessToken}} and {{instanceUrl}}':
         - set:
             name: output
             value:
@@ -59,7 +79,7 @@ do:
   - conditions:
       '{{mode}} == "accessToken"':
         - conditions:
-            '{{auth.accessToken}} && {{auth.instanceUrl}}':
+            '{{auth.accessToken}} and {{auth.instanceUrl}}':
               - set:
                   name: output
                   value:
@@ -80,6 +100,7 @@ do:
                   function: makeTokenSecretName
                   parameters:
                     userId: '{{targetUserId}}'
+                    cacheKey: '{{tokenCache.key}}'
                   output: tokName
               - conditions:
                   '{{tokName.error}}':
@@ -103,7 +124,7 @@ do:
                           error: No stored Salesforce token for this user. They must connect once from the connector config app (OAuth mode) as a workspace editor.
                     - break: {}
               - fetch:
-                  url: '{{normHost}}/services/oauth2/token'
+                  url: '{{auth.oauthTokenUrl}}'
                   method: POST
                   headers:
                     Content-Type: application/x-www-form-urlencoded
@@ -142,7 +163,7 @@ do:
                           - set:
                               name: output
                               value:
-                                error: 'Salesforce token refresh failed ({{refResp.status}} {{refResp.body.error}}) for this user. They must reconnect from the config app.'
+                                error: 'Salesforce token refresh was rejected (status {{refResp.status}}). The user must reconnect from the config app.'
                           - break: {}
                     - set:
                         name: output
@@ -152,7 +173,7 @@ do:
                     - break: {}
         - comment: Interactive — use the cached access token while still valid (120s skew); otherwise refresh it proactively from the stored refresh token and update the user-scope cache.
         - conditions:
-            '{{user.salesforceNext.oauth.accessToken}} and {{user.salesforceNext.oauth.expiresAt}} > {% date({{run.date}}).ts + 120000 %}':
+            '{{user.salesforceNext.oauth.cacheKey}} == {{tokenCache.key}} and {{user.salesforceNext.oauth.accessToken}} and {{user.salesforceNext.oauth.expiresAt}} > {% date({{run.date}}).ts + 120000 %}':
               - set:
                   name: output
                   value:
@@ -160,9 +181,9 @@ do:
                     baseUrl: '{{user.salesforceNext.oauth.instanceUrl}}/services/data/{{effectiveApiVersion}}'
               - break: {}
         - conditions:
-            '{{user.salesforceNext.oauth.refreshToken}}':
+            '{{user.salesforceNext.oauth.cacheKey}} == {{tokenCache.key}} and {{user.salesforceNext.oauth.refreshToken}}':
               - fetch:
-                  url: '{{normHost}}/services/oauth2/token'
+                  url: '{{auth.oauthTokenUrl}}'
                   method: POST
                   headers:
                     Content-Type: application/x-www-form-urlencoded
@@ -196,6 +217,10 @@ do:
                         scope: user
                         value: '{% date({{run.date}}).ts + ({{refTtlSec}} * 1000) %}'
                     - set:
+                        name: user.salesforceNext.oauth.cacheKey
+                        scope: user
+                        value: '{{tokenCache.key}}'
+                    - set:
                         name: output
                         value:
                           accessToken: '{{userRefResp.body.access_token}}'
@@ -211,7 +236,7 @@ do:
                           - set:
                               name: output
                               value:
-                                error: 'Salesforce token refresh failed ({{userRefResp.status}} {{userRefResp.body.error}}). The user must reconnect from the config app (OAuth mode).'
+                                error: 'Salesforce token refresh was rejected (status {{userRefResp.status}}). The user must reconnect from the config app.'
                           - break: {}
                     - set:
                         name: output
@@ -220,7 +245,7 @@ do:
                           transient: true
                     - break: {}
         - conditions:
-            '{{user.salesforceNext.oauth.accessToken}}':
+            '{{user.salesforceNext.oauth.cacheKey}} == {{tokenCache.key}} and {{user.salesforceNext.oauth.accessToken}}':
               - comment: No refresh token available (legacy connection) — fall back to the stored token; may be stale.
               - set:
                   name: output
@@ -238,12 +263,9 @@ do:
   - conditions:
       '{{mode}} == "clientCredentials"':
         - conditions:
-            '{{auth.oauthClientId}} && {{auth.oauthClientSecret}}':
-              - set:
-                  name: ccHost
-                  value: '{{normHost}}'
+            '{{auth.oauthClientId}} and {{auth.oauthClientSecret}}':
               - fetch:
-                  url: '{{ccHost}}/services/oauth2/token'
+                  url: '{{auth.oauthTokenUrl}}'
                   method: POST
                   headers:
                     Content-Type: application/x-www-form-urlencoded
@@ -272,15 +294,17 @@ do:
   - conditions:
       '{{mode}} == "jwt"':
         - conditions:
-            '{{auth.jwtUsername}} && {{auth.jwtPrivateKey}}':
+            '{{auth.jwtUsername}} and {{auth.jwtPrivateKey}}':
               - exchangeJwtBearer:
                   username: '{{auth.jwtUsername}}'
                   privateKey: '{{auth.jwtPrivateKey}}'
                   clientId: '{{auth.oauthClientId}}'
                   loginHost: '{{normHost}}'
+                  tenantId: '{{global.workspaceId}}'
+                  scopes: '{{auth.oauthScopes}}'
                   output: jwtResult
               - conditions:
-                  '!{{jwtResult.error}} && {{jwtResult.accessToken}} && {{jwtResult.instanceUrl}}':
+                  '!{{jwtResult.error}} and {{jwtResult.accessToken}} and {{jwtResult.instanceUrl}}':
                     - set:
                         name: output
                         value:

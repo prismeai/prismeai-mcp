@@ -11,23 +11,41 @@ arguments:
     type: string
   loginHost:
     type: string
+  tenantId:
+    type: string
+  scopes:
+    type: string
 do:
   - conditions:
-      '!{{username}} || !{{privateKey}} || !{{clientId}}':
+      '!{{username}} or !{{privateKey}} or !{{clientId}} or !{{loginHost}} or !{{tenantId}} or !{{scopes}}':
         - set:
             name: jwtResult
             value:
-              error: JWT Bearer requires username + privateKey + clientId (oauthClientId).
+              error: JWT Bearer requires secret-backed username, private key, client ID, auth host, tenant ID and scopes.
         - break: {}
   - set:
       name: effectiveHost
-      value: '{% {{loginHost}} || "https://login.salesforce.com" %}'
-  - comment: Cache key = sha-truncated of (clientId+username+host). Recompute every call but TTL gates the network exchange.
+      value: '{{loginHost}}'
+  - Custom Code.run:
+      function: makeTokenCacheKey
+      parameters:
+        tenantId: '{{tenantId}}'
+        clientId: '{{clientId}}'
+        scopes: '{{scopes}}'
+      output: cacheContext
+  - conditions:
+      '{{cacheContext.error}}':
+        - set:
+            name: jwtResult
+            value:
+              error: JWT cache context is incomplete.
+        - break: {}
+  - comment: Cache key includes tenant ID, client ID and scopes; host and user further partition it.
   - set:
       name: cacheKey
-      value: '{{clientId}}|{{username}}|{{effectiveHost}}'
+      value: '{{cacheContext.key}}|{{username}}|{{effectiveHost}}'
   - conditions:
-      '{{session.salesforceJwt[{{cacheKey}}].accessToken}} && {{session.salesforceJwt[{{cacheKey}}].expiresAt}} > {% date({{run.date}}).ts %}':
+      '{{session.salesforceJwt[{{cacheKey}}].accessToken}} and {{session.salesforceJwt[{{cacheKey}}].expiresAt}} > {% date({{run.date}}).ts %}':
         - set:
             name: jwtResult
             value:
@@ -64,7 +82,7 @@ do:
         - set:
             name: jwtResult
             value:
-              error: 'JWT exchange failed ({{tokenResponse.status}}): {{tokenResponse.body.error_description}}'
+              error: 'JWT exchange failed (status {{tokenResponse.status}}). Check the secret-backed JWT configuration.'
         - break: {}
   - set:
       name: session.salesforceJwt[{{cacheKey}}]
