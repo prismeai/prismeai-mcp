@@ -84,7 +84,7 @@ do:
               arguments: '{{body.params.arguments}}'
               accessToken: '{{auth.accessToken}}'
               baseUrl: '{{auth.baseUrl}}'
-              apiVersion: '{{config.auth.apiVersion}}'
+              apiVersion: '{{config.apiVersion}}'
             output: toolResult
         - set:
             name: response

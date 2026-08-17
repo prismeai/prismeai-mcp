@@ -3,7 +3,7 @@ name: OAuth/oauthConnect
 description: >-
   Per-user OAuth2 (authorization-code + PKCE) connect endpoint. Opened in the
   user's browser (Connexion button / agent-factory connect_url). Reads the tenant
-  Connected App creds from config.auth (OAuth mode), stores PKCE + state in user
+  Connected App creds from field-level config values, stores PKCE + state in user
   scope, and redirects to Salesforce's authorize endpoint. oauthCallback then
   exchanges the code and stores the token for this user.
 private: true
@@ -22,7 +22,11 @@ do:
         - break: {}
   - set:
       name: a
-      value: '{{config.auth}}'
+      value:
+        loginHost: '{{config.loginHost}}'
+        oauthClientId: '{{config.oauthClientId}}'
+        oauthClientSecret: '{{config.oauthClientSecret}}'
+        scopes: '{{config.oauthScopes}}'
   - conditions:
       '!{{a.oauthClientId}} || !{{a.oauthClientSecret}} || !{{a.oauthAuthorizeUrl}} || !{{a.oauthScopes}}':
         - set:

@@ -21,7 +21,19 @@ config:
       description: Open this link to configure the connector (authentication + authorized agents) for this workspace. Auto-generated on install.
       readOnly: true
   value:
-    salesforceNextAuth: '{{secret.salesforceNextAuth}}'
+    salesforceNextAuthMode: '{{secret.salesforceNextAuthMode}}'
+    salesforceNextLoginHost: '{{secret.salesforceNextLoginHost}}'
+    salesforceNextOAuthAuthorizeUrl: '{{secret.salesforceNextOAuthAuthorizeUrl}}'
+    salesforceNextOAuthTokenUrl: '{{secret.salesforceNextOAuthTokenUrl}}'
+    salesforceNextOAuthRevokeUrl: '{{secret.salesforceNextOAuthRevokeUrl}}'
+    salesforceNextApiVersion: '{{secret.salesforceNextApiVersion}}'
+    salesforceNextJwtUsername: '{{secret.salesforceNextJwtUsername}}'
+    salesforceNextOAuthClientId: '{{secret.salesforceNextOAuthClientId}}'
+    salesforceNextOAuthClientSecret: '{{secret.salesforceNextOAuthClientSecret}}'
+    salesforceNextJwtPrivateKey: '{{secret.salesforceNextJwtPrivateKey}}'
+    salesforceNextAccessToken: '{{secret.salesforceNextAccessToken}}'
+    salesforceNextInstanceUrl: '{{secret.salesforceNextInstanceUrl}}'
+    salesforceNextOAuthScopes: '{{secret.salesforceNextOAuthScopes}}'
     salesforceNextAuthorizedAgents: '{{secret.salesforceNextAuthorizedAgents}}'
     bundles:
       salesforce-next:
@@ -837,37 +849,57 @@ config:
             description: Response format for the MCP client.
 secrets:
   schema:
-    salesforceNextAuth:
-      type: object
-      title: Salesforce auth config
-      description: Secret-backed auth and provider configuration, managed by the connector config app.
-      properties:
-        mode:
-          type: string
-        loginHost:
-          type: string
-        oauthAuthorizeUrl:
-          type: string
-        oauthTokenUrl:
-          type: string
-        oauthRevokeUrl:
-          type: string
-        oauthScopes:
-          type: string
-        apiVersion:
-          type: string
-        jwtUsername:
-          type: string
-        oauthClientId:
-          type: string
-        oauthClientSecret:
-          type: string
-        jwtPrivateKey:
-          type: string
-        accessToken:
-          type: string
-        instanceUrl:
-          type: string
+    salesforceNextAuthMode:
+      type: string
+      title: Salesforce auth mode
+      ui:widget: password
+    salesforceNextLoginHost:
+      type: string
+      title: Salesforce login host
+      ui:widget: password
+    salesforceNextOAuthAuthorizeUrl:
+      type: string
+      title: Salesforce OAuth authorize URL
+      ui:widget: password
+    salesforceNextOAuthTokenUrl:
+      type: string
+      title: Salesforce OAuth token URL
+      ui:widget: password
+    salesforceNextOAuthRevokeUrl:
+      type: string
+      title: Salesforce OAuth revoke URL
+      ui:widget: password
+    salesforceNextApiVersion:
+      type: string
+      title: Salesforce API version
+      ui:widget: password
+    salesforceNextJwtUsername:
+      type: string
+      title: Salesforce JWT username
+      ui:widget: password
+    salesforceNextOAuthClientId:
+      type: string
+      title: Salesforce OAuth client id
+      ui:widget: password
+    salesforceNextOAuthClientSecret:
+      type: string
+      title: Salesforce OAuth client secret
+      ui:widget: password
+    salesforceNextJwtPrivateKey:
+      type: string
+      title: Salesforce JWT private key
+      ui:widget: password
+    salesforceNextAccessToken:
+      type: string
+      title: Salesforce access token
+      ui:widget: password
+    salesforceNextInstanceUrl:
+      type: string
+      title: Salesforce instance URL
+      ui:widget: password
+    salesforceNextOAuthScopes:
+      type: string
+      title: Salesforce OAuth scopes
       ui:widget: password
     salesforceNextAuthorizedAgents:
       type: string

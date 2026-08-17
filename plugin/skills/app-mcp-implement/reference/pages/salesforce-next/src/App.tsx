@@ -15,10 +15,8 @@ import { CatalogPublish, type CatalogAuth } from './CatalogPublish'
 /**
  * Salesforce Next — connector config SPA (model B: direct platform API).
  *
- * Auth is stored as a single tenant secret object `salesforceNextAuth`
- * ({mode, loginHost, jwtUsername, oauthClientId, oauthClientSecret,
- * jwtPrivateKey, accessToken, instanceUrl}); the mode select drives which fields
- * show. Reads/writes the tenant secrets straight through the platform API with
+ * Each auth field is stored under its own tenant secret as one plain value; the mode select
+ * drives which fields show. Reads/writes the tenant secrets straight through the platform API with
  * the user's session — the platform enforces the user's rights natively. All
  * user-facing strings go through `t()` (src/lib/i18n.ts).
  */
@@ -47,7 +45,17 @@ interface Agent {
   name?: string
 }
 
-const AUTH_SECRET = 'salesforceNextAuth'
+const AUTH_SECRETS: Record<keyof AuthConfig, string> = {
+  mode: 'salesforceNextAuthMode',
+  loginHost: 'salesforceNextLoginHost',
+  jwtUsername: 'salesforceNextJwtUsername',
+  oauthClientId: 'salesforceNextOAuthClientId',
+  oauthClientSecret: 'salesforceNextOAuthClientSecret',
+  jwtPrivateKey: 'salesforceNextJwtPrivateKey',
+  accessToken: 'salesforceNextAccessToken',
+  instanceUrl: 'salesforceNextInstanceUrl',
+  scopes: 'salesforceNextScopes',
+}
 const ALLOWLIST_SECRET = 'salesforceNextAuthorizedAgents'
 
 // Available auth modes (labels localized via t('mode.<value>')).
@@ -221,7 +229,9 @@ function ConfigApp(props: Props) {
       const r = await fetch(secretsUrl, { headers: apiHeaders(sdk), credentials: 'include' })
       if (r.status === 403 || r.status === 401) throw new Error(t('msg.notAllowed'))
       const secrets = (await r.json()) || {}
-      const a = (secrets[AUTH_SECRET]?.value as AuthConfig) || {}
+      const a = Object.fromEntries(
+        Object.entries(AUTH_SECRETS).map(([field, secret]) => [field, secrets[secret]?.value]),
+      ) as Partial<AuthConfig>
       setAuth({ ...a, mode: (a.mode as Mode) || 'jwt' })
       const csv = String(secrets[ALLOWLIST_SECRET]?.value || '')
       const ids = csv.split(',').map((s) => s.trim()).filter(Boolean)
@@ -270,22 +280,25 @@ function ConfigApp(props: Props) {
     })()
   }, [tenantId, tenantSlug, host, sdk])
 
-  async function patchSecret(name: string, value: unknown) {
+  async function patchSecrets(values: Record<string, string>) {
     const r = await fetch(secretsUrl, {
       method: 'PATCH',
       headers: apiHeaders(sdk),
       credentials: 'include',
-      body: JSON.stringify({ [name]: { value } }),
+      body: JSON.stringify(Object.fromEntries(Object.entries(values).map(([name, value]) => [name, { value }]))),
     })
     if (!r.ok) throw new Error(r.status === 403 ? t('msg.forbidden') : t('msg.saveFailed', { status: r.status }))
   }
 
+  async function patchSecret(name: string, value: string) {
+    await patchSecrets({ [name]: value })
+  }
+
   async function persistAuth() {
-    // Only keep the fields relevant to the selected mode (+ mode itself).
     const keep: (keyof AuthConfig)[] = ['mode', ...FIELDS[auth.mode].map((f) => f.key)]
-    const payload: AuthConfig = { mode: auth.mode }
-    for (const k of keep) if (auth[k]) (payload as any)[k] = auth[k]
-    await patchSecret(AUTH_SECRET, payload)
+    const values = Object.fromEntries(Object.values(AUTH_SECRETS).map((name) => [name, ''])) as Record<string, string>
+    for (const key of keep) values[AUTH_SECRETS[key]] = String(auth[key] || '')
+    await patchSecrets(values)
   }
 
   async function saveAuth() {

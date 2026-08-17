@@ -1,22 +1,19 @@
 slug: getOAuthClientPublic
 name: 00_Maintainer/getOAuthClientPublic
-description: 'CORE webhook — returns the PUBLIC part of the central platform OAuth client ({ configured, clientId, scopes }), never the secret. Called at runtime by resolveOAuthClient from tenant app-instance contexts (the core secret `googleWorkspacesCentralOAuth` only resolves in the core workspace context — secret refs interpolate against the RUNNING workspace''s store, so tenants cannot read it through config inheritance). The client secret stays on the core: token operations go through centralTokenExchange.'
+description: 'CORE webhook — returns the PUBLIC part of the central platform OAuth client ({ configured, clientId, scopes, authorizeUrl }), never the secret. Called at runtime by resolveOAuthClient from tenant app-instance contexts (the core secrets `googleWorkspacesCentralOAuth*` only resolve in the core workspace context — secret refs interpolate against the RUNNING workspace''s store, so tenants cannot read them through config inheritance). The client secret stays on the core: token operations go through centralTokenExchange.'
 private: true
 when:
   endpoint: true
 do:
-  - set:
-      name: c
-      value: '{{config.centralAuth}}'
   - conditions:
-      '{{c.oauthClientId}} && {{c.oauthClientSecret}}':
+      '{{config.centralOAuthClientId}} && {{config.centralOAuthClientSecret}}':
         - set:
             name: output
             value:
               configured: true
-              clientId: '{{c.oauthClientId}}'
-              scopes: '{{c.scopes}}'
-              authorizeUrl: '{{c.authorizeUrl}}'
+              clientId: '{{config.centralOAuthClientId}}'
+              scopes: '{{config.centralOAuthScopes}}'
+              authorizeUrl: '{{config.centralOAuthAuthorizeUrl}}'
         - break: {}
   - set:
       name: output

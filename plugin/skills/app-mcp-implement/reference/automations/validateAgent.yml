@@ -4,7 +4,7 @@ description: >-
   Authorize an incoming MCP agent. The agentId is injected server-side by
   agent-factory via the MCP capability `scope: "...,agent_id"` (so it reflects
   the real calling agent). Authorization = (a) global/central endpoint
-  short-circuit (config.centralAuth resolves -> all agents accepted), else (b)
+  short-circuit (config.centralOAuthClientId resolves -> all agents accepted), else (b)
   the agentId must be in the tenant allowlist (config.authorizedAgents,
   comma-separated, backed by a workspace secret). Returns { valid, reason }.
 private: true
@@ -14,18 +14,15 @@ arguments:
     description: Agent id (scope-injected by agent-factory, or header).
 do:
   - comment: >-
-      Global/central endpoint: config.centralAuth resolves ONLY in the CORE
+      Global/central endpoint: config.centralOAuthClientId resolves only in the CORE
       workspace context (its own secret store) — tenant app-instances inherit
       just the unresolved literal, so central.oauthClientId is empty there (see
       resolveOAuthClient). When the central client IS configured, this MCP is the
       shared global endpoint where the per-agent allowlist does not apply: every
       agent is accepted (per-user OAuth is the real gate). Only ship this branch
       on central-OAuth connectors that expose a global endpoint.
-  - set:
-      name: central
-      value: '{{config.centralAuth}}'
   - conditions:
-      '{{central.oauthClientId}}':
+      '{{config.centralOAuthClientId}}':
         - set:
             name: output
             value:

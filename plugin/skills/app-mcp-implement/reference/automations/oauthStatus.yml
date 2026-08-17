@@ -20,7 +20,7 @@ do:
   - comment: Non-oauth tenants (jwt / clientCredentials / accessToken) have no per-user connection — report connected so a wrongly-wired status_url never gates their tools.
   - set:
       name: statusMode
-      value: '{% {{config.auth.mode}} || "jwt" %}'
+      value: '{% {{config.authMode}} || "jwt" %}'
   - conditions:
       '{{statusMode}} != "oauth"':
         - set:
@@ -36,8 +36,8 @@ do:
       function: makeTokenCacheKey
       parameters:
         tenantId: '{{global.workspaceId}}'
-        clientId: '{{config.auth.oauthClientId}}'
-        scopes: '{{config.auth.oauthScopes}}'
+        clientId: '{{config.oauthClientId}}'
+        scopes: '{{config.oauthScopes}}'
       output: tokenCache
   - conditions:
       '{{tokenCache.error}} or {{user.salesforceNext.oauth.cacheKey}} != {{tokenCache.key}}':

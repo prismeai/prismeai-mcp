@@ -1,10 +1,13 @@
 slug: buildAppAuth
 name: /Helpers/buildAppAuth
 description: >-
-  Resolve Salesforce auth from the tenant config object `config.auth`
-  (`{mode, loginHost, oauthTokenUrl, oauthScopes, apiVersion, jwtUsername,
-  oauthClientId, oauthClientSecret, jwtPrivateKey, accessToken, instanceUrl}`).
-  Every provider/tenant value is secret-backed. Supported modes:
+  Resolve Salesforce auth from field-level tenant config values
+  (`config.authMode`, `config.loginHost`, `config.oauthAuthorizeUrl`,
+  `config.oauthTokenUrl`, `config.oauthRevokeUrl`, `config.oauthScopes`,
+  `config.apiVersion`, `config.jwtUsername`, `config.oauthClientId`,
+  `config.oauthClientSecret`, `config.jwtPrivateKey`, `config.accessToken`,
+  `config.instanceUrl`). Every provider/tenant value is secret-backed, each in
+  its own secret holding one plain value. Supported modes:
   - `jwt` (default): OAuth2 JWT Bearer (Connected App + service-account user).
   - `clientCredentials`: OAuth2 client_credentials grant (Connected App run-as user).
   - `accessToken`: caller-managed access token + instance URL (no exchange).
@@ -14,6 +17,7 @@ private: true
 arguments:
   accessToken:
     type: string
+    secret: true
     description: Pre-resolved access token (bypasses config).
   instanceUrl:
     type: string
@@ -31,7 +35,19 @@ arguments:
 do:
   - set:
       name: auth
-      value: '{{config.auth}}'
+      value:
+        mode: '{{config.authMode}}'
+        loginHost: '{{config.loginHost}}'
+        jwtUsername: '{{config.jwtUsername}}'
+        oauthClientId: '{{config.oauthClientId}}'
+        oauthClientSecret: '{{config.oauthClientSecret}}'
+        jwtPrivateKey: '{{config.jwtPrivateKey}}'
+        accessToken: '{{config.accessToken}}'
+        instanceUrl: '{{config.instanceUrl}}'
+        apiVersion: '{{config.apiVersion}}'
+        oauthScopes: '{{config.oauthScopes}}'
+        oauthAuthorizeUrl: '{{config.oauthAuthorizeUrl}}'
+        oauthTokenUrl: '{{config.oauthTokenUrl}}'
   - set:
       name: effectiveApiVersion
       value: '{% {{apiVersion}} || {{auth.apiVersion}} %}'

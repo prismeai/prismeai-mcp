@@ -13,7 +13,7 @@ do:
   - conditions:
       '{{user.salesforceNext.oauth.accessToken}}':
         - fetch:
-            url: '{{config.auth.oauthRevokeUrl}}'
+            url: '{{config.oauthRevokeUrl}}'
             method: POST
             headers:
               Content-Type: application/x-www-form-urlencoded
@@ -32,8 +32,8 @@ do:
             function: makeTokenCacheKey
             parameters:
               tenantId: '{{global.workspaceId}}'
-              clientId: '{{config.auth.oauthClientId}}'
-              scopes: '{{config.auth.oauthScopes}}'
+              clientId: '{{config.oauthClientId}}'
+              scopes: '{{config.oauthScopes}}'
             output: tokenCache
         - Custom Code.run:
             function: makeTokenSecretName

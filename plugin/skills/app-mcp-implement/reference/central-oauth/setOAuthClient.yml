@@ -1,12 +1,13 @@
 slug: setOAuthClient
 name: 00_Maintainer/setOAuthClient
-description: 'MAINTAINER setup — stores the central platform Google OAuth client, used as fallback by every tenant that does not provide its own client. Reads clientId / clientSecret / scopes from the HTTP body (maintainer view of the config SPA, opened from the core workspace Builder) or top-level args (Studio Test). Writes the whole client object into the declared secret `googleWorkspacesCentralOAuth`; `config.value.centralAuth` (static binding in index.yml) resolves it for resolveOAuthClient. Gated: authenticated user + workspace owner/editor role when exposed by the runtime.'
+description: 'MAINTAINER setup — stores the central platform Google OAuth client as five separate secrets, one plain value per key, used as fallback by every tenant that does not provide its own client. Reads clientId / clientSecret / scopes / authorizeUrl / tokenUrl from the HTTP body (maintainer view of the config SPA, opened from the core workspace Builder) or top-level args (Studio Test). Each `config.value.centralOAuth*` static binding in index.yml resolves the matching secret for resolveOAuthClient. Gated: authenticated user + workspace owner/editor role when exposed by the runtime.'
 private: true
 arguments:
   clientId:
     type: string
   clientSecret:
     type: string
+    secret: true
   scopes:
     type: string
   authorizeUrl:
@@ -68,7 +69,7 @@ do:
   - auth:
       workspace: true
       output: wsAuth
-  - comment: Whole client object → declared secret; config.value.centralAuth ({{secret.googleWorkspacesCentralOAuth}} binding in index.yml) resolves it. Secrets survive push_workspace, unlike runtime config.value writes.
+  - comment: One secret key per field, each holding a single plain value — never an aggregate client object. The config.value.centralOAuth* bindings in index.yml resolve them. Secrets survive push_workspace, unlike runtime config.value writes.
   - fetch:
       url: '{{global.apiUrl}}/workspaces/{{global.workspaceId}}/security/secrets'
       method: PATCH
@@ -76,13 +77,16 @@ do:
         Authorization: Bearer {{wsAuth.jwt}}
         Content-Type: application/json
       body:
-        googleWorkspacesCentralOAuth:
-          value:
-            oauthClientId: '{{cid}}'
-            oauthClientSecret: '{{csec}}'
-            scopes: '{{csco}}'
-            authorizeUrl: '{{cauth}}'
-            tokenUrl: '{{ctok}}'
+        googleWorkspacesCentralOAuthClientId:
+          value: '{{cid}}'
+        googleWorkspacesCentralOAuthClientSecret:
+          value: '{{csec}}'
+        googleWorkspacesCentralOAuthScopes:
+          value: '{{csco}}'
+        googleWorkspacesCentralOAuthAuthorizeUrl:
+          value: '{{cauth}}'
+        googleWorkspacesCentralOAuthTokenUrl:
+          value: '{{ctok}}'
       output: patchResp
       outputMode: detailed_response
       emitErrors: false

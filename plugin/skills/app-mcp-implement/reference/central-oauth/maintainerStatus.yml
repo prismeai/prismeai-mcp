@@ -13,21 +13,13 @@ do:
         - set:
             name: allowed
             value: true
-  - comment: 'Public client part (clientId/scopes) for prefill — only when allowed. config.centralAuth resolves the core declared secret in the core context. The clientSecret is NEVER returned.'
-  - set:
-      name: c
-      value: {}
-  - conditions:
-      '{{allowed}}':
-        - set:
-            name: c
-            value: '{{config.centralAuth}}'
+  - comment: 'Public client fields for prefill. The client secret is not returned.'
   - set:
       name: output
       value:
         allowed: '{{allowed}}'
         authenticated: '{% {{user.id}} && true %}'
-        configured: '{% {{c.oauthClientId}} && {{c.oauthClientSecret}} && true %}'
-        clientId: '{{c.oauthClientId}}'
-        scopes: '{{c.scopes}}'
+        configured: '{% {{allowed}} && {{config.centralOAuthClientId}} && {{config.centralOAuthClientSecret}} && true %}'
+        clientId: '{% {{allowed}} && {{config.centralOAuthClientId}} %}'
+        scopes: '{% {{allowed}} && {{config.centralOAuthScopes}} %}'
 output: '{{output}}'

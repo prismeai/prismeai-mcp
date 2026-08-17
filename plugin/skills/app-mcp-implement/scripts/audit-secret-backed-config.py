@@ -166,29 +166,58 @@ def main():
         ),
         "cache mismatch invalidation": "cacheKey" in (workspace / "automations/buildAppAuth.yml").read_text(),
     }
-    auth_schema = ((secret_schema.get("salesforceNextAuth") or {}).get("properties") or {})
-    referenced_auth_fields = set()
-    for path in workspace.rglob("*.yml"):
-        content = path.read_text(errors="replace")
-        referenced_auth_fields.update(re.findall(r"config\.auth\.([A-Za-z][A-Za-z0-9_]*)", content))
-        if path.name == "buildAppAuth.yml":
-            referenced_auth_fields.update(re.findall(r"\{\{auth\.([A-Za-z][A-Za-z0-9_]*)", content))
-        if path.name.startswith("oauth"):
-            referenced_auth_fields.update(re.findall(r"\{\{a\.([A-Za-z][A-Za-z0-9_]*)", content))
-    missing_schema_fields = sorted(referenced_auth_fields - set(auth_schema))
+    # Per-field secret model: every auth field is its own secret holding one plain
+    # value, surfaced to automations through a binding-A alias written by onInstall.
+    oninstall = (workspace / "automations/onInstall.yml").read_text()
+    binding_to_secret = {
+        b: k for k, b in re.findall(
+            r"makeConfigRef, parameters: \{key: (\w+)\}, output: (\w+)", oninstall)
+    }
+    alias_to_secret = {
+        alias: binding_to_secret[bvar]
+        for alias, bvar in re.findall(r"^\s+(\w+): '\{\{(\w+)\}\}'", oninstall, re.M)
+        if bvar in binding_to_secret
+    }
+    missing_schema_fields = sorted(
+        sec for sec in alias_to_secret.values() if sec not in secret_schema
+    )
     if missing_schema_fields:
-        failures.append("Auth fields missing from secrets.schema: " + ", ".join(missing_schema_fields))
+        failures.append("Auth secrets missing from secrets.schema: " + ", ".join(missing_schema_fields))
+
+    # Aggregate secrets are forbidden: one secret key = one plain value.
+    aggregate_secrets = sorted(
+        k for k, v in secret_schema.items()
+        if isinstance(v, dict) and v.get("type") in {"object", "array"}
+    )
+    if aggregate_secrets:
+        failures.append("Secrets must hold one plain value (type: string): " + ", ".join(aggregate_secrets))
+    required_markers["no aggregate secrets"] = not aggregate_secrets
+
+    # buildAppAuth assembles a transient auth object from the field-level values;
+    # every {{auth.X}} it reads must actually be set on that object.
+    build_text = (workspace / "automations/buildAppAuth.yml").read_text()
+    obj = re.search(r"name: auth\n\s+value:\n((?:\s{8}\w+:.*\n)+)", build_text)
+    defined = set(re.findall(r"^\s+(\w+):", obj.group(1), re.M)) if obj else set()
+    referenced = set(re.findall(r"\{\{auth\.(\w+)", build_text))
+    dangling = sorted(referenced - defined)
+    if dangling:
+        failures.append("buildAppAuth reads undefined auth fields: " + ", ".join(dangling))
+    required_markers["transient auth object complete"] = not dangling
+
+    configurable_fields = {
+        alias for alias in alias_to_secret
+        if SUSPICIOUS_KEY.search(alias) or alias in {"loginHost", "instanceUrl", "jwtUsername"}
+    }
     spa_text = "\n".join(
         p.read_text(errors="replace") for r in roots[1:] for p in r.rglob("*.tsx")
     ) if len(roots) > 1 else ""
-    configurable_fields = {
-        key for key in auth_schema
-        if SUSPICIOUS_KEY.search(key) or key in {"loginHost", "instanceUrl", "jwtUsername"}
-    }
-    missing_spa_fields = sorted(key for key in configurable_fields if key not in spa_text)
+    missing_spa_fields = sorted(
+        a for a in configurable_fields
+        if a not in spa_text and alias_to_secret[a] not in spa_text
+    )
     if missing_spa_fields:
         failures.append("Secret-backed fields missing from SPA/install controls: " + ", ".join(missing_spa_fields))
-    required_markers["auth fields declared in secret schema"] = not missing_schema_fields
+    required_markers["auth secrets declared in schema"] = not missing_schema_fields
     required_markers["secret-backed fields exposed in SPA"] = not missing_spa_fields
     for label, ok in required_markers.items():
         if not ok:

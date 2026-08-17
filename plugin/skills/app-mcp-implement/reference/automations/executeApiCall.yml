@@ -23,6 +23,7 @@ arguments:
     description: Query string parameters (will be URL-encoded).
   accessToken:
     type: string
+    secret: true
   baseUrl:
     type: string
     description: Full Salesforce REST API base — `{instance_url}/services/data/{apiVersion}`.
