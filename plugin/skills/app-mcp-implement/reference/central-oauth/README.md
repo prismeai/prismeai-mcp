@@ -82,10 +82,15 @@ code cannot exchange it (no verifier).
    non-maintainers get an "Access restricted" card, never the form** — i18n keys
    (en+fr, incl. `maint.noAccessTitle`/`maint.noAccessBody`).
 7. `validateAgent`: first step short-circuits to `{valid:true, reason:'global_endpoint'}`
-   when `{{config.centralOAuthClientId}}` is set, so the CORE/global MCP
-   endpoint accepts every agent (the allowlist is a tenant-only concern; per-user
-   OAuth is the global gate). No-op in tenants — the core bindings remain unresolved there
-   (Gotcha 26/29).
+   when the central client id **resolves**, so the CORE/global MCP endpoint
+   accepts every agent (the allowlist is a tenant-only concern; per-user OAuth
+   is the global gate). No-op in tenants — the core bindings remain unresolved
+   there (Gotcha 26/29). **Test it via the `resolvedSecret` Custom Code helper,
+   never as a bare `'{{config.centralOAuthClientId}}'` condition**: an
+   unresolved binding is a non-empty, TRUTHY literal, so the bare form
+   short-circuits on every tenant and turns the allowlist off (bypass). The
+   same applies to `resolveOAuthClient`, `getOAuthClientPublic`,
+   `maintainerStatus` and `centralTokenExchange`; the audit script enforces it.
 8. Re-`publish_app` after any core config/automation change — instances run the
    published snapshot (Gotcha 26 / 18-cache).
 9. Run `scripts/audit-secret-backed-config.py` before validation/push and verify

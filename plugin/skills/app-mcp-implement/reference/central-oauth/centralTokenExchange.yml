@@ -5,8 +5,15 @@ private: true
 when:
   endpoint: true
 do:
+  - comment: >-
+      Unresolved {{secret.X}} bindings are truthy literals (Gotcha 26); resolve
+      them in plain JS so an unconfigured core fails closed with 400 instead of
+      POSTing a literal client_secret to the provider.
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientId}}'}, output: cId}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientSecret}}'}, output: cSecret}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthTokenUrl}}'}, output: cTokenUrl}
   - conditions:
-      '!{{config.centralOAuthClientId}} || !{{config.centralOAuthClientSecret}} || !{{config.centralOAuthTokenUrl}}':
+      '!{{cId.resolved}} || !{{cSecret.resolved}} || !{{cTokenUrl.resolved}}':
         - set:
             name: $http
             value:
@@ -36,19 +43,19 @@ do:
               code: '{{body.code}}'
               code_verifier: '{{body.code_verifier}}'
               redirect_uri: '{{body.redirect_uri}}'
-              client_id: '{{config.centralOAuthClientId}}'
-              client_secret: '{{config.centralOAuthClientSecret}}'
+              client_id: '{{cId.value}}'
+              client_secret: '{{cSecret.value}}'
       default:
         - set:
             name: tokenBody
             value:
               grant_type: refresh_token
               refresh_token: '{{body.refresh_token}}'
-              client_id: '{{config.centralOAuthClientId}}'
-              client_secret: '{{config.centralOAuthClientSecret}}'
+              client_id: '{{cId.value}}'
+              client_secret: '{{cSecret.value}}'
   - comment: 'emitErrors: false is MANDATORY here — a failing fetch emits runtime.fetch.failed with the request body, which would leak client_secret into the activity feed.'
   - fetch:
-      url: '{{config.centralOAuthTokenUrl}}'
+      url: '{{cTokenUrl.value}}'
       method: POST
       headers:
         Content-Type: application/x-www-form-urlencoded

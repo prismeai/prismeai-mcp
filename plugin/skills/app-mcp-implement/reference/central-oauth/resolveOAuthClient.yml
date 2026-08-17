@@ -33,15 +33,27 @@ do:
               tokenUrl: '{{a.oauthTokenUrl}}'
               central: false
         - break: {}
-  - comment: 'Central client. Fast path: the field-level centralOAuth* bindings resolve locally on the CORE workspace (its own secret store). Tenant instances inherit only the unresolved literals — fall back to the core public webhook.'
+  - comment: >-
+      Central client. Fast path: the field-level centralOAuth* bindings resolve
+      locally on the CORE workspace (its own secret store). Tenant instances
+      inherit only the UNRESOLVED literals, which are non-empty and therefore
+      TRUTHY strings (Gotcha 26) — a direct '!{{config.centralOAuthClientId}}'
+      test would never fall back and central OAuth would be silently dead for
+      every tenant. resolvedSecret normalises each binding to '' when it is
+      still a literal, so the fallback below triggers correctly.
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientId}}'}, output: cId}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientSecret}}'}, output: cSecret}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthScopes}}'}, output: cScopes}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthAuthorizeUrl}}'}, output: cAuthUrl}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthTokenUrl}}'}, output: cTokenUrl}
   - set:
       name: c
       value:
-        oauthClientId: '{{config.centralOAuthClientId}}'
-        oauthClientSecret: '{{config.centralOAuthClientSecret}}'
-        scopes: '{{config.centralOAuthScopes}}'
-        authorizeUrl: '{{config.centralOAuthAuthorizeUrl}}'
-        tokenUrl: '{{config.centralOAuthTokenUrl}}'
+        oauthClientId: '{{cId.value}}'
+        oauthClientSecret: '{{cSecret.value}}'
+        scopes: '{{cScopes.value}}'
+        authorizeUrl: '{{cAuthUrl.value}}'
+        tokenUrl: '{{cTokenUrl.value}}'
   - conditions:
       '!{{c.oauthClientId}}':
         - fetch:

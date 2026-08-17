@@ -5,15 +5,25 @@ private: true
 when:
   endpoint: true
 do:
+  - comment: >-
+      Before setOAuthClient has ever run, the declared secrets hold no value and
+      the bindings survive as UNRESOLVED literals — non-empty, therefore TRUTHY
+      (Gotcha 26). Testing them directly would answer configured:true and hand
+      tenants a literal "{{secret...}}" as the client id. resolvedSecret settles
+      it in plain JS.
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientId}}'}, output: cId}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientSecret}}'}, output: cSecret}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthScopes}}'}, output: cScopes}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthAuthorizeUrl}}'}, output: cAuthUrl}
   - conditions:
-      '{{config.centralOAuthClientId}} && {{config.centralOAuthClientSecret}}':
+      '{{cId.resolved}} && {{cSecret.resolved}}':
         - set:
             name: output
             value:
               configured: true
-              clientId: '{{config.centralOAuthClientId}}'
-              scopes: '{{config.centralOAuthScopes}}'
-              authorizeUrl: '{{config.centralOAuthAuthorizeUrl}}'
+              clientId: '{{cId.value}}'
+              scopes: '{{cScopes.value}}'
+              authorizeUrl: '{{cAuthUrl.value}}'
         - break: {}
   - set:
       name: output

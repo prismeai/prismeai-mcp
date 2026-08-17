@@ -15,6 +15,23 @@ config:
         // "*" = allow ALL agents (disables the per-agent gate).
         const wildcard = ids.indexOf('*') !== -1;
         return { allowed: wildcard || ids.indexOf(String(agentId)) !== -1, wildcard: wildcard };
+    resolvedSecret:
+      parameters:
+        value:
+          type: string
+      code: |
+        // Tell a RESOLVED secret-backed binding from an UNRESOLVED literal.
+        // A {{secret.X}} ref only resolves against the RUNNING workspace's
+        // store (Gotcha 26); elsewhere it survives verbatim as a NON-EMPTY —
+        // therefore TRUTHY — string. Never test such a binding directly in a
+        // DSUL condition, and never match on braces inside {% %} (literal
+        // braces in an expression crash the parser). Inspect it here in plain
+        // JS instead. Returns { value, resolved }: value is '' unless the
+        // binding actually carries a real secret value.
+        const v = (value === null || value === undefined) ? '' : String(value).trim();
+        if (!v || v.indexOf('{' + '{') !== -1) return { value: '', resolved: false };
+        return { value: v, resolved: true };
+
     makeConfigRef:
       parameters:
         key:

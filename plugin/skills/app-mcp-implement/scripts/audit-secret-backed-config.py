@@ -204,6 +204,33 @@ def main():
         failures.append("buildAppAuth reads undefined auth fields: " + ", ".join(dangling))
     required_markers["transient auth object complete"] = not dangling
 
+    # A scalar secret binding has no property to read, so an UNRESOLVED
+    # "{{secret.X}}" is a truthy literal. Gating on one directly is a live
+    # bypass (validateAgent) or a silent outage (resolveOAuthClient), so every
+    # such read must go through the resolvedSecret Custom Code helper.
+    unguarded = []
+    for path in workspace.rglob("*.yml"):
+        if path.name == "Custom Code.yml":
+            continue
+        for lineno, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+            stripped = line.strip()
+            if not re.search(r"\{\{config\.central\w+\}\}", stripped):
+                continue
+            if "resolvedSecret" in stripped or stripped.startswith("#"):
+                continue
+            # comments/descriptions are prose, not evaluated conditions
+            if re.match(r"^(-\s*)?(comment|description|name|title)\b", stripped):
+                continue
+            if stripped.startswith(("'", '"')) and ("conditions" in stripped or "{%" in stripped):
+                unguarded.append(f"{path.relative_to(workspace)}:{lineno}")
+            elif re.match(r"^'[^']*\{\{config\.central", stripped):
+                unguarded.append(f"{path.relative_to(workspace)}:{lineno}")
+    if unguarded:
+        failures.append(
+            "Central secret bindings gated without resolvedSecret (truthy-literal hazard, Gotcha 26): "
+            + ", ".join(unguarded))
+    required_markers["central bindings resolved before use"] = not unguarded
+
     configurable_fields = {
         alias for alias in alias_to_secret
         if SUSPICIOUS_KEY.search(alias) or alias in {"loginHost", "instanceUrl", "jwtUsername"}

@@ -16,13 +16,21 @@ do:
   - comment: >-
       Global/central endpoint: config.centralOAuthClientId resolves only in the CORE
       workspace context (its own secret store) — tenant app-instances inherit
-      just the unresolved literal, so central.oauthClientId is empty there (see
-      resolveOAuthClient). When the central client IS configured, this MCP is the
-      shared global endpoint where the per-agent allowlist does not apply: every
-      agent is accepted (per-user OAuth is the real gate). Only ship this branch
-      on central-OAuth connectors that expose a global endpoint.
+      just the UNRESOLVED literal, which is a non-empty and therefore TRUTHY
+      string (Gotcha 26). Testing the binding directly here would short-circuit
+      on EVERY tenant and accept every agent — an allowlist bypass. Route it
+      through resolvedSecret, which inspects the string in plain JS. When the
+      central client IS configured, this MCP is the shared global endpoint where
+      the per-agent allowlist does not apply: every agent is accepted (per-user
+      OAuth is the real gate). Only ship this branch on central-OAuth connectors
+      that expose a global endpoint.
+  - Custom Code.run:
+      function: resolvedSecret
+      parameters:
+        value: '{{config.centralOAuthClientId}}'
+      output: central
   - conditions:
-      '{{config.centralOAuthClientId}}':
+      '{{central.resolved}}':
         - set:
             name: output
             value:
