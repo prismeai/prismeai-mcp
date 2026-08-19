@@ -1,6 +1,6 @@
 ---
 name: app-mcp-implement
-description: Build a brand-new Prisme.ai App+MCP connector for a third-party SaaS using the tenant-context model (no HMAC), an entity-grouped registry driven by a generated OpenAPI spec, multi-mode auth (API key / OAuth2 client-credentials / OAuth2 per-user PKCE / JWT service-account) resolved by buildAppAuth, a central platform OAuth client (token-service model — zero-config `oauthCentral` tenant mode + maintainer view in the config SPA), per-user OAuth tokens resolvable from cron, and a model-B config SPA. Reproduces the validated `salesforce-next` build (+ `google-workspaces` central OAuth) for any service. Use when the user says "build an app+mcp for X", "créer une app+mcp pour X", "implémente un connecteur X". Everything needed is here + in `reference/`.
+description: Build a brand-new Prisme.ai App+MCP connector for a third-party SaaS using the tenant-context model (no HMAC), an entity-grouped registry driven by a generated OpenAPI spec, multi-mode auth (API key / OAuth2 client-credentials / OAuth2 per-user PKCE / JWT service-account) resolved by buildAppAuth, a central platform OAuth client (token-service model — zero-config `oauthCentral` tenant mode + maintainer view in the config SPA), per-user OAuth tokens resolvable from cron, a model-B config SPA, and optionally a **MCP Knowledge Resources** surface so the connector can feed a knowledge base (Phase 9). Reproduces the validated `salesforce-next` build (+ `google-workspaces` central OAuth) for any service. Use when the user says "build an app+mcp for X", "créer une app+mcp pour X", "implémente un connecteur X". Everything needed is here + in `reference/`.
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, AskUserQuestion, Agent, mcp__prisme-ai-builder__get_prisme_documentation, mcp__prisme-ai-builder__validate_automation, mcp__prisme-ai-builder__push_workspace, mcp__prisme-ai-builder__upload_file, mcp__prisme-ai-builder__create_workspace, mcp__prisme-ai-builder__search_workspaces, mcp__prisme-ai-builder__search_events, mcp__prisme-ai-builder__get_app_instance_config, mcp__prisme-ai-builder__update_app_instance_config
 ---
 
@@ -136,27 +136,152 @@ Deploy runbook (back changes need only a push; front changes need a bundle uploa
 6. After each verify pass, run the review agents if available (`verify-correctness`, `verify-dead-code`, `verify-dsul-consistency`, `verify-global-scope`, `verify-system-first`); they may be unregistered in a worktree — then run them inline.
 7. **Only once the connector is declared OK** (smoke + verify passes green, user validation when applicable): add `production:app` to `index.yml > labels` (final state: `[app-mcp, production:app]`, nothing else), strip any platform-injected label (`importFrom:<id>`, `imported-*`, `app-builder`), push the label change, THEN commit. A connector without `production:app` is by definition not production-ready.
 
-### Phase 9 — Knowledge-Sync compatibility (optional — PROPOSE it when the service is a document/file store)
+### Phase 9 — Knowledge Resources (optional — PROPOSE it when the service is a document/file store)
 
-**When to propose (do it spontaneously in Phase 1, alongside the auth decision):** if the third-party service exposes a **browseable hierarchy of ingestible documents/files** — Drive, SharePoint/OneDrive, Confluence, Notion, Box, S3/GCS, a DMS, a wiki — the connector can double as a **knowledge-connector** for AI Knowledge (the `knowledge-sync` host `Yfxb1Vv` discovers it by label and syncs its files into a KB vector store, with per-user delegated access control). Offer it: *"Ce service expose des fichiers navigables — je le rends aussi compatible knowledge-sync (sync vers une base AI Knowledge) ?"*. Skip it for pure action/API services with no file tree (Salesforce records, Calendar, a payments API).
+> **Rewritten 2026-08-19.** This phase used to describe a `ks*` contract
+> (`ksManifest` / `ksBrowse` / `ksListFiles` / `ksCall`…). **That contract is
+> gone — no connector in the repo implements it.** `knowledge-sync` speaks
+> standard **MCP Resources**, and nothing else: `resources/list`,
+> `resources/read`, `resources/templates/list`, and one `tools/call
+> <tool>/checkAccess`. If you find `ks*` anywhere, it is dead code.
 
-**What it is:** a thin **`ks*` contract** layered on the connector's existing browse/list/get primitives — NO auth/REST rewrite. The host dispatches every op via a cross-ws webhook (`ksCall`), so the adapter just answers `when: endpoint: true`. Two live references, deliberately DIFFERENT tree shapes (proof the contract is generic): **`sharepoint-next`** (3 levels `site→drive→folder`, files carry a pre-authenticated `fetchUrl`) and **`google-workspaces`** (2 levels `drive→folder`, files carry `contentOp` — see Gotcha 34). Mirror whichever is closer.
+**When to propose (do it spontaneously in Phase 1, alongside the auth decision):**
+if the service exposes a **browseable hierarchy of ingestible documents** — Drive,
+SharePoint/OneDrive, Confluence, a mailbox, Box, S3/Azure Blob, a DMS, a wiki —
+the connector can double as a **Knowledge source**: `knowledge-sync` traverses its
+Resources and indexes them into a knowledge base. Offer it: *"Ce service expose
+des documents navigables — je le rends aussi utilisable comme source de base de
+connaissances ?"*. Skip it for pure action/API services with no document tree
+(Salesforce records, a calendar, a payments API).
 
-**The 7 automations to add** (all `private: true`, `when: endpoint: true`; copy a reference verbatim then adapt the REST calls + node-id scheme):
-- `ksManifest` — static shape: `slug/appType`, `name/description/icon` (localized `{fr,en}`), `ops:{browse,listFiles,checkAccess,getContent?}`, `auth:{mode (from config.auth.mode), needsConnect (true only for oauth/oauthCentral), statusOp:ksAuthStatus, connectOp:oauthConnect, disconnectOp:ksAuthDisconnect}`, `resourceTree:{levels:[{id,label{fr,en},hint{fr,en},recursive}], selectable:[...]}`, `capabilities:{incremental,delete,delegatedAccessCheck:live}`, `fileTypes:[pdf,docx,…]`. `ksCall` maps `op → manifest.ops[op]`, so declare EVERY op you implement.
-- `ksBrowse` — `{level,parentId,cursor,query}` → `{nodes:[{id,label,kind,hasChildren}], nextCursor}`. Node ids are **self-descriptive** (e.g. `sharepoint:<siteId>:<driveId>:<itemId>` or `gws:<fileId>`) so ksListFiles can resolve a selection without extra state. Interactive/ambient auth (no delegation).
-- `ksListFiles` — `{selection,cursor,targetUserId,fileTypes?}` → `{files:[{externalId,name,mimeType,size,revisionTag,webUrl, fetchUrl|contentOp, scope}], nextCursor}`. **Depth-bounded BFS** (no `while` in DSUL — a fixed `depths` array `[1..8]`, re-queue a container with its page cursor). Non-negotiable robustness rules learned the hard way: (a) **init `output={files:[]}` at the TOP** and re-`set output` at **every depth** (an unset/late output returns `{}` → the host reports 0 docs); (b) break the BFS with **`break: {scope: repeat}`**, NEVER a bare `break: {}` (default scope is `automation` → it aborts the whole automation / gets caught as an error and skips the resume-cursor packing); (c) do NOT let the host pass MIME types as `fileTypes` — adapters filter by **extension** (the host MIME-filters itself).
-- `ksCheckAccess` — `{externalIds,targetUserId}` → `{allowed[], requiresOAuth?, connectUrl?}`. ALWAYS delegated: `buildAppAuth(modeOverride:oauthCentral, targetUserId)` (per-user, independent of ingestion mode) then probe each item's GET at the user's identity (200=allowed). Fail-closed.
-- `ksGetContent` (only if files have no pre-authenticated static download URL — see Gotcha 34) — `{externalId,targetUserId}` → `{fetchUrl}` a short-lived **self-authenticating** URL.
-- `ksAuthStatus` / `ksAuthDisconnect` — server-side, `targetUserId`-aware: check / delete the per-user refresh-token workspace secret (`<prefix>Refresh_<userId>`), so status/disconnect work over `ksCall` with no browser session. Non-oauth modes report `hasCredentials:true`.
+**What it is:** four Resource automations plus one guard, layered on the
+connector's existing list/get primitives — no auth or REST rewrite. Live
+references, deliberately different tree shapes: `sharepoint-next`
+(site→drive→item, pre-authenticated `downloadUrl`), `google-workspaces`
+(drive→folder, exported text), `webdav` (folder→file, inlined bytes),
+`confluence-next` (space→page, **flattened** — see the `_meta.kind` rule below),
+`outlook-next` (folder→message, two-phase cursor), `azure-blob-storage`
+(container→prefix→blob, minted SAS). Mirror whichever is closest.
+
+**The 5 automations to add** (all `private: true`; copy a reference then adapt):
+
+- `listMcpResourceTemplates` — static URI templates + the profile entry. **No
+  tenant, no auth.** The profile entry MUST carry `mimeType: application/json`.
+- `readMcpResource` — the **profile branch first** (public, returns before
+  anything touches credentials), then a container descriptor or a document.
+- `listMcpResources` — children of a parent URI, cursor-paginated, page size
+  clamped from BOTH sides (a 0 or fractional size walks the cursor forever).
+- `checkMcpResourceAccess` — bounded, deduplicated, fail-closed. See below.
+- `requireWorkspaceRole` — the authorization guard. See below.
+
+Plus the branches in `mcp.yml`: `resources/templates/list`, the profile read,
+`resources/list|read`, the delegated `checkAccess` intercept, and
+`serverCapabilities.resources` on the MCP Core delegation.
+
+**The Knowledge profile** (`<scheme>://profile/knowledge`, returned as JSON text):
+`knowledge_compatible: true`, `provider`, `tools`, `hierarchy`, `canonical_uri`,
+`list: {parent_parameter, default_page_size, maximum_page_size}`, `read`,
+`revision: {primary, fallback}`, `access: {tool, action, maximum_uris}`,
+`authentication: {modes, resource_access}`. Discovery reads exactly this URI,
+anonymously, to decide whether the connector is Knowledge-capable.
+
+⚠️ **Two silent-failure traps at discovery.** `initialize` MUST advertise
+`capabilities.resources`, and the profile template MUST be
+`mimeType: application/json`. Discovery that finds neither gives up **silently**,
+reporting an ordinary "not compatible" with no error to read — the most expensive
+failure mode in the chain.
+
+**Four engine constraints, measured in `_sync-engine.yml`, that decide your data
+model. Read them BEFORE choosing URIs:**
+
+1. **`_meta.kind` has exactly two families.** `file` is ingested; `site`/`drive`/
+   `folder` (or `mimeType: inode/directory`) is descended into. **A node is one or
+   the other.** When an object is genuinely both a document AND a parent — a
+   Confluence page, a Notion page — model it as `file` and **flatten** the tree:
+   modelling it as a container means it is never indexed, and every such object
+   silently vanishes from the base.
+2. **`revision` is read at the TOP LEVEL of each listed resource**, next to `uri`
+   / `name` / `mimeType` / `size` — not inside `_meta`. Put it only in `_meta` and
+   every run re-ingests everything.
+3. **The engine sends `metadataOnly: true` on the INGESTION path** and prefers
+   bytes (`_meta.downloadUrl`) over inline text (`contents[0].text`). If your
+   provider has no pre-signed URL, `metadataOnly` must **NOT** strip the text —
+   dropping it indexes every document as its own metadata (the SharePoint defect:
+   ten documents of pure metadata, counted as ten successes).
+4. **Never send both** a `downloadUrl` and `text`: Storage prefers `content` over
+   `fetch_url`, so sending both means the URL is never fetched.
+
+**Authorization — a workspace role, NOT the agent allowlist** (platform#152):
+`validateAgent` guards `tools/call` and nothing else. Nobody in a Resource flow is
+an agent — Knowledge Sync browses for a signed-in human and synchronizes with no
+identity at all, so no `agent_id` is ever injected and the allowlist answers
+`missing_agent_id` to every legitimate call, leaving "allow EVERY agent" as the
+only way to make a knowledge base work. `requireWorkspaceRole` asks the question
+that actually bounds the call:
+
+| Caller | Check |
+|---|---|
+| An agent (`agent-id` header or `params.agent_id` present) | `validateAgent`, unchanged |
+| A user — wizard, browse, the self-carried-connection probe | `GET /workspaces/{id}/versions` **as the caller** (no `Authorization` header — the runtime mints the token from `source.userId`) |
+| No identity — the sync, scheduled or manual | `run.sourceWorkspaceId` ∈ `config.knowledgeSync.trustedCallers` |
+| `tools/call <tool>/checkAccess` | The trusted-caller guard, placed **above** the allowlist |
+
+Deliberately **not** `access-manager.checkAccess`: with a `resourceType` and no
+`resourceId` it never reaches the roles it is handed and resolves against the
+caller's org IAM map, where only an org-wide admin passes — the tenant's own owner
+is refused on their own connector.
+
+**The access check** answers which of a batch of URIs one reader may open. Two
+shapes, and you must say which one you shipped, in the profile and the docs:
+
+- **Per-reader** (provider has user identities: SharePoint, Drive, Confluence,
+  a mailbox): probe each URI at the READER's identity, with
+  `buildAppAuth(modeOverride: 'oauthCentral', targetUserId)` forcing per-user
+  resolution — a check run on the ingestion identity answers for THAT identity and
+  clears documents the reader cannot open.
+- **Perimeter only** (one service credential: WebDAV, Azure Blob): it verifies the
+  document is still inside the configured scope and still exists. **Say plainly
+  that a base fed from there is exactly as readable as the people it is shared
+  with**, and that `targetUserId` is accepted then ignored.
+
+Both: cap the batch (`access.maximum_uris`) and **refuse** above it rather than
+truncate — a shortened check denies readable documents and looks like a permission
+bug nobody can reproduce. Fail closed on malformed URI, denial, expired token and
+provider outage alike. Tell a 401 (reconnect) apart from a 403/404 (denial).
 
 **Shared plumbing:**
-- **Anti-impersonation guard (every delegated op):** honor `body.targetUserId` ONLY when `run.sourceWorkspaceId` (platform-injected, non-spoofable) is in `config.knowledgeSync.trustedCallers`; else fall back to `{{user.id}}` / ambient. Never trust an inbound targetUserId.
-- **`index.yml`:** add label **`knowledge-connector`** (this is how the host discovers it) + `config.value.knowledgeSync.trustedCallers: [Yfxb1Vv]` (the knowledge-sync host).
-- **`buildAppAuth`:** add an optional **`modeOverride`** arg taking precedence over `config.auth.mode` (`{% {{modeOverride}} || {{auth.mode}} || … %}`) so checkAccess/getContent can force per-user delegation even on a service-account/jwt instance. Additive — absent = unchanged.
-- **Custom Code helpers** (param types **string|number|boolean|object ONLY** — an `array`/`integer`/`oneOf` param bricks the WHOLE functions deploy in a silent 400): the node-id parser (`gwsUnref`/`parseSpItemRef`), the `mapChildren`/`mapNodes` mappers, `inList`, `uniq`, `packFrontier`/`unpackFrontier` (base64 BFS cursor).
+- **Anti-impersonation guard (every delegated path):** honour `body.targetUserId`
+  ONLY when `run.sourceWorkspaceId` (platform-injected, unforgeable) is in
+  `config.knowledgeSync.trustedCallers`; else fall back to `{{user.id}}`/ambient.
+  Never trust an inbound targetUserId.
+- **`index.yml`:** `config.value.knowledgeSync.trustedCallers: [Yfxb1Vv]` (the
+  knowledge-sync host). **No `knowledge-connector` label** — that was the `ks*`
+  discovery mechanism; discovery now goes through the Capabilities catalog entry
+  or a self-carried connection. Add the `checkAccess` action to the relevant tool's
+  `action` enum, marked *not for the model*, with `resourceUris` (`type: array`
+  WITH `items`) and `targetUserId`.
+- **Custom Code helpers** (param types **string|number|boolean|object ONLY** — an
+  `array`/`integer`/`oneOf` param bricks the WHOLE functions deploy in a silent
+  400): the URI parser, the resource mapper, `pack`/`unpack` cursor, `inList`,
+  `uniq`, plus whatever content extraction the provider needs (HTML→text, SAS
+  signing…).
 
-**Verify (no live third-party account needed for most of it):** smoke `ksManifest` (webhook, no auth); confirm the host discovers it — `POST /workspaces/Yfxb1Vv/webhooks/v1/providers {"candidates":["<slug>"]}` returns your manifest; with a connected account, `ksBrowse`/`ksListFiles` return real nodes/files; then create a connection in AI Knowledge → `/connections/:id/sync` → the KB indexes the docs. (The engine bugs above were all found this way — trace `runtime.automations.executed` on both the host `Yfxb1Vv` and the adapter.)
+**Self-carried connections:** an endpoint that passes the above can be attached to
+a knowledge base directly — `POST knowledge-sync/v1/connections` with
+`connector.server` instead of a `capability_id`, no catalog entry, no
+`mcp-api-key`. `knowledge-sync` probes it anonymously, then follows with a
+`resources/list` carried by the caller's identity — which is exactly the guard
+above, and why anyone may probe a server while only someone allowed to read it may
+attach it.
+
+**Verify (most of it needs no live third-party account):** smoke `initialize`
+(expect `capabilities.resources`), `resources/templates/list` and the profile read
+**with no credentials at all**; then, with a connected account, `resources/list`
+on the root and one level down, and `resources/read` on a document (check the text
+or the downloadUrl, never both). Then create a connection in a knowledge base →
+sync → the documents are indexed; re-run → nothing is re-ingested (revision
+comparison). Trace `runtime.automations.executed` on both `Yfxb1Vv` and the
+connector.
 
 ---
 
@@ -213,7 +338,12 @@ Deploy runbook (back changes need only a push; front changes need a bundle uploa
 
 33. **`CatalogPublish`/`MaintainerSetup` catalog `auth` block MUST use the connector's REAL webhook slugs (`oauthConnect`/`oauthStatus`/`oauthDisconnect`), not the legacy `initiateOAuth`/`checkAuthStatus`/`disconnectOAuth` names.** The org-wide catalog entry's `auth.connect_url` (Gotcha 30) is what Agent Factory opens when a builder's agent initiates OAuth. If it points at a webhook the connector doesn't expose, the agent's connect flow dies with `ObjectNotFoundError: "Did not find any matching trigger for endpoint initiateOAuth"` — **even though the per-agent "Install capability" button and the tenant Connect button work**, because those build their URL from `wh('oauthConnect')` (the real slug) while only the catalog `auth` used the wrong name. Diagnostic tell: the per-agent/appinstance Connect works but the agent-proposed OAuth 404s on `initiateOAuth`. The app+mcp connectors (salesforce-next family) expose `oauthConnect`/`oauthStatus`/`oauthDisconnect`; the legacy `initiateOAuth`/`oauthCallback` names belong to the OLD oauth-core/google-docs/google-mail/gmail-reply-agent connectors and must NOT be copied into a new connector's catalog block. **Found+fixed 2026-06-26 in `google-workspaces` (the lone outlier — built first from a stale `MaintainerSetup-excerpt.tsx`; the rest of the fleet already used the correct slugs).** Fix is in `reference/central-oauth/MaintainerSetup-excerpt.tsx` (`catalogAuth`). When this is wrong on a LIVE connector, also PATCH the already-registered catalog entry (`PATCH /workspaces/slug:capabilities/webhooks/v1/servers/:id {config:{auth:{connect_url,status_url,disconnect_url}}}`) in EVERY env — fixing the SPA only corrects FUTURE Add/Update clicks.
 
-34. **Knowledge-sync content ingestion needs a SELF-AUTHENTICATING download URL — the storage crawler fetches `fetchUrl` ANONYMOUSLY (no auth header).** The AI Knowledge sync pipeline (`storage` → crawler) ingests a file by handing the crawler a URL it GETs with no credentials. This works trivially for providers that mint pre-authenticated, tokenless download URLs (SharePoint/Graph `@microsoft.graph.downloadUrl`, S3 presigned URLs) — `ksListFiles` puts that URL straight in `file.fetchUrl`. It **breaks for providers whose download requires a bearer header** — notably **Google Drive**: `webContentLink`/`alt=media` need `Authorization: Bearer`, and Google **rejects `?access_token=` in the query** (HTTP 403 "Sorry… automated queries" — verified 2026-07-16, header-auth returns 200 for the same file). There is NO query-param auth for Drive. The ks contract's escape hatch is `contentOp: getContent` (host calls `ksCall op:getContent` per file to mint a short-lived URL), but that returned URL STILL must be crawler-fetchable anonymously, so it doesn't rescue Google. **Consequences for a header-auth file store:** browse/list/checkAccess/auth all work over the ks contract, but content-ingestion is blocked until one of: (a) a **platform enhancement** — teach the reindex → `file.index_requested` → `crawler.crawlPage` chain to carry a per-file auth header / token (the crawler is an external microservice, so this is a real platform chantier, not a DSUL change); or (b) **re-host** — `ksGetContent` downloads the bytes with the bearer and re-uploads to `/v2/files` with a shareToken, returning `<file_url>?token=…` (self-authenticating like SharePoint), BUT binary can't transit a DSUL `fetch`→upload cleanly (Gotcha 23; large base64 → 500), so this needs the Prisme API app + a bounded/streamed transport. Decide this in Phase 1: if the provider gives tokenless URLs, `ks*` is complete; if it needs a header, ship browse/list/access and flag content as a follow-up. `google-workspaces` `ksGetContent` is wired (returns the media URL) but content ingestion awaits (a) or (b).
+34. **Knowledge ingestion needs a SELF-AUTHENTICATING download URL — the storage crawler fetches `_meta.downloadUrl` ANONYMOUSLY (no auth header).** The pipeline (`storage` → crawler) ingests a document by handing the crawler a URL it GETs with no credentials. Three provider shapes, and the one you have decides the connector's ceiling:
+    - **Tokenless URL minted by the provider** (SharePoint/Graph `@microsoft.graph.downloadUrl`, S3 presigned): put it straight in `_meta.downloadUrl`. No size limit, bytes never transit DSUL.
+    - **You can SIGN one yourself** (Azure Blob): mint a short-lived service SAS in Custom Code (`crypto` is available) — same benefit. Backdate the start time ~5 min or clock skew yields a token Azure rejects as "not valid yet", with a 403 and no hint. Note the two modes that cannot: a SAS-only tenant reuses its own token, and a Microsoft Entra bearer token **cannot** sign a SAS without a user delegation key — report that in `_meta.unfetchable_reason` instead of failing anonymously.
+    - **Download requires a bearer header** (Google Drive, Confluence page bodies, a mail body): there is no URL to give. Serve the content INLINE as `contents[0].text` — and remember constraint 3 above: `metadataOnly: true` must NOT strip it. Google **rejects `?access_token=` in the query** (HTTP 403 "Sorry… automated queries" — verified 2026-07-16, header-auth returns 200 for the same file), so there is no query-param escape hatch. Bytes inlined as a base64 data URL (webdav) are capped by Storage's `content` field at 2 000 000 CHARACTERS, ×1.37 for base64 → keep the connector ceiling at ~1 400 000 bytes.
+    
+    **Never send both** `downloadUrl` and `text`: Storage prefers `content` over `fetch_url`, so the URL would never be fetched. Decide the shape in Phase 1 — it determines whether large binaries can be ingested at all.
 
 ---
 
@@ -222,6 +352,7 @@ Deploy runbook (back changes need only a push; front changes need a bundle uploa
 - **`reference/`** — the full validated `salesforce-next` connector (automations, `imports/`, `index.yml`, `security.yml`, `pages/<slug>/src`). The canonical implementation. Mirror it.
 - **`reference/central-oauth/`** — the central platform OAuth client (token-service) pattern, lifted verbatim from the validated `google-workspaces` connector (xjROdh7, E2E on tenant w6UiyHw 2026-06-12): `setOAuthClient.yml`, `maintainerStatus.yml` (maintainer access gate — Gotcha 28), `getOAuthClientPublic.yml`, `centralTokenExchange.yml`, `resolveOAuthClient.yml`, the reworked `oauthConnect.yml`/`oauthCallback.yml`, the `packOAuthState`/`unpackOAuthState` Custom Code functions, and the SPA `MaintainerSetup` excerpt (access-gated, now mounting `CatalogPublish` on the CORE endpoint — Gotcha 30). The global-endpoint allow-all lives in `reference/automations/validateAgent.yml` (Gotcha 29). Substitute `google-workspaces`/`googleWorkspaces`/`gws` placeholders + the provider token URL.
 - **`reference/pages/salesforce-next/src/CatalogPublish.tsx`** — the reusable one-click "Add to catalog" component (`POST /v1/servers`, existence-gated; Gotcha 30) + `buildMcpCatalogEntry` helper. Imported by both the tenant ConfigApp (`App.tsx`, per-tenant endpoint) and the central `MaintainerSetup` (core endpoint). The shared `resolveHost`/`readParam`/`apiHeaders` now live in `src/lib/utils.ts`.
+- **Knowledge Resources references** (in `prismeai-workspaces`, not bundled here — read the code, it is the contract): `workspaces/sharepoint-next` (pre-signed URLs, 3 levels), `workspaces/google-workspaces` (exported text), `workspaces/webdav` (inlined bytes, perimeter-only access check), `workspaces/confluence-next` (flattened tree — the `_meta.kind` trade), `workspaces/outlook-next` (two-phase cursor), `workspaces/azure-blob-storage` (self-signed SAS). The host side is `workspaces/knowledge-sync` + `docs/knowledge-sync/automations.md`; the traversal rules of Phase 9 were all measured in its `_sync-engine.yml`. Each connector's `docs/<slug>/` states its own trade-offs.
 - Project memory `app-mcp-refacto-design` — locked design decisions + the rationale behind every gotcha above.
 
 ## Output to the user
