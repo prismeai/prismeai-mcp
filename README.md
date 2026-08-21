@@ -1,6 +1,8 @@
 # Prisme.ai MCP Plugin
 
-Prisme.ai MCP is distributed as a plugin for **Claude Code** and **Codex**. The plugin bundles the MCP server, Prisme.ai skills, Claude agents, documentation, and the DSUL linter in one repository. Install and use the plugin only.
+Prisme.ai MCP is distributed as a plugin for **Claude Code**, **Codex**, and **VS Code Copilot**. The plugin bundles the MCP server, Prisme.ai skills, Claude agents, documentation, and the DSUL linter in one repository. On those clients, install and use the plugin only.
+
+Clients that are not plugin hosts — Cursor, Claude Desktop — consume the bundled MCP server directly; see [Manual Setup](./docs/MANUAL_SETUP.md).
 
 ## What You Get
 
@@ -13,7 +15,7 @@ Prisme.ai MCP is distributed as a plugin for **Claude Code** and **Codex**. The 
 
 ## Prerequisites
 
-- Claude Code and/or Codex
+- Claude Code, Codex, or a VS Code build with agent plugin support (Agent Plugins 1.0, August 2026 or later)
 - **Node.js v18+**, resolvable from the environment the client is launched from
 
 The plugin runs the committed bundle with `node`; no Node.js runtime ships with it. Check before installing:
@@ -50,6 +52,47 @@ codex plugin add prisme-ai@prismeai-mcp
 
 The plugin source is `./plugin` inside this repository. Both marketplaces point there, so the same GitHub repo installs cleanly in Claude Code and Codex.
 
+### VS Code Copilot
+
+VS Code detects Claude-format plugins, so this repository installs as an agent plugin — no manual MCP configuration.
+
+1. Add the marketplace in `Preferences: Open User Settings (JSON)`:
+
+   ```json
+   "chat.plugins.marketplaces": ["prismeai/prismeai-mcp"]
+   ```
+
+2. Open the Extensions view (`⇧⌘X` / `Ctrl+Shift+X`), search `@agentPlugins`, and install **prisme-ai**. `Chat: Open Customizations` → **Plugins** → **Browse Marketplace** is the equivalent path.
+
+3. The `prisme-ai-builder` MCP server starts automatically once the plugin is enabled, and stops when it is disabled.
+
+To register the plugin for a whole team, commit the recommendation to `.github/copilot/settings.json` in the target project instead:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "prismeai-mcp": {
+      "source": { "source": "github", "repo": "prismeai/prismeai-mcp" }
+    }
+  },
+  "enabledPlugins": {
+    "prisme-ai@prismeai-mcp": true
+  }
+}
+```
+
+For a local checkout — maintainers, or testing an unreleased branch — skip the marketplace and register the folder with `chat.pluginLocations`:
+
+```json
+"chat.pluginLocations": {
+  "/absolute/path/to/prismeai-mcp/plugin": true
+}
+```
+
+**What loads.** The `prisme-ai-builder` tools and the bundled skills, which Copilot loads on demand rather than as `/prisme-ai:*` slash commands. The `prisme-code-review` agent is Claude Code-specific and is not exposed.
+
+**Config directory.** VS Code expands `${CLAUDE_PLUGIN_ROOT}` but not `${PLUGIN_DATA}` for Claude-format plugins. The server detects the unexpanded value and falls back to `~/.prisme-ai-mcp`, so register tokens against that directory — see [Authenticate](#authenticate).
+
 ## Authenticate
 
 Credentials are user-created API tokens, registered per environment. The recommended path keeps the token **out of the chat** (it is never sent to the LLM provider):
@@ -64,9 +107,17 @@ Credentials are user-created API tokens, registered per environment. The recomme
    It prompts for the token with hidden input, the API and Studio URLs, and an optional `NODE_EXTRA_CA_CERTS` PEM path. It probe-validates the token (using the extra CA when configured), then saves it to the plugin data dir (`credentials.json`, mode 600). An invalid token saves nothing.
 3. Re-run your request — the server picks up the new token automatically (no restart). Run `set-token` again anytime to rotate.
 
+On VS Code Copilot the config dir is always `~/.prisme-ai-mcp` (see [VS Code Copilot](#vs-code-copilot)):
+
+```bash
+node "<plugin>/build/index.js" set-token sandbox --config-dir "$HOME/.prisme-ai-mcp"
+```
+
 When a tool call has no token (or hits a 401), the error message contains the exact command to run. If you first try to use any tool from the chat, the LLM agent will read that error and provide the proper `set-token` arguments for your environment and config dir. You can instead let the agent register a pasted token via the `set_token` tool, but that token is sent to the LLM provider as part of the conversation — prefer the CLI.
 
 ## First Use
+
+The slash commands below are Claude Code and Codex syntax. VS Code Copilot loads the same skills, but invokes them from the request itself — ask for the Prisme.ai guide rather than typing `/prisme-ai:guide`.
 
 After installation, run:
 
@@ -122,6 +173,10 @@ Codex does not currently provide a separate `plugin update` command. Re-running
 refreshed catalog. Start a new Codex session (or restart the desktop app) to load
 the updated plugin.
 
+### VS Code Copilot
+
+VS Code checks for plugin updates every 24 hours when `extensions.autoUpdate` is on. To force a check, run `Extensions: Check for Extension Updates` from the Command Palette, then confirm the update on the **prisme-ai** entry in the **Agent Plugins - Installed** view.
+
 Plugin updates are distributed from the committed source. Maintainers rebuild and commit `plugin/build/index.js` before tagging; CI only verifies that the tagged commit is consistent.
 
 ## Runtime Model
@@ -152,6 +207,8 @@ Check in this order:
 2. Restart the client after installing Node.js. A session that already failed to spawn the server does not retry, so `set-token` alone will not recover it — this is the one case where the CLI's "no restart needed" message does not apply.
 3. Only then register a token, as described in [Authenticate](#authenticate).
 
+On VS Code, an editor started from the Dock or Start menu frequently misses a `PATH` set in your shell profile. Launch it with `code .` from a terminal, then disable and re-enable the plugin from the **Agent Plugins - Installed** view to respawn the server. `MCP: Show Output` prints the spawn error.
+
 ## Maintainer Development
 
 Only plugin maintainers need source-based local setup. Use [Development](./docs/DEVELOPMENT.md) to run an MCP client against this repository checkout and rebuild the committed runtime artifact.
@@ -160,15 +217,17 @@ Only plugin maintainers need source-based local setup. Use [Development](./docs/
 
 | Path | Purpose |
 |------|---------|
-| `.claude-plugin/marketplace.json` | Claude marketplace entry, pointing to `./plugin` |
+| `.claude-plugin/marketplace.json` | Claude marketplace entry, pointing to `./plugin`; also read by VS Code Copilot |
 | `.agents/plugins/marketplace.json` | Codex marketplace entry, pointing to `./plugin` |
 | `plugin/.claude-plugin/plugin.json` | Claude plugin manifest |
-| `plugin/.mcp.json` | Claude MCP server definition |
+| `plugin/.mcp.json` | Claude MCP server definition, reused by VS Code Copilot |
 | `plugin/.codex-plugin/plugin.json` | Codex manifest with its inline MCP server definition |
 | `plugin/build/index.js` | Self-contained MCP server bundle |
 | `plugin/skills/` | Bundled Prisme.ai skills |
 | `plugin/agents/` | Claude Code agents |
 | `plugin/llmDoc/` | Prisme.ai documentation exposed to tools |
+
+Manual MCP clients bypass all of this and point directly at `plugin/build/index.js`.
 
 ## Reference Docs
 
