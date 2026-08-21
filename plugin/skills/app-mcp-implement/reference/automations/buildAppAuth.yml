@@ -128,6 +128,7 @@ do:
               - run:
                   module: secrets
                   function: get
+                  assumeRole: tokenResolver
                   parameters:
                     name: '{{tokName.name}}'
                     scope: workspace
@@ -169,6 +170,7 @@ do:
                                 - run:
                                     module: secrets
                                     function: delete
+                                    assumeRole: tokenResolver
                                     parameters:
                                       name: '{{tokName.name}}'
                                       scope: workspace

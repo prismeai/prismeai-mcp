@@ -1,5 +1,9 @@
 authorizations:
   roles:
+    # Assumed by buildAppAuth to resolve a member's token when nobody drives the
+    # run. Never grant it to a person and never give it an `auth` block: anything
+    # holding it reads and overwrites every credential in the family below.
+    tokenResolver: {}
     editor: {}
     viewer: {}
     workspace:
@@ -95,3 +99,25 @@ authorizations:
         labels:
           $in:
             - public
+    - action:
+        - create
+        - update
+      subject: secure_secrets
+      conditions:
+        name:
+          $regex: '^<pfx>Refresh_${user.id}$'
+      reason: A member connecting their own account deposits the refresh token.
+    - role: tokenResolver
+      action:
+        - read
+        - create
+        - update
+      subject: secure_secrets
+      conditions:
+        name:
+          $regex: '^<pfx>Refresh_'
+      reason: |
+        The same credentials, resolved for a member who is not there. Names the
+        FAMILY rather than one person: `${user.id}` binds to nobody in a run
+        nobody drives. The write is here too because providers rotate refresh
+        tokens, and the new one must be stored for that absent member.
