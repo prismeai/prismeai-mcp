@@ -1,6 +1,6 @@
 slug: oauthConnect
 name: OAuth/oauthConnect
-description: Per-user OAuth2 (authorization-code + PKCE) connect endpoint. Opened in the user's browser (Connect button / agent-factory connect_url). Resolves the OAuth client via resolveOAuthClient (tenant config.auth override → central platform client), stores PKCE + state + redirectUri in user scope, and redirects to Google's authorize endpoint with access_type=offline + prompt=consent so a refresh_token is (re)issued. With the central client, the redirect_uri is the CORE workspace callback and the tenant callback URL is packed into the state (the core proxies back). oauthCallback then exchanges the code and stores the token for this user.
+description: Per-user OAuth2 (authorization-code + PKCE) connect endpoint. Resolves the OAuth client from field-level tenant values or the central platform client, stores PKCE + state + redirectUri in user scope, and redirects to Google's authorize endpoint.
 private: true
 when:
   endpoint: true
@@ -59,10 +59,10 @@ do:
   - Custom Code.run:
       function: buildAuthorizeUrl
       parameters:
-        authorizeUrl: https://accounts.google.com/o/oauth2/v2/auth
+        authorizeUrl: '{{oc.authorizeUrl}}'
         clientId: '{{oc.oauthClientId}}'
         redirectUri: '{{oc.redirectUri}}'
-        scopes: '{% {{oc.scopes}} || "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar openid email" %}'
+        scopes: '{{oc.scopes}}'
         state: '{{packed.packed}}'
         codeChallenge: '{{pkce.codeChallenge}}'
         accessType: offline

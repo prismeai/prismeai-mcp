@@ -9,6 +9,7 @@ arguments:
     type: object
   accessToken:
     type: string
+    secret: true
   baseUrl:
     type: string
     description: Full Salesforce REST base — `{instance_url}/services/data/{apiVersion}`.

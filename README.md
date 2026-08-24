@@ -11,6 +11,19 @@ Prisme.ai MCP is distributed as a plugin for **Claude Code** and **Codex**. The 
 | Skills | `/prisme-ai:*` skills for connector scaffolding, consumer E2E testing, documentation, A2UI, workspace pages, assistant workflows, and ticket validation |
 | Claude agents | `prisme-code-review` for Claude Code |
 
+## Prerequisites
+
+- Claude Code and/or Codex
+- **Node.js v18+**, resolvable from the environment the client is launched from
+
+The plugin runs the committed bundle with `node`; no Node.js runtime ships with it. Check before installing:
+
+```bash
+node --version
+```
+
+If the command is not found, install Node.js first ([nodejs.org](https://nodejs.org), or a version manager such as `nvm` or `fnm`). A client started from a desktop launcher does not always inherit a `PATH` set up in your shell profile — starting it from a terminal is the reliable path.
+
 ## Install From GitHub
 
 Repository: [prismeai/prismeai-mcp](https://github.com/prismeai/prismeai-mcp)
@@ -126,6 +139,18 @@ Runtime requirements:
 - No local build
 - No Playwright
 - No browser token capture
+
+## Troubleshooting
+
+### No `prisme-ai-builder` tools, and no error message
+
+The client spawns the MCP server with `node` when the session starts. If `node` is not resolvable at that moment, the spawn fails and is not retried for the rest of the session: no tools appear, and no "no credentials" error is raised — so the `set-token` command that error normally prints never surfaces.
+
+Check in this order:
+
+1. `node --version` resolves in the shell the client was launched from.
+2. Restart the client after installing Node.js. A session that already failed to spawn the server does not retry, so `set-token` alone will not recover it — this is the one case where the CLI's "no restart needed" message does not apply.
+3. Only then register a token, as described in [Authenticate](#authenticate).
 
 ## Maintainer Development
 

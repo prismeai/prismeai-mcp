@@ -1,0 +1,3738 @@
+openapi: 3.0.3
+info:
+  version: 1.0.0
+  title: Knowledges API
+  description: |
+    Public REST API for the Prisme.ai Knowledges (storage) workspace: knowledge bases, documents (uploaded files, web pages, remote files, connector documents), recurring web-crawl sources, semantic search, access control, per-knowledge-base API keys, and skills.
+
+    Resource identifiers use the physical prefixes emitted by the implementation (`vs_` knowledge base, `vsf_` document, `seed_` web source, `kb-` API-key slug).
+
+    This spec documents the public REST surface only. Internal helpers (private automations prefixed with `_`) and admin/GDPR lifecycle operations are not part of the public contract.
+  contact:
+    name: Prisme.ai
+    url: https://prisme.ai
+servers:
+- url: https://{host}/v2/workspaces/slug:storage/webhooks
+  description: Prisme.ai workspace webhooks
+  variables:
+    host:
+      default: api.studio.prisme.ai
+      description: API host (override for self-hosted or sandbox)
+security:
+- BearerAuth: []
+- WorkspaceApiKeyAuth: []
+tags:
+- name: Knowledge Bases
+  description: Create, list, read, update, and delete knowledge bases (vector-backed document stores).
+- name: Documents
+  description: Ingest and manage documents (uploaded files, web pages, remote files, connector documents) and their indexing.
+- name: Web Sources
+  description: Recurring web crawl seeds that discover and index pages into a knowledge base.
+- name: Search
+  description: Semantic search over a knowledge base.
+- name: Access
+  description: Per-knowledge-base access bindings (user, group, org, agent principals).
+- name: API Keys
+  description: Per-knowledge-base API keys for connector authentication.
+- name: Stats
+  description: Aggregate dashboard statistics.
+- name: Skills
+  description: Prompt/instruction registry entries.
+paths:
+  /v1/knowledge_bases:
+    post:
+      operationId: createKnowledgeBase
+      tags:
+      - Knowledge Bases
+      summary: Create a knowledge base
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                  maxLength: 256
+                description:
+                  type: string
+                  maxLength: 4096
+                provider:
+                  type: string
+                  enum:
+                  - mock
+                  - elasticsearch
+                  - opensearch
+                  - redis
+                  - pgvector
+                  - qdrant
+                  - pinecone
+                  description: |
+                    Defaults to the platform-configured provider. Not
+                    strictly server-validated - an unsupported value
+                    surfaces as a `500` from the vector router rather
+                    than a `400`.
+                embedding:
+                  type: object
+                  properties:
+                    model:
+                      type: string
+                    dimensions:
+                      type: integer
+                      minimum: 1
+                  description: Defaults to the platform-configured embedding model.
+                chunking_strategy:
+                  type: object
+                  additionalProperties: true
+                parser:
+                  type: string
+                  enum:
+                  - tika
+                  - tika-ocr
+                  - unstructured
+                  - unstructured-ocr
+                  - llm
+                file_parsing:
+                  type: object
+                  properties:
+                    image:
+                      type: string
+                    audio:
+                      type: string
+                    document:
+                      type: string
+                agent_id:
+                  type: string
+                  description: Binds the store to an agent (conversation scope).
+                expires_after:
+                  type: object
+                  additionalProperties: true
+                  description: |
+                    Optional expiry policy persisted on the store row
+                    (e.g. conversation-scoped stores).
+      responses:
+        '201':
+          description: Knowledge base created (status `creating` until provisioned, then `active`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBase'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '500':
+          description: |
+            Provisioning failure - `INDEX_CREATION_FAILED` (vector index)
+            or `CRAWLER_INIT_FAILED` (crawler). Nested `Error` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      operationId: listKnowledgeBases
+      tags:
+      - Knowledge Bases
+      summary: List knowledge bases visible to the caller
+      description: |
+        Scoped by the caller's active `orgSlug` and access bindings.
+      security:
+      - BearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Page'
+      - name: name
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Case-insensitive substring match on `name`.
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+        description: |
+          Case-insensitive substring match on `name` OR `description`
+          (legacy `/vector_stores?search=` parity; takes precedence
+          over `name` when both are sent - added 2026-07-15, SPA
+          migration F1).
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: scope
+        in: query
+        required: false
+        schema:
+          type: string
+        description: |
+          Comma-separated list of store populations to include -
+          `owned`, `shared`, `all`, `agents`. Defaults to
+          `owned,shared`. `all`/`agents` require the corresponding
+          admin/agent access.
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - creating
+          - active
+          - failed
+          - deleting
+        description: |
+          Documented valid values; not strictly server-validated - an
+          unrecognized value yields an empty result rather than a 400.
+      responses:
+        '200':
+          description: Paginated knowledge bases.
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Pagination'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/KnowledgeBase'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '429':
+          $ref: '#/components/responses/Error429'
+  /v1/knowledge_bases/{knowledgeBaseId}:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    get:
+      operationId: getKnowledgeBase
+      tags:
+      - Knowledge Bases
+      summary: Retrieve a knowledge base
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: include
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - processing
+        description: |
+          `processing` triggers a live crawler round-trip that
+          populates the `processing` object (`status`, `metrics`,
+          `crawler_reachable`). Omitted → those live fields are `null`.
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Agent context for agent-owned knowledge bases.
+      responses:
+        '200':
+          description: The knowledge base.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBase'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+    patch:
+      operationId: updateKnowledgeBase
+      tags:
+      - Knowledge Bases
+      summary: Update knowledge base metadata and crawl settings
+      description: |
+        Metadata (`name`, `description`, `chunking_strategy`, `parser`,
+        `file_parsing`) plus the engine-global `crawl_settings` (partial
+        object). Provider, embedding, and index are immutable. Per-seed
+        listing lives in `/web_sources` (url + crawler_options only).
+        `crawl_settings.webpages_limit` is governance-capped (Platform →
+        Org); `null` re-inherits the resolved governance default - it
+        can never bypass the cap (the resolved value is persisted, a
+        snapshot: later org-cap changes do not retro-apply).
+        `crawl_settings.paused` writes the store-level pause directly:
+        creating or mutating seeds can never change it. A crawler-sync
+        failure fails the PATCH (`CRAWLER_SYNC_FAILED`, 502) before any
+        metadata mutation. Requires `editor`+.
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Agent context for agent-owned knowledge bases.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                  maxLength: 256
+                description:
+                  type: string
+                  maxLength: 4096
+                chunking_strategy:
+                  type: object
+                  additionalProperties: true
+                parser:
+                  type: string
+                  enum:
+                  - tika
+                  - tika-ocr
+                  - unstructured
+                  - unstructured-ocr
+                  - llm
+                file_parsing:
+                  type: object
+                  properties:
+                    image:
+                      type: string
+                    audio:
+                      type: string
+                    document:
+                      type: string
+                crawl_settings:
+                  type: object
+                  additionalProperties: false
+                  description: Partial - absent fields preserve the store value.
+                  properties:
+                    webpages_limit:
+                      type: integer
+                      minimum: 1
+                      description: Null re-inherits the governance default.
+                      nullable: true
+                    periodicity:
+                      type: integer
+                      description: |
+                        Seconds between crawls; null = manual-only.
+                        LIMITATION: the crawler service cannot clear an
+                        existing schedule (its PATCH ignores null fields -
+                        lab-proven 2026-07-17), so the scheduled → manual
+                        transition returns 400 until the service supports
+                        unsetting periodicity; null on an already-manual KB
+                        is an idempotent 200.
+                      nullable: true
+                    paused:
+                      type: boolean
+      responses:
+        '200':
+          description: Updated knowledge base.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBase'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '502':
+          description: '`CRAWLER_SYNC_FAILED` - pre-mutation crawler sync failed. Nested `Error` envelope.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      operationId: deleteKnowledgeBase
+      tags:
+      - Knowledge Bases
+      summary: Delete a knowledge base
+      description: |
+        Transactional: status moves to `deleting`, then documents,
+        seeds, chunks, vectors, and access bindings are cascaded, then
+        the store is removed. Native files referenced by documents
+        are NEVER deleted. Requires `admin`+ (or owner).
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Agent context for agent-owned knowledge bases.
+      responses:
+        '202':
+          description: Deletion started.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - object
+                - status
+                properties:
+                  id:
+                    type: string
+                  object:
+                    type: string
+                    enum:
+                    - knowledge_base
+                  status:
+                    type: string
+                    enum:
+                    - deleting
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '502':
+          description: |
+            Pre-mutation external cleanup failed - `CRAWLER_DELETE_FAILED`
+            or `VECTOR_INDEX_DELETE_FAILED`. Nested `Error` envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/knowledge_bases/{knowledgeBaseId}/documents:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    post:
+      operationId: createDocument
+      tags:
+      - Documents
+      summary: Attach a source (idempotent upsert)
+      description: |
+        The single ingestion endpoint. The server computes the
+        canonical `source_key` and upserts by
+        `(knowledge_base_id, source_key)`:
+
+        - no existing row → insert, schedule indexing, **201**;
+        - existing row → refresh mutable fields (`fetch_url`, `tags`,
+          `metadata`, `filename`, `mime_type`, `bytes`), schedule a
+          fresh indexing run, **200**.
+
+        For `native_file_id` sources no fetch URL is stored; storage
+        mints short-lived ones at fetch time.
+
+        Connector sync = repeat this call per document per cycle with
+        the same `source_url` and a fresh `fetch_url`.
+
+        Requires `editor`+ on the knowledge base.
+      security:
+      - BearerAuth: []
+      - WorkspaceApiKeyAuth: []
+      parameters:
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 128
+        description: |
+          Agent context for hook resolution and agent-owned knowledge
+          bases. May also be supplied in the request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentCreateRequest'
+      responses:
+        '200':
+          description: Existing document refreshed; indexing rescheduled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '201':
+          description: New document created; indexing queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '502':
+          $ref: '#/components/responses/Error502'
+        '503':
+          $ref: '#/components/responses/Error503'
+    get:
+      operationId: listDocuments
+      tags:
+      - Documents
+      summary: List documents
+      description: |
+        Paginated. Beyond the declared filters, `tags.<key>=<value>`
+        query parameters filter on caller-supplied tags (e.g.
+        `?tags.conversation_id=conv_42`) and `metadata.<key>=<value>`
+        on connector metadata. Requires `reader`+.
+      security:
+      - BearerAuth: []
+      - WorkspaceApiKeyAuth: []
+      parameters:
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Page'
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+        description: |
+          One status, or a comma-separated list matched as `$in`
+          (e.g. `?status=queued,failed` - the SPA status multi-select).
+          Values: `queued`, `in_progress`, `completed`, `failed`,
+          `fetch_expired`. Connectors use `?status=fetch_expired` to
+          discover documents whose ephemeral fetch URL must be refreshed.
+      - name: source_type
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - uploaded_file
+          - remote_file
+          - web_page
+          - connector_document
+      - name: origin
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - user
+          - web_source
+      - name: web_source_id
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^seed_[A-Za-z0-9-]+$
+        description: List pages produced by a seed.
+      - name: scope
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - knowledge
+          - conversation
+      - name: conversation_id
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 256
+        description: |
+          Server-side substring match over the document URL and a
+          denormalized display-text field (ReDoS-guarded). Combinable
+          with the other filters.
+      - name: updated_before
+        in: query
+        required: false
+        schema:
+          type: integer
+        description: |
+          Unix-seconds upper bound on `updated_at` (`$lt`). For
+          consumer retention sweeps.
+      - name: agent_id
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Agent context for agent-owned knowledge bases.
+      responses:
+        '200':
+          description: Paginated documents.
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Pagination'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Document'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v1/knowledge_bases/{knowledgeBaseId}/documents/{documentId}:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    - name: documentId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vsf_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Document id. Legacy physical prefix `vsf_` (the `doc_` rename is deferred).
+    get:
+      operationId: getDocument
+      tags:
+      - Documents
+      summary: Retrieve a document
+      description: |
+        Indexing state is read here (`status`, `last_error`,
+        `indexed_at`) - there is no separate jobs resource. Requires
+        `reader`+.
+      security:
+      - BearerAuth: []
+      - WorkspaceApiKeyAuth: []
+      responses:
+        '200':
+          description: The document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+    patch:
+      operationId: updateDocument
+      tags:
+      - Documents
+      summary: Update document metadata
+      description: |
+        Editable: `tags`, `metadata`, `expires_at`, `filename`.
+        `source_url`, `source_key`, `native_file_id`, and `source_type`
+        are immutable - re-keying a source means deleting and
+        re-attaching. To refresh `fetch_url` or re-trigger indexing,
+        use the POST upsert or `/reindex`. Requires `editor`+.
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                tags:
+                  type: object
+                  additionalProperties: true
+                metadata:
+                  type: object
+                  additionalProperties: true
+                expires_at:
+                  type: integer
+                  nullable: true
+                filename:
+                  type: string
+                  maxLength: 255
+      responses:
+        '200':
+          description: Updated document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+    delete:
+      operationId: deleteDocument
+      tags:
+      - Documents
+      summary: Detach a source
+      description: |
+        Deletes vectors (keyed by `document_id`), chunks, and the document
+        row; notifies the crawler to drop `crawler_document_id` when
+        relevant. **Never deletes the native file** - call
+        `DELETE /v2/workspaces/{ws}/files/{id}` separately if the bytes
+        should go too. Requires `editor`+ **and** document ownership - a
+        non-owner, non-admin editor deleting a document they do not own
+        gets `403 FORBIDDEN`.
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Detached.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - object
+                - deleted
+                properties:
+                  id:
+                    type: string
+                  object:
+                    type: string
+                    enum:
+                    - knowledge_base.document
+                  deleted:
+                    type: boolean
+                    enum:
+                    - true
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v1/knowledge_bases/{knowledgeBaseId}/documents/{documentId}/reindex:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    - name: documentId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vsf_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Document id. Legacy physical prefix `vsf_` (the `doc_` rename is deferred).
+    post:
+      operationId: reindexDocument
+      tags:
+      - Documents
+      summary: Force a re-run of the indexing pipeline (re-fetch, re-parse, re-chunk, re-embed)
+      description: |
+        Forced FULL re-run of the pipeline - fetch, parse, chunk,
+        embed, vector swap - on an EXISTING document only. `404` when
+        the document does not exist; no create or upsert semantics.
+        Increments `index_generation`; the previous good vectors remain
+        searchable until the new generation commits.
+
+        This is also the **rechunk** operation: pass
+        `chunking_strategy` to re-run with new settings. The override
+        is persisted on the document (replacing any previous
+        per-document override) so later re-runs reuse it. To rechunk
+        a whole store after changing the store-level
+        `chunking_strategy` (which only affects future runs), iterate
+        `GET /documents` and reindex each entry - there is
+        deliberately no bulk endpoint in v1.
+
+        For a `web_page` document this also re-fetches its URL through
+        the crawler (a single-page refresh).
+
+        Fetch behaviour by source type:
+        - `uploaded_file` - storage mints a fresh native fetch URL;
+          cannot expire.
+        - `web_page` / `remote_file` - the crawler re-fetches the URL.
+        - `connector_document` - uses the stored ephemeral `fetch_url`;
+          if it has expired, the document transitions to
+          `status: fetch_expired` and the owning connector refreshes it
+          on its next sync (or on observing the emitted event).
+
+        Requires `editor`+.
+      security:
+      - BearerAuth: []
+      - WorkspaceApiKeyAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                chunking_strategy:
+                  type: object
+                  additionalProperties: true
+                  description: |
+                    Rechunk with these settings. Persisted as the
+                    document's `chunking_strategy` override.
+                parser:
+                  type: string
+                  description: |
+                    Per-document parser override, persisted on the
+                    document and reused by later re-runs. The sentinel
+                    value `"default"` clears any existing override
+                    (reverts to the store-level parser).
+                reason:
+                  type: string
+                  maxLength: 256
+                  description: Free-form audit context (e.g. `parser_upgrade`).
+      responses:
+        '202':
+          description: 'Re-indexing queued; document returned with `status: in_progress`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '502':
+          $ref: '#/components/responses/Error502'
+  /v1/knowledge_bases/{knowledgeBaseId}/documents/{documentId}/chunks:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    - name: documentId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vsf_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Document id. Legacy physical prefix `vsf_` (the `doc_` rename is deferred).
+    get:
+      operationId: listDocumentChunks
+      tags:
+      - Documents
+      summary: List the document's chunks
+      description: Debug/quality review. Requires `reader`+.
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+        description: Page size. Defaults to 50 for this endpoint.
+      - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Paginated chunks.
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Pagination'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Chunk'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v1/knowledge_bases/{knowledgeBaseId}/documents/{documentId}/source_url:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    - name: documentId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vsf_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Document id. Legacy physical prefix `vsf_` (the `doc_` rename is deferred).
+    get:
+      operationId: resolveDocumentSourceUrl
+      tags:
+      - Documents
+      summary: Resolve a citation link (lazy)
+      description: |
+        Citation resolver. Authorization is on the VECTOR STORE
+        (`reader`+), not on the underlying file: a caller who can
+        search the store already reads the content as chunks, so the
+        source follows the store's ACL. For `uploaded_file`, the
+        storage workspace (privileged) mints a short-lived native share
+        URL (~5 min) and returns it with `expires_at`; callers
+        re-resolve on expiry. For other source types, returns
+        `source_url` as-is; a document with no stored `source_url`, or an
+        `uploaded_file` whose native file is owned by another workspace,
+        resolves to `404 SOURCE_UNAVAILABLE`.
+
+        Frontends should call this lazily - when the user clicks a
+        citation - never eagerly for every search hit.
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Resolved URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentSourceUrl'
+              examples:
+                uploaded:
+                  value:
+                    object: document.source_url
+                    document_id: vsf_550e8400-e29b-41d4-a716-446655440000
+                    source_type: uploaded_file
+                    url: https://api.studio.prisme.ai/v2/files/wsp_acme/nf_8GkX2p9QwLmZ4rTv1bCdE.report.pdf?token=temp_hmac
+                    expires_at: 1717000300
+                web:
+                  value:
+                    object: document.source_url
+                    document_id: vsf_550e8400-e29b-41d4-a716-446655440000
+                    source_type: web_page
+                    url: https://example.com/pricing
+                    expires_at: null
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          description: |
+            Document not found, or the source is unavailable
+            (`SOURCE_UNAVAILABLE`): the underlying native file was deleted
+            out-of-band (native files emit no deletion events, so this
+            surfaces at resolve time), the native file is owned by another
+            workspace and cannot be shared from here, or a non-uploaded
+            document carries no `source_url` to resolve.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                source_unavailable:
+                  value:
+                    error:
+                      code: SOURCE_UNAVAILABLE
+                      message: The underlying native file no longer exists.
+                      details:
+                        document_id: vsf_550e8400-e29b-41d4-a716-446655440000
+                        native_file_id: nf_8GkX2p9QwLmZ4rTv1bCdE
+        '502':
+          $ref: '#/components/responses/Error502'
+  /v1/knowledge_bases/{knowledgeBaseId}/source_urls:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    post:
+      operationId: resolveDocumentSourceUrlsBatch
+      tags:
+      - Documents
+      summary: Resolve citation links in a batch
+      description: |
+        Batch form of the single-doc citation resolver - the N+1
+        replacement for calling `GET /documents/{document_id}/source_url`
+        once per search hit. Resolves up to 50 documents in one
+        round-trip. Authorization is on the KNOWLEDGE BASE (`reader`+),
+        the same boundary as `/search` and the single-doc resolver: a
+        caller who can search the store already reads its chunks, so a
+        source URL follows the store ACL.
+
+        Per-item failures are returned INLINE - a document not in this
+        knowledge base, a dangling native file, or a transient mint
+        failure never fails the whole batch, which always returns 200.
+        Each `data` entry is either a resolved `document.source_url`
+        object or a `{ document_id, error }` item; a failed item carries
+        no `object` field, so detect it by the presence of `error`.
+        Technical item failures (`error.technical: true`, e.g.
+        `MINT_FAILED` / `RESOLVE_FAILED`) are retryable; business ones
+        (`NOT_FOUND`, `SOURCE_UNAVAILABLE`) are terminal.
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - document_ids
+              properties:
+                document_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  description: |
+                    Document ids to resolve (1-50 per request). Bounded
+                    strings, deliberately NOT pattern-constrained to
+                    `^vsf_` so legacy or backfilled ids still resolve.
+                knowledge_base_id:
+                  type: string
+                  maxLength: 128
+                  description: Optional override of the path parameter (body wins).
+                agent_id:
+                  type: string
+                  maxLength: 128
+                  description: |
+                    Agent context for trusted-workspace authorization,
+                    used when a trusted product resolves citations on an
+                    end user's behalf.
+      responses:
+        '200':
+          description: |
+            One entry per requested document (order not guaranteed).
+            Always 200, even when every item failed - inspect each entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchSourceUrlResult'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '405':
+          $ref: '#/components/responses/Error405'
+        '429':
+          $ref: '#/components/responses/Error429'
+  /v1/knowledge_bases/{knowledgeBaseId}/reindex:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    post:
+      operationId: reindexKnowledgeBase
+      tags:
+      - Knowledge Bases
+      summary: Bulk reindex DISPATCHER - queue re-processing of every document
+      description: |
+        One POST queues the full extraction pipeline (fetch → parse →
+        chunk → embed) on EVERY known document of the knowledge base -
+        uploaded files, connector/remote docs AND existing web pages
+        (including auto-discovered ones) - re-processing them with the
+        current store settings plus each document's persisted overrides.
+        Use after a store-level parser or chunking change to roll it out
+        across the whole KB. No request body: per-document overrides stay
+        on `POST /documents/{document_id}/reindex`.
+
+        **Dispatch-only, by design.** The request does only auth, a
+        count, one atomic lease acquire and one internal batch kick, then
+        returns `202`. All per-document work runs ASYNCHRONOUSLY
+        afterwards (batches of 100, keyset-paginated by id, chained
+        through the platform events API so each link restarts at call
+        depth 0). The response reports what was DISPATCHED, never real
+        parse/embed completion - `status` is `dispatching` (or `complete`
+        for an empty KB), and the terminal
+        `storage.kb.reindex.dispatch_completed` event likewise reports
+        counts of what was queued (`visited`, `dispatched`,
+        `skipped_missing_file`, `dispatch_failed`). There is intentionally
+        NO completion or progress tracking; a document that later fails to
+        parse/embed surfaces through its own `status`, not here.
+
+        Documented characteristics of the dispatch-only design:
+        - **Best-effort live set, not a snapshot.** Documents are walked
+          by keyset pagination during the run; rows inserted or deleted
+          mid-run may or may not be visited.
+        - **Burst, not throttled backpressure.** Batches are spaced by a
+          small delay only; a large KB enqueues its whole document set
+          into the pipeline over a short window (milder than, and
+          replacing, the legacy synchronous fan-out).
+        - **Concurrency guard is dispatcher-only.** An atomic lease
+          prevents two overlapping reindex DISPATCHES; it does NOT guard a
+          reindex overlapping ordinary ingestion, does not interact with
+          the crawl pause state, and does not block on a running crawl.
+        - **No new-page discovery.** Existing/known web pages are
+          re-fetched (depth-0); discovery of NEW pages runs on the crawl
+          `periodicity` schedule, not here (there is no manual recrawl -
+          removed 2026-07-20 as it never discovered pages).
+
+        Requires `editor`+.
+      security:
+      - BearerAuth: []
+      - WorkspaceApiKeyAuth: []
+      responses:
+        '202':
+          description: |
+            Reindex dispatched (or a no-op for an empty KB). `status` is
+            `dispatching` when documents were queued, `complete` when the
+            KB has no documents (no lease is taken).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  object:
+                    type: string
+                    enum:
+                    - knowledge_base.reindex
+                  knowledge_base_id:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                    - dispatching
+                    - complete
+                  documents_queued:
+                    type: integer
+                    description: Documents queued for re-processing (0 for an empty KB).
+              examples:
+                dispatching:
+                  value:
+                    object: knowledge_base.reindex
+                    knowledge_base_id: vs_7c9e6679-7425-40de-944b-e07fc1f90ae7
+                    status: dispatching
+                    documents_queued: 342
+                empty:
+                  value:
+                    object: knowledge_base.reindex
+                    knowledge_base_id: vs_7c9e6679-7425-40de-944b-e07fc1f90ae7
+                    status: complete
+                    documents_queued: 0
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          description: |
+            A reindex dispatch is already in progress for this knowledge
+            base (its lease is still live). Staleness is judged on the
+            lease expiry (15 min of no progress), never the immutable
+            start time, so a dispatcher that died mid-run frees the lock
+            automatically.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                already_running:
+                  value:
+                    error:
+                      code: REINDEX_ALREADY_RUNNING
+                      message: A reindex is already in progress for this knowledge base.
+                      details:
+                        started_at: '2026-07-20T10:15:00.000Z'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '502':
+          description: |
+            The reindex could not be started (the first internal batch
+            could not be enqueued after retries); the lease is released so
+            a retry is immediately possible.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                dispatch_failed:
+                  value:
+                    error:
+                      code: REINDEX_DISPATCH_FAILED
+                      message: Could not start the reindex. Please try again.
+  /v1/knowledge_bases/{knowledgeBaseId}/web_sources:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    post:
+      operationId: createWebSource
+      tags:
+      - Web Sources
+      summary: Create a recurring crawl seed
+      description: |
+        Registers a start URL + per-domain crawler options. The first
+        crawl is scheduled immediately unless the knowledge base is
+        paused (`crawl_settings.paused` - creating a seed never resumes
+        the crawler). Discovered pages arrive as documents
+        (`origin: web_source`, `web_source_id` set), deduped against
+        manual documents by `source_key`. The engine-global crawl
+        settings (`webpages_limit`, `periodicity`, `paused`, plus
+        decorative `depth`) are rejected here with 400 - set them via
+        the KB PATCH `crawl_settings`. The URL is the idempotency key:
+        re-POSTing an already-registered URL returns the existing seed
+        with `200` rather than creating a duplicate. Requires `editor`+.
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - url
+              additionalProperties: false
+              properties:
+                url:
+                  type: string
+                  format: uri
+                crawler_options:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Existing seed returned (the URL was already registered).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSource'
+        '201':
+          description: Seed created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSource'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '502':
+          $ref: '#/components/responses/Error502'
+    get:
+      operationId: listWebSources
+      tags:
+      - Web Sources
+      summary: List crawl seeds
+      security:
+      - BearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: |
+            Paginated seeds, plus a knowledge-base-level `summary`
+            (§F-5): the unattributed residual (web pages with no seed
+            attribution) and the total web-page count.
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Pagination'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/WebSource'
+                    summary:
+                      type: object
+                      properties:
+                        total_web_pages:
+                          type: integer
+                          minimum: 0
+                        unattributed_count:
+                          type: integer
+                          minimum: 0
+                          description: |
+                            Web pages with empty/absent
+                            `parent_web_source_ids` (off-domain
+                            redirects, or pre-backfill rows).
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v1/knowledge_bases/{knowledgeBaseId}/web_sources/{seedId}:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    - name: seedId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^seed_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Web crawl seed id. Prefix `seed_`.
+    get:
+      operationId: getWebSource
+      tags:
+      - Web Sources
+      summary: Retrieve a crawl seed (config + metrics + last/next run)
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: The seed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSource'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+    patch:
+      operationId: updateWebSource
+      tags:
+      - Web Sources
+      summary: Update seed configuration
+      description: |
+        `url` is immutable (a different start URL is a different seed).
+        Only `crawler_options` is editable - the engine-global crawl
+        settings (`webpages_limit`, `periodicity`, `paused`, plus
+        decorative `depth`) are rejected with 400: set them via the KB
+        PATCH `crawl_settings`. Seed mutations can never change the
+        pause state. Requires `editor`+.
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                crawler_options:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Updated seed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSource'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+    delete:
+      operationId: deleteWebSource
+      tags:
+      - Web Sources
+      summary: Delete a crawl seed
+      description: |
+        Cascades over documents with `web_source_id = seed_id` AND
+        `origin: web_source` (vectors + chunks + rows). Documents
+        with `origin: user` that the seed had adopted survive and lose
+        their `web_source_id`. Requires `editor`+.
+      security:
+      - BearerAuth: []
+      responses:
+        '202':
+          description: Deletion + cascade started.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - object
+                - deleted
+                properties:
+                  id:
+                    type: string
+                  object:
+                    type: string
+                    enum:
+                    - knowledge_base.web_source
+                  deleted:
+                    type: boolean
+                    enum:
+                    - true
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v1/knowledge_bases/{knowledgeBaseId}/search:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    post:
+      operationId: searchKnowledgeBase
+      tags:
+      - Search
+      summary: Semantic search
+      description: |
+        Hits are enriched from document rows directly (no registry
+        join). They carry `document_id` + display `source_url` only - never
+        `fetch_url`, never tokens. Resolve downloadable links lazily
+        via `GET /documents/{document_id}/source_url`. Requires `reader`+.
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - query
+              properties:
+                query:
+                  type: string
+                  maxLength: 8192
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 50
+                  default: 10
+                min_score:
+                  type: number
+                  description: Drop hits below this score.
+                filter:
+                  $ref: '#/components/schemas/SearchFilter'
+                scope:
+                  type: string
+                  enum:
+                  - knowledge
+                  - conversation
+                  description: Restrict to a scope. Omit for both.
+                conversation_id:
+                  type: string
+                  description: 'Required when `scope: conversation`.'
+      responses:
+        '200':
+          description: Search results, best score first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - object
+                - data
+                properties:
+                  object:
+                    type: string
+                    enum:
+                    - list
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SearchHit'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '429':
+          $ref: '#/components/responses/Error429'
+        '502':
+          $ref: '#/components/responses/Error502'
+  /v1/knowledge_bases/{knowledgeBaseId}/access:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    get:
+      operationId: listAccessBindings
+      tags:
+      - Access
+      summary: List access bindings
+      description: Requires `admin`+ (or owner).
+      security:
+      - BearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Paginated bindings.
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Pagination'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/AccessBinding'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+    post:
+      operationId: createAccessBinding
+      tags:
+      - Access
+      summary: Grant access
+      description: |
+        Idempotent on `(knowledge_base_id, principal_type,
+        principal_id)`: re-granting updates the role (200) instead of
+        duplicating. Requires `admin`+ (or owner).
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - principal_type
+              - principal_id
+              - role
+              properties:
+                principal_type:
+                  type: string
+                  enum:
+                  - user
+                  - group
+                  - org
+                  - agent
+                principal_id:
+                  type: string
+                  maxLength: 128
+                role:
+                  type: string
+                  enum:
+                  - admin
+                  - editor
+                  - reader
+                  description: '`owner` is not grantable via this endpoint.'
+      responses:
+        '200':
+          description: Existing binding updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessBinding'
+        '201':
+          description: Binding created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessBinding'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v1/knowledge_bases/{knowledgeBaseId}/access/{principalType}/{principalId}:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    - name: principalType
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+        - user
+        - group
+        - org
+        - agent
+      description: |
+        Type of access principal. `agent` is a first-class owner
+        principal for conversation/agent-owned knowledge bases (§F-6);
+        `principal_id` is then the agent id (or its service-account id).
+    - name: principalId
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 128
+      description: |
+        Identifier of the principal. For `user`, the user id; for
+        `group` and `org`, the group/org slug or id resolvable by the
+        platform.
+    patch:
+      operationId: updateAccessBinding
+      tags:
+      - Access
+      summary: Change a principal's role
+      description: Requires `admin`+ (or owner).
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - role
+              additionalProperties: false
+              properties:
+                role:
+                  type: string
+                  enum:
+                  - admin
+                  - editor
+                  - reader
+      responses:
+        '200':
+          description: Updated binding.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessBinding'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+    delete:
+      operationId: deleteAccessBinding
+      tags:
+      - Access
+      summary: Revoke access
+      description: Requires `admin`+ (or owner).
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - object
+                - deleted
+                properties:
+                  object:
+                    type: string
+                    enum:
+                    - knowledge_base.access_binding
+                  deleted:
+                    type: boolean
+                    enum:
+                    - true
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v1/knowledge_bases/{knowledgeBaseId}/api-keys:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    post:
+      operationId: createKnowledgeBaseApiKey
+      tags:
+      - API Keys
+      summary: Mint an API key
+      description: |
+        Creates an API key (minted scope `storage:vector_stores:{id}` -
+        the `knowledge_bases` rename is deferred with the platform
+        allowlist). The secret is returned ONCE in this response and
+        never again. `expires_at` is **required** - the platform key
+        service rejects a key with no expiry. Requires `admin`+ (or owner).
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - expires_at
+              properties:
+                name:
+                  type: string
+                  maxLength: 256
+                slug:
+                  type: string
+                  description: |
+                    Optional path-safe id. Auto-generated as
+                    `kb-{knowledge_base_id}-{uuid}` when omitted.
+                permissions:
+                  type: array
+                  items:
+                    type: string
+                  description: |
+                    Optional `storage:`-prefixed permission strings.
+                    Falls back to `config.api_key_default_permissions`.
+                expires_at:
+                  type: integer
+                  description: Unix seconds. **Required.**
+      responses:
+        '201':
+          description: Key created; `secret` present (once).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyWithSecret'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+    get:
+      operationId: listKnowledgeBaseApiKeys
+      tags:
+      - API Keys
+      summary: List API keys
+      description: Secrets are never included. Requires `admin`+ (or owner).
+      security:
+      - BearerAuth: []
+      parameters:
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Paginated API keys (no secrets).
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Pagination'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ApiKey'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v1/knowledge_bases/{knowledgeBaseId}/api-keys/{apiKeyId}:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    - name: apiKeyId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^kb-[A-Za-z0-9_-]+$
+        maxLength: 128
+      description: |
+        Knowledge-base API key identifier - the key **slug**
+        (auto-generated as `kb-{knowledge_base_id}-{uuid}`, or
+        caller-supplied). This is the value returned as `ApiKey.id`.
+    delete:
+      operationId: deleteKnowledgeBaseApiKey
+      tags:
+      - API Keys
+      summary: Revoke an API key
+      description: Requires `admin`+ (or owner).
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - object
+                - deleted
+                properties:
+                  object:
+                    type: string
+                    enum:
+                    - knowledge_base.api_key
+                  deleted:
+                    type: boolean
+                    enum:
+                    - true
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v1/knowledge_bases/{knowledgeBaseId}/api-keys/{apiKeyId}/rotate:
+    parameters:
+    - name: knowledgeBaseId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^vs_[A-Za-z0-9-]+$
+        maxLength: 128
+      description: Knowledge base id. Legacy physical prefix `vs_` (the `kb_` rename is deferred).
+    - name: apiKeyId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: ^kb-[A-Za-z0-9_-]+$
+        maxLength: 128
+      description: |
+        Knowledge-base API key identifier - the key **slug**
+        (auto-generated as `kb-{knowledge_base_id}-{uuid}`, or
+        caller-supplied). This is the value returned as `ApiKey.id`.
+    post:
+      operationId: rotateKnowledgeBaseApiKey
+      tags:
+      - API Keys
+      summary: Rotate an API key
+      description: |
+        Issues a new secret for the same key id and invalidates the
+        previous secret. The new secret is returned ONCE. Requires
+        `admin`+ (or owner).
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Rotated; new `secret` present (once).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyWithSecret'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+  /v1/stats:
+    get:
+      operationId: getStats
+      tags:
+      - Stats
+      summary: Dashboard stats
+      description: |
+        Aggregate totals for the caller's org scope (knowledge bases,
+        documents by status, vectors, web sources, storage bytes).
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: scope
+        in: query
+        required: false
+        schema:
+          type: string
+        description: |
+          Comma-separated population selector - `own`, `shared`, `all`.
+      responses:
+        '200':
+          description: Stats.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stats'
+        '401':
+          $ref: '#/components/responses/LegacyError401'
+        '403':
+          $ref: '#/components/responses/LegacyError403'
+  /v1/skills:
+    post:
+      operationId: createSkill
+      tags:
+      - Skills
+      summary: Create a skill
+      description: |
+        Create a skill in the registry.
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillInput'
+      responses:
+        '200':
+          description: 'Skill created (note: the implementation returns 200, not 201).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '400':
+          $ref: '#/components/responses/LegacyError400'
+        '401':
+          $ref: '#/components/responses/LegacyError401'
+        '403':
+          $ref: '#/components/responses/LegacyError403'
+    get:
+      operationId: listSkills
+      tags:
+      - Skills
+      summary: List skills
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: pageSize
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+        description: 'Page size (note: the param is `pageSize`, not `limit`).'
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Case-insensitive regex filter on `name`.
+      responses:
+        '200':
+          description: |
+            Skills list. The implementation returns a **flat** envelope
+            `{ items: [...] }` with no pagination metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Skill'
+        '401':
+          $ref: '#/components/responses/LegacyError401'
+        '403':
+          $ref: '#/components/responses/LegacyError403'
+  /v1/skills/{skillId}:
+    parameters:
+    - name: skillId
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 128
+    get:
+      operationId: getSkill
+      tags:
+      - Skills
+      summary: Retrieve a skill
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: The skill.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '401':
+          $ref: '#/components/responses/LegacyError401'
+        '403':
+          $ref: '#/components/responses/LegacyError403'
+        '404':
+          $ref: '#/components/responses/LegacyError404'
+    patch:
+      operationId: updateSkill
+      tags:
+      - Skills
+      summary: Update a skill
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillInput'
+      responses:
+        '200':
+          description: Updated skill.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '400':
+          $ref: '#/components/responses/LegacyError400'
+        '401':
+          $ref: '#/components/responses/LegacyError401'
+        '403':
+          $ref: '#/components/responses/LegacyError403'
+        '404':
+          $ref: '#/components/responses/LegacyError404'
+    delete:
+      operationId: deleteSkill
+      tags:
+      - Skills
+      summary: Delete a skill
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: 'Deleted (the implementation returns `{ deleted: true }` with no `object`).'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - deleted
+                properties:
+                  deleted:
+                    type: boolean
+                    enum:
+                    - true
+        '401':
+          $ref: '#/components/responses/LegacyError401'
+        '403':
+          $ref: '#/components/responses/LegacyError403'
+        '404':
+          $ref: '#/components/responses/LegacyError404'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'User session JWT or instance API key (`iak_*`). Send as `Authorization: Bearer <token>`.'
+    WorkspaceApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-prismeai-api-key
+      description: Workspace- or knowledge-base-scoped API key.
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: Page size. Server clamps to `[1, 100]` silently.
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: 1-based page number.
+  schemas:
+    Error:
+      type: object
+      description: |
+        Single error envelope shared by every non-2xx response. `code`
+        is the stable machine-readable identifier; `message` is the
+        human-readable text; `details` is optional structured context.
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+      required:
+      - error
+    Pagination:
+      type: object
+      description: |
+        Shared list-response envelope. Array is always `data`. Every
+        element carries its own `object` discriminator.
+      required:
+      - object
+      - data
+      - total
+      - page
+      - limit
+      - has_more
+      properties:
+        object:
+          type: string
+          enum:
+          - list
+        data:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+          minimum: 0
+        page:
+          type: integer
+          minimum: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        has_more:
+          type: boolean
+    KnowledgeBase:
+      type: object
+      description: |
+        Knowledge base metadata. PATCH is metadata-only; web-crawl
+        configuration lives in `/web_sources`.
+      required:
+      - id
+      - object
+      - name
+      - provider
+      - index_name
+      - embedding
+      - status
+      - owner
+      - owner_org_slug
+      - created_at
+      properties:
+        id:
+          type: string
+          pattern: ^vs_[A-Za-z0-9-]+$
+          maxLength: 128
+        object:
+          type: string
+          enum:
+          - knowledge_base
+        name:
+          type: string
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 4096
+        provider:
+          type: string
+          enum:
+          - mock
+          - elasticsearch
+          - opensearch
+          - redis
+          - pgvector
+          - qdrant
+          - pinecone
+        index_name:
+          type: string
+          description: Physical index name on the provider.
+        embedding:
+          type: object
+          required:
+          - model
+          - dimensions
+          properties:
+            model:
+              type: string
+            dimensions:
+              type: integer
+              minimum: 1
+        chunking_strategy:
+          type: object
+          additionalProperties: true
+          description: Default chunking for documents; overridable per document.
+        parser:
+          type: string
+          enum:
+          - tika
+          - tika-ocr
+          - unstructured
+          - unstructured-ocr
+          - llm
+          - null
+          nullable: true
+        file_parsing:
+          type: object
+          properties:
+            image:
+              type: string
+            audio:
+              type: string
+            document:
+              type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+          - creating
+          - active
+          - failed
+          - deleting
+          description: |
+            `creating` before external resources are provisioned;
+            `active` after metadata + physical setup + owner binding
+            succeed; `failed` is a visible failed state with a
+            cleanup-job hook; `deleting` is the transactional deletion
+            window.
+        document_counts:
+          type: object
+          description: |
+            Per-status aggregate over this store's documents.
+            Maintained with transitions guarded by each document's
+            `index_generation` - duplicate or stale crawler callbacks
+            cannot corrupt counters.
+          properties:
+            queued:
+              type: integer
+              minimum: 0
+            in_progress:
+              type: integer
+              minimum: 0
+            completed:
+              type: integer
+              minimum: 0
+            failed:
+              type: integer
+              minimum: 0
+            fetch_expired:
+              type: integer
+              minimum: 0
+            total:
+              type: integer
+              minimum: 0
+        owner:
+          type: object
+          required:
+          - type
+          - id
+          description: |
+            First-class owner principal (§F-6). For agent-owned
+            (conversation-scope) stores `type: agent` and `id` is the
+            agent id - represented as a `principalType: agent` binding
+            in the platform-managed `product_bindings` store, NOT a
+            blanked `owner_user_id`. `owner_user_id` / `agent_id` below
+            mirror this for convenience and filtering.
+          properties:
+            type:
+              type: string
+              enum:
+              - user
+              - agent
+              - org
+            id:
+              type: string
+              maxLength: 128
+        owner_user_id:
+          type: string
+          description: '`owner.id` when `owner.type == user`; null for agent-owned stores.'
+          nullable: true
+        owner_org_slug:
+          type: string
+          description: Tenant scope. All knowledge-base lookups are scoped by this field.
+        agent_id:
+          type: string
+          description: '`owner.id` when `owner.type == agent`; null otherwise. Filterable on list.'
+          nullable: true
+        role:
+          type: string
+          enum:
+          - owner
+          - admin
+          - editor
+          - reader
+          - null
+          description: |
+            Caller's effective role, computed at read time from access
+            bindings. Null on cross-workspace (`workspace_jwt`) reads.
+          nullable: true
+        access_reason:
+          type: string
+          enum:
+          - owner
+          - admin_binding
+          - editor_binding
+          - reader_binding
+          - agent_binding
+          - trusted_workspace
+          - null
+          nullable: true
+        processing:
+          $ref: '#/components/schemas/Processing'
+        crawl_settings:
+          type: object
+          description: |
+            Engine-global crawl settings - one Crawler instance per KB, so
+            these are the single values the crawler honors (they are NOT
+            per-seed). Read from the store-level columns; edited via the
+            KB PATCH (added 2026-07-17, web-sources crawl-settings
+            re-home).
+          required:
+          - webpages_limit
+          - periodicity
+          - paused
+          properties:
+            webpages_limit:
+              type: integer
+              minimum: 1
+              description: |
+                Per-crawl page cap, governance-capped (Platform → Org
+                hierarchy).
+              nullable: true
+            periodicity:
+              type: integer
+              description: |
+                Seconds between crawls; null = manual-only (seconds
+                integer rather than an enum for lossless crawler parity -
+                deviation 06-A-1).
+              nullable: true
+            paused:
+              type: boolean
+              description: Whether the whole crawler is paused.
+            max_webpages_limit:
+              type: integer
+              readOnly: true
+              description: |
+                Resolved governance cap (Platform → Org hierarchy) for
+                `webpages_limit` - the "max allowed" hint surfaced on the
+                KB detail response. Read-only; not accepted on PATCH
+                (added 2026-07-20).
+              nullable: true
+        web_source_count:
+          type: integer
+          minimum: 0
+          description: |
+            Number of registered web sources (crawl seeds). Summary
+            metadata for list cards - the seed objects themselves stay
+            on `/web_sources` (added 2026-07-15, SPA migration F1).
+        last_active_at:
+          type: integer
+          description: Unix seconds.
+          nullable: true
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+    Document:
+      type: object
+      description: |
+        Association between a source and a knowledge base - the only
+        membership model (no `files` registry). The server computes
+        `source_key` and dedups on `(knowledge_base_id, source_key)`.
+
+        `fetch_url` is intentionally ABSENT from this schema: it is
+        write-only at the API boundary (may embed credentials). For
+        `source_type: uploaded_file` no fetch URL is stored at all -
+        storage mints a fresh short-lived one (as a privileged
+        workspace) whenever the crawler needs bytes, so expired-token
+        failures are structurally impossible for uploaded files.
+      required:
+      - id
+      - object
+      - knowledge_base_id
+      - source_type
+      - source_key
+      - source_url
+      - origin
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          pattern: ^vsf_[A-Za-z0-9-]+$
+          maxLength: 128
+        object:
+          type: string
+          enum:
+          - knowledge_base.document
+        knowledge_base_id:
+          type: string
+          pattern: ^vs_[A-Za-z0-9-]+$
+        source_type:
+          type: string
+          enum:
+          - uploaded_file
+          - remote_file
+          - web_page
+          - connector_document
+          description: |
+            Discriminator. `uploaded_file` for platform-native files
+            (attached by `native_file_id`); `remote_file` for document
+            bytes at an arbitrary URL; `web_page` for HTML pages
+            (single URL or crawl-discovered); `connector_document` for
+            sources owned by a third-party connector.
+        source_key:
+          type: string
+          maxLength: 2048
+          readOnly: true
+          description: |
+            Server-computed canonical source URI; the dedup key,
+            UNIQUE with `knowledge_base_id`.
+            `prisme-file://{workspace_id}/{native_file_id}` for
+            uploaded files (stable across renames - never the rebuilt
+            native URL); `web://{normalized_url}` otherwise.
+            Normalization is conservative (strip fragment, lowercase
+            scheme + host, normalize percent-encoding, strip default
+            ports - query params untouched) and shared with the
+            crawler's canonicalization.
+        source_url:
+          type: string
+          format: uri
+          description: |
+            User-facing provenance URL - citations, UI links, audit
+            logs. Stable by construction for connector documents
+            (e.g. SharePoint webUrl) and web pages (the page URL). For
+            uploaded files, a display URL (caller-overridable at
+            attach time); downloadable links are minted lazily via
+            `GET /documents/{document_id}/source_url`.
+        native_file_id:
+          type: string
+          description: 'Platform-native file id when `source_type: uploaded_file`.'
+          nullable: true
+        native_file_workspace_id:
+          type: string
+          description: Workspace owning the native file. Defaults to the caller's workspace.
+          nullable: true
+        origin:
+          type: string
+          enum:
+          - user
+          - web_source
+          description: |
+            Provenance, set at row creation and never overwritten by
+            seed adoption. Seed deletion cascades only over
+            `origin: web_source` rows - a manually attached page later
+            discovered by a seed keeps `origin: user` and survives the
+            seed's deletion (losing only its `web_source_id`).
+        web_source_id:
+          type: string
+          pattern: ^seed_[A-Za-z0-9-]+$
+          description: |
+            Primary producing/adopting seed (origin-of-record), when
+            any. Multi-attribution (a page reachable from several
+            seeds) is carried by `parent_web_source_ids`.
+          nullable: true
+        parent_web_source_ids:
+          type: array
+          readOnly: true
+          items:
+            type: string
+            pattern: ^seed_[A-Za-z0-9-]+$
+          description: |
+            All seeds whose crawl scope covers this page
+            (multi-attribution, §F-5). Backs per-seed page counts and
+            seed cascade-delete: deleting a seed removes it from this
+            array and drops the row only when the array empties AND
+            `origin: web_source`. Empty/absent ⇒ unattributed (counted
+            in the `/web_sources` summary residual).
+        crawler_document_id:
+          type: string
+          description: Crawler-side document id, set once the crawler has seen this source.
+          nullable: true
+        status:
+          type: string
+          enum:
+          - queued
+          - in_progress
+          - completed
+          - failed
+          - fetch_expired
+          - rejected
+          description: |
+            Authoritative indexing status. Transitions are guarded by
+            `index_generation` - stale or duplicate callbacks are
+            ignored. `fetch_expired` is connector-facing: the stored
+            ephemeral `fetch_url` no longer works and the owning
+            connector must refresh it via the upsert (`POST
+            /documents` with the same `source_url`); it is never a
+            user-actionable error and never occurs for
+            `uploaded_file` sources. `rejected` means an external hook
+            (`before_file_ingest` / `after_file_parse`) blocked the
+            content - see `rejection_reason` / `rejected_by`.
+        index_generation:
+          type: integer
+          minimum: 1
+          readOnly: true
+          description: |
+            Monotonically increasing per document; incremented on
+            every (re)index. Search reads only the latest committed
+            generation; a reindex swaps the new generation in only on
+            success, so the previous good vectors remain searchable on
+            failure.
+        filename:
+          type: string
+          maxLength: 255
+          nullable: true
+        mime_type:
+          type: string
+          nullable: true
+        bytes:
+          type: integer
+          minimum: 0
+          nullable: true
+        parser:
+          type: string
+          description: Parser used at last successful parse.
+          nullable: true
+        parsed_at:
+          type: integer
+          nullable: true
+        page_count:
+          type: integer
+          minimum: 0
+          nullable: true
+        char_count:
+          type: integer
+          minimum: 0
+          nullable: true
+        chunking_strategy:
+          type: object
+          additionalProperties: true
+          description: Per-document override of the store default.
+          nullable: true
+        scope:
+          type: string
+          enum:
+          - knowledge
+          - conversation
+          default: knowledge
+        conversation_id:
+          type: string
+          nullable: true
+        expires_at:
+          type: integer
+          description: Unix seconds. TTL for conversation-scope documents.
+          nullable: true
+        tags:
+          type: object
+          additionalProperties: true
+          description: Caller-supplied tags. Editable via PATCH. Filterable on list.
+        metadata:
+          type: object
+          additionalProperties: true
+          description: |
+            Connector-supplied structured context (e.g. `connector`,
+            `site_id`, `drive_item_id`, `version`). Editable via PATCH.
+        chunks_count:
+          type: integer
+          minimum: 0
+          nullable: true
+        vectors_count:
+          type: integer
+          minimum: 0
+          nullable: true
+        last_error:
+          type: object
+          description: |
+            Most recent failure context. Cleared when a new indexing
+            attempt transitions to `in_progress`. `code:
+            SOURCE_UNAVAILABLE` signals a dangling reference (e.g. the
+            native file was deleted out-of-band - native files emit no
+            lifecycle events, so this surfaces at the next fetch).
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+            timestamp:
+              type: integer
+          nullable: true
+        errors:
+          type: array
+          readOnly: true
+          description: |
+            Bounded retry/failure history (the most recent failure is
+            also in `last_error`). For debugging repeated index
+            failures.
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              message:
+                type: string
+              timestamp:
+                type: integer
+          nullable: true
+        message:
+          type: string
+          description: |
+            Human-readable narrative status, distinct from `last_error`
+            (e.g. a partial-success or skipped note).
+          nullable: true
+        failed_at:
+          type: integer
+          description: Unix seconds of the most recent failure.
+          nullable: true
+        rejection_reason:
+          type: string
+          description: |
+            Set when `status: rejected`. Why an external hook blocked
+            the content. Surfaced to the user only when the resolved
+            hook config sets `expose_reason: true`.
+          nullable: true
+        rejected_by:
+          type: string
+          description: Identifier of the hook that produced the rejection.
+          nullable: true
+        indexed_at:
+          type: integer
+          description: Unix seconds. Set when the document reaches `completed`.
+          nullable: true
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+      example:
+        id: vsf_550e8400-e29b-41d4-a716-446655440000
+        object: knowledge_base.document
+        knowledge_base_id: vs_7c9e6679-7425-40de-944b-e07fc1f90ae7
+        source_type: connector_document
+        source_key: web://https://contoso.sharepoint.com/sites/x/Shared%20Documents/report.pdf
+        source_url: https://contoso.sharepoint.com/sites/x/Shared%20Documents/report.pdf
+        native_file_id: null
+        native_file_workspace_id: null
+        origin: user
+        web_source_id: null
+        crawler_document_id: crawl_doc_8842
+        status: completed
+        index_generation: 3
+        filename: report.pdf
+        mime_type: application/pdf
+        bytes: 234567
+        parser: tika
+        parsed_at: 1717000000
+        page_count: 12
+        char_count: 48213
+        chunking_strategy: null
+        scope: knowledge
+        conversation_id: null
+        expires_at: null
+        tags:
+          project: contracts-2026
+        metadata:
+          connector: sharepoint
+          site_id: site_123
+          drive_item_id: item_456
+          version: '42'
+        chunks_count: 37
+        vectors_count: 37
+        last_error: null
+        indexed_at: 1717000050
+        created_at: 1714972900
+        updated_at: 1717000050
+    DocumentCreateRequest:
+      type: object
+      description: |
+        Body of `POST /documents`. Exactly one source must be
+        identifiable: `native_file_id`, or `source_url`, or `fetch_url`
+        (in dedup-key priority order) - otherwise `400 MISSING_SOURCE`.
+
+        `source_type` is optional: inferred `uploaded_file` when
+        `native_file_id` is present (a conflicting explicit value is a
+        `400`); defaults to `web_page` for a bare URL. Pass
+        `remote_file` explicitly for non-HTML document bytes at a URL,
+        and `connector_document` from connectors.
+      properties:
+        source_type:
+          type: string
+          enum:
+          - uploaded_file
+          - remote_file
+          - web_page
+          - connector_document
+        native_file_id:
+          type: string
+          description: |
+            Platform-native file id. `404 FILE_NOT_FOUND` if the
+            referenced native file cannot be resolved. Content access is
+            governed by the knowledge base's ACL. Storage resolves
+            `filename`, `mime_type`, `bytes` from the native API unless
+            supplied inline.
+        native_file_workspace_id:
+          type: string
+          description: Workspace owning the native file. Defaults to the caller's workspace.
+        source_url:
+          type: string
+          format: uri
+          description: |
+            Stable provenance URL - the dedup key for non-native
+            sources. Defaults to `fetch_url` when omitted. For
+            uploaded files, an optional display override (e.g. a doc
+            viewer page URL).
+        fetch_url:
+          type: string
+          format: uri
+          writeOnly: true
+          description: |
+            Operational URL used to retrieve bytes at index time. May
+            be temporary, signed, tokenized. Write-only - never
+            returned by any response. Ignored for
+            `source_type: uploaded_file` (storage mints its own).
+            Refreshed on every upsert (200 path); connectors send a
+            fresh one on each sync.
+        filename:
+          type: string
+          maxLength: 255
+        mime_type:
+          type: string
+        bytes:
+          type: integer
+          minimum: 0
+        chunking_strategy:
+          type: object
+          additionalProperties: true
+        model:
+          type: string
+          maxLength: 256
+          description: |
+            Optional embedding model override threaded into the indexing
+            pipeline for this document.
+        agent_id:
+          type: string
+          maxLength: 128
+          description: |
+            Agent context for hook resolution and agent-owned knowledge
+            bases. May also be supplied as the `agent_id` query parameter.
+        scope:
+          type: string
+          enum:
+          - knowledge
+          - conversation
+          default: knowledge
+        conversation_id:
+          type: string
+        expires_at:
+          type: integer
+          description: Unix seconds.
+        tags:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+        hooks:
+          type: array
+          writeOnly: true
+          description: |
+            Optional external-hook pass-through (e.g. from
+            agent-factory). Merged with the server-resolved
+            platform/org/agent hook config. A `before_file_ingest` or
+            `after_file_parse` hook may transform or block the content;
+            a block yields `403 HOOK_REJECTED` (sync) or a document in
+            `status: rejected` (async), with `rejection_reason` /
+            `rejected_by` set. Write-only; never returned.
+          items:
+            type: object
+            additionalProperties: true
+      example:
+        source_type: uploaded_file
+        native_file_id: nf_8GkX2p9QwLmZ4rTv1bCdE
+        native_file_workspace_id: wsp_acme
+        tags:
+          conversation_id: conv_42
+    DocumentSourceUrl:
+      type: object
+      description: |
+        Result of the lazy citation resolver. For `uploaded_file`, the
+        URL is a short-lived native share URL minted BY THE STORAGE
+        WORKSPACE (not the user - a knowledge-base reader may have no
+        rights on the underlying file; chunk text is already readable
+        through search, so the source follows the knowledge base's ACL).
+        For all other source types, `url` is the document's
+        `source_url` as-is and `expires_at` is null.
+      required:
+      - object
+      - document_id
+      - source_type
+      - url
+      properties:
+        object:
+          type: string
+          enum:
+          - document.source_url
+        document_id:
+          type: string
+          pattern: ^vsf_[A-Za-z0-9-]+$
+        source_type:
+          type: string
+          enum:
+          - uploaded_file
+          - remote_file
+          - web_page
+          - connector_document
+        url:
+          type: string
+          format: uri
+        expires_at:
+          type: integer
+          description: |
+            Unix seconds. Populated for minted short-lived URLs
+            (`uploaded_file`) and null for every other source type. For a
+            minted URL it is always set: if the file service's own expiry
+            is missing or unparseable, a conservative request-time-plus-TTL
+            estimate is returned rather than null, so callers always have a
+            refresh signal. Re-resolve on expiry.
+          nullable: true
+    DocumentSourceUrlErrorItem:
+      type: object
+      description: |
+        Per-item failure inside a batch source-url response. Deliberately
+        carries NO `object` discriminator (unlike the resolved item), so
+        consumers detect a failed entry by the presence of `error`. An
+        item failure never fails the whole batch - the request still
+        returns 200.
+      required:
+      - document_id
+      - error
+      properties:
+        document_id:
+          type: string
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+              enum:
+              - NOT_FOUND
+              - SOURCE_UNAVAILABLE
+              - MINT_FAILED
+              - RESOLVE_FAILED
+            message:
+              type: string
+            technical:
+              type: boolean
+              description: |
+                Present and true for retryable technical failures
+                (`MINT_FAILED`, `RESOLVE_FAILED`) - the upstream file
+                service errored. Absent for terminal business failures
+                (`NOT_FOUND`, `SOURCE_UNAVAILABLE`).
+              nullable: true
+            details:
+              type: object
+              additionalProperties: true
+    BatchSourceUrlResult:
+      type: object
+      description: |
+        Batch citation-resolution response. `data` holds one entry per
+        requested document, in no guaranteed order; each entry is either a
+        resolved `document.source_url` object or a per-item error object.
+        Even a fully-failed batch returns 200 - inspect every item.
+      required:
+      - object
+      - data
+      properties:
+        object:
+          type: string
+          enum:
+          - list
+        data:
+          type: array
+          items:
+            oneOf:
+            - $ref: '#/components/schemas/DocumentSourceUrl'
+            - $ref: '#/components/schemas/DocumentSourceUrlErrorItem'
+    WebSource:
+      type: object
+      description: |
+        Recurring web crawl seed. A seed is a generator of documents,
+        not a document: pages it discovers materialize as
+        `knowledge_base.document` rows (`source_type: web_page`,
+        `origin: web_source`, `web_source_id` set) deduped in the same
+        `source_key` space as manual documents. A seed carries only its
+        URL and per-domain `crawler_options` - the engine-global crawl
+        settings (`webpages_limit`, `periodicity`, `paused`) live on the
+        knowledge base's `crawl_settings` object (one crawler per KB).
+      required:
+      - id
+      - object
+      - knowledge_base_id
+      - url
+      - created_at
+      properties:
+        id:
+          type: string
+          pattern: ^seed_[A-Za-z0-9-]+$
+          maxLength: 128
+        object:
+          type: string
+          enum:
+          - knowledge_base.web_source
+        knowledge_base_id:
+          type: string
+          pattern: ^vs_[A-Za-z0-9-]+$
+        url:
+          type: string
+          format: uri
+          description: Seed URL the crawler starts from.
+        crawler_options:
+          type: object
+          additionalProperties: true
+          description: |
+            Provider-specific crawl configuration passed through to the
+            crawler (e.g. include/exclude URL patterns, auth headers,
+            render mode). Validated by the crawler, not by this API.
+            Projects PER DOMAIN on the store-level crawler: sources on
+            the same hostname share these options.
+          nullable: true
+        last_crawl_at:
+          type: integer
+          description: |
+            Reserved. Currently always `null` - there is no per-seed
+            crawl-run ledger yet.
+          nullable: true
+        next_crawl_at:
+          type: integer
+          description: |
+            Reserved. Currently always `null` (no per-seed scheduled-run
+            computation yet).
+          nullable: true
+        metrics:
+          type: object
+          description: |
+            Per-seed page counts, DB-derived from documents attributed
+            to this seed via `parent_web_source_ids` (multi-attribution,
+            §F-5). Independent of crawler reachability - these are
+            always available even when the crawler is unreachable.
+          properties:
+            pages_total:
+              type: integer
+              minimum: 0
+            pages_indexed:
+              type: integer
+              minimum: 0
+            pages_failed:
+              type: integer
+              minimum: 0
+            pages_pending:
+              type: integer
+              minimum: 0
+            pages_skipped:
+              type: integer
+              minimum: 0
+              description: Reserved. Currently always `0` (no per-seed "skipped" status).
+            last_run_status:
+              type: string
+              enum:
+              - running
+              - completed
+              - failed
+              - partial
+              - null
+              description: Reserved. Currently always `null` (no per-seed run ledger).
+              nullable: true
+            last_run_started_at:
+              type: integer
+              description: Reserved. Currently always `null`.
+              nullable: true
+            last_run_completed_at:
+              type: integer
+              description: Reserved. Currently always `null`.
+              nullable: true
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+    Chunk:
+      type: object
+      description: |
+        A chunk returned by `GET /documents/{document_id}/chunks`.
+        Read-only; for debugging and quality review, not runtime search.
+      required:
+      - chunk_index
+      - text
+      properties:
+        chunk_index:
+          type: integer
+          minimum: 0
+        text:
+          type: string
+        page:
+          type: integer
+          minimum: 1
+          nullable: true
+        start_char:
+          type: integer
+          nullable: true
+        end_char:
+          type: integer
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+    SearchFilter:
+      type: object
+      description: |
+        Structured filter AST validated at the API boundary; provider
+        adapters transform it into provider DSL internally. Invalid
+        filters are rejected with `400 VALIDATION_ERROR`, never
+        silently coerced. Nesting capped at 8 levels; total leaf
+        clauses at 100.
+      oneOf:
+      - $ref: '#/components/schemas/SearchFilterLeaf'
+      - $ref: '#/components/schemas/SearchFilterAnd'
+      - $ref: '#/components/schemas/SearchFilterOr'
+      - $ref: '#/components/schemas/SearchFilterNot'
+    SearchFilterLeaf:
+      type: object
+      required:
+      - op
+      - field
+      - value
+      properties:
+        op:
+          type: string
+          enum:
+          - eq
+          - ne
+          - in
+          - nin
+          - gt
+          - gte
+          - lt
+          - lte
+          - exists
+          - matches
+        field:
+          type: string
+          maxLength: 256
+          description: |
+            Dot-path filter. **Currently only `tags.<key>` is
+            supported**; `metadata.*`, `source_type`, `web_source_id` and
+            `origin` are not yet implemented and return
+            `400 INVALID_FILTER_FIELD`.
+        value:
+          description: |
+            Operator-dependent. Scalars for `eq`/`ne`/comparisons;
+            arrays for `in`/`nin`; boolean for `exists`; string for
+            `matches`.
+    SearchFilterAnd:
+      type: object
+      required:
+      - and
+      properties:
+        and:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/SearchFilter'
+    SearchFilterOr:
+      type: object
+      required:
+      - or
+      properties:
+        or:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/SearchFilter'
+    SearchFilterNot:
+      type: object
+      required:
+      - not
+      properties:
+        not:
+          $ref: '#/components/schemas/SearchFilter'
+    SearchHit:
+      type: object
+      description: |
+        Single search result, enriched from the document row directly
+        (single row read - no registry join). `source_url` is the
+        display/provenance URL; `fetch_url` and tokens never appear in
+        hits. To obtain a downloadable link (uploaded files), callers
+        resolve `GET /documents/{document_id}/source_url` lazily.
+      required:
+      - document_id
+      - source_type
+      - source_url
+      - score
+      - content
+      properties:
+        document_id:
+          type: string
+          pattern: ^vsf_[A-Za-z0-9-]+$
+        filename:
+          type: string
+          nullable: true
+        source_type:
+          type: string
+          enum:
+          - uploaded_file
+          - remote_file
+          - web_page
+          - connector_document
+        source_url:
+          type: string
+          format: uri
+          description: |
+            Display/provenance URL for the hit. May be null - some
+            uploaded files carry no display URL, and legacy web rows may
+            have none. `fetch_url` and tokens never appear in hits;
+            obtain a downloadable link lazily via the single
+            (`GET .../documents/{document_id}/source_url`) or batch
+            (`POST .../source_urls`) resolver.
+          nullable: true
+        native_file_id:
+          type: string
+          description: |
+            Platform-native file id when `source_type: uploaded_file`,
+            null otherwise. Pass it (with `native_file_workspace_id`) to
+            the batch or single citation resolver to mint a downloadable
+            link.
+          nullable: true
+        native_file_workspace_id:
+          type: string
+          description: |
+            Workspace owning the native file. Defaults to the caller's
+            workspace; a foreign value means the source can only be
+            resolved from its owning workspace.
+          nullable: true
+        score:
+          type: number
+        content:
+          type: array
+          items:
+            type: object
+            required:
+            - type
+            - text
+            properties:
+              type:
+                type: string
+                enum:
+                - text
+              text:
+                type: string
+        attributes:
+          type: object
+          properties:
+            page:
+              type: integer
+              nullable: true
+            chunk_index:
+              type: integer
+            scope:
+              type: string
+              enum:
+              - knowledge
+              - conversation
+            conversation_id:
+              type: string
+              nullable: true
+    AccessBinding:
+      type: object
+      description: |
+        Per-knowledge-base access binding, persisted in the
+        platform-managed `product_bindings` store (storage owns no
+        bindings collection). Principals: `user`, `group`, `org`, and
+        `agent` - agent ownership is first-class (§F-6). The owner
+        appears as an explicit `role: owner` binding; `admin` / `editor`
+        / `reader` are grantable via the API (owner is not).
+      required:
+      - object
+      - knowledge_base_id
+      - principal_type
+      - principal_id
+      - role
+      - created_at
+      properties:
+        object:
+          type: string
+          enum:
+          - knowledge_base.access_binding
+        knowledge_base_id:
+          type: string
+          pattern: ^vs_[A-Za-z0-9-]+$
+        principal_type:
+          type: string
+          enum:
+          - user
+          - group
+          - org
+          - agent
+        principal_id:
+          type: string
+          maxLength: 128
+        role:
+          type: string
+          enum:
+          - owner
+          - admin
+          - editor
+          - reader
+        email:
+          type: string
+          description: Resolved at read time for `user` principals.
+          nullable: true
+        org_slug:
+          type: string
+          nullable: true
+        granted_by:
+          type: string
+          nullable: true
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+    Processing:
+      type: object
+      description: |
+        Knowledge-base processing / parser-backend health (§F-5). The
+        crawler is the universal parse/fetch backend for EVERY document
+        (uploads, single pages, web crawl), so this is present whenever
+        the knowledge base has documents - even with zero web sources.
+        Live fields come from the crawler; when it is unreachable
+        `crawler_reachable` is false and the live `status`/`metrics`
+        degrade to null rather than erroring (replacing the legacy
+        overloaded `status:"unknown"` + `crawler_error`). DB-derived
+        per-seed counts live on `/web_sources` and remain available
+        regardless.
+      properties:
+        status:
+          type: string
+          enum:
+          - idle
+          - processing
+          - paused
+          - unknown
+          - null
+          nullable: true
+        crawler_reachable:
+          type: boolean
+          description: |
+            `null` by default - the live crawler round-trip only runs when
+            the KB detail request passes `?include=processing`; `true`/
+            `false` otherwise.
+          nullable: true
+        health:
+          type: object
+          description: |
+            The persisted crawler health - previously exposed by no
+            endpoint, now surfaced here (powers OUT_OF_SPACE / PAUSED
+            inline banners).
+          properties:
+            status:
+              type: string
+              enum:
+              - HEALTHY
+              - OUT_OF_SPACE
+              - PAUSED
+              - UNAUTHENTICATED
+              - UNHEALTHY
+            message:
+              type: string
+              nullable: true
+            last_event_at:
+              type: integer
+              nullable: true
+        metrics:
+          type: object
+          description: Live KB-wide item counts from the crawler; null when unreachable.
+          properties:
+            total_items:
+              type: integer
+              minimum: 0
+            indexed:
+              type: integer
+              minimum: 0
+            failed:
+              type: integer
+              minimum: 0
+            skipped:
+              type: integer
+              minimum: 0
+          nullable: true
+        last_run_at:
+          type: integer
+          nullable: true
+    ApiKey:
+      type: object
+      description: |
+        Per-knowledge-base API key metadata (no secret).
+      required:
+      - id
+      - object
+      - knowledge_base_id
+      - scope
+      - created_at
+      properties:
+        id:
+          type: string
+          pattern: ^kb-[A-Za-z0-9_-]+$
+          description: The key slug (also exposed as `slug`).
+        object:
+          type: string
+          enum:
+          - knowledge_base.api_key
+        knowledge_base_id:
+          type: string
+          pattern: ^vs_[A-Za-z0-9-]+$
+        name:
+          type: string
+          maxLength: 256
+          nullable: true
+        slug:
+          type: string
+          description: |
+            Path-safe key identifier (`kb-{knowledge_base_id}-{uuid}`, or
+            caller-supplied at mint). Equal to `id`.
+          nullable: true
+        scope:
+          type: string
+          description: |
+            Currently `storage:vector_stores:{knowledge_base_id}` (the
+            `storage:knowledge_bases:{id}` rename is deferred with the
+            platform allowlist change).
+        permissions:
+          type: array
+          items:
+            type: string
+          description: |
+            The `storage:`-prefixed permission strings the key grants
+            (caller-provided at mint, else `config.api_key_default_permissions`).
+        prefix:
+          type: string
+          description: Non-secret leading characters, for identification in lists.
+          nullable: true
+        last_used_at:
+          type: integer
+          nullable: true
+        expires_at:
+          type: integer
+          nullable: true
+        created_by:
+          type: string
+          nullable: true
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+    ApiKeyWithSecret:
+      allOf:
+      - $ref: '#/components/schemas/ApiKey'
+      - type: object
+        required:
+        - secret
+        properties:
+          secret:
+            type: string
+            writeOnly: true
+            description: |
+              The full API key, returned ONCE at mint and on rotate.
+              Never retrievable afterwards - store it securely.
+    Stats:
+      type: object
+      description: |
+        Dashboard aggregate for the caller's org scope. The
+        implementation also returns legacy-named superset fields
+        (`totalStores`, `totalDocuments`, `storageUsedBytes`, `scope`)
+        alongside those below - additive, safe to ignore.
+      additionalProperties: true
+      required:
+      - object
+      properties:
+        object:
+          type: string
+          enum:
+          - stats
+        knowledge_bases:
+          type: integer
+          minimum: 0
+        documents:
+          type: integer
+          minimum: 0
+        documents_by_status:
+          type: object
+          additionalProperties:
+            type: integer
+        vectors:
+          type: integer
+          minimum: 0
+        web_sources:
+          type: integer
+          minimum: 0
+        storage_used_bytes:
+          type: integer
+          minimum: 0
+          description: |
+            Real aggregate. (The legacy `stats.storageUsedBytes` was
+            dead code returning 0 - see `09` §B2 - fixed when porting.)
+    Skill:
+      type: object
+      description: |
+        Registry entry (prompt/instructions). Intentionally permissive. Note the implementation does NOT emit an `object` discriminator, and the field is `instructions` (plural).
+      additionalProperties: true
+      required:
+      - id
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        instructions:
+          type: string
+        tools:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        user_id:
+          type: string
+        orgSlug:
+          type: string
+          nullable: true
+    SkillInput:
+      type: object
+      additionalProperties: true
+      description: Writable fields for creating or updating a skill.
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        instructions:
+          type: string
+        tools:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+  responses:
+    Error400:
+      description: Caller validation failure.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missing_source:
+              summary: No identifiable source
+              value:
+                error:
+                  code: MISSING_SOURCE
+                  message: Provide native_file_id, source_url, or fetch_url.
+            conflicting_type:
+              summary: source_type conflicts with native_file_id
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: source_type must be uploaded_file when native_file_id is provided
+                  details:
+                    field: source_type
+    Error401:
+      description: Authentication missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            unauthenticated:
+              value:
+                error:
+                  code: UNAUTHENTICATED
+                  message: Authentication required.
+    Error403:
+      description: Authentication present, authorization denied.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            forbidden:
+              value:
+                error:
+                  code: FORBIDDEN
+                  message: Caller is not allowed to access this resource.
+            hook_rejected:
+              summary: An external content hook blocked ingestion (sync)
+              value:
+                error:
+                  code: HOOK_REJECTED
+                  message: Content was rejected by a compliance hook.
+                  details:
+                    rejected_by: hook_pii_filter
+                    rejection_reason: detected_unmasked_pii
+    Error404:
+      description: Resource does not exist or is not visible to the caller.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            not_found:
+              value:
+                error:
+                  code: NOT_FOUND
+                  message: knowledge_base.document not found.
+                  details:
+                    resource: knowledge_base.document
+                    id: vsf_unknown
+    Error405:
+      description: Method not allowed on this endpoint.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            method_not_allowed:
+              value:
+                error:
+                  code: METHOD_NOT_ALLOWED
+                  message: Method not allowed
+    Error429:
+      description: Rate limited.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds the caller should wait before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error502:
+      description: Upstream provider failure (vector DB, LLM gateway, crawler, native files API).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            provider_failure:
+              value:
+                error:
+                  code: PROVIDER_UNAVAILABLE
+                  message: Upstream provider returned an error.
+                  details:
+                    provider: elasticsearch
+    Error503:
+      description: Storage overloaded or in maintenance.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    LegacyError400:
+      description: Caller validation failure (legacy flat envelope).
+      content:
+        application/json:
+          schema:
+            type: object
+            description: |
+              Legacy **flat** error envelope emitted by the not-yet-migrated
+              `/v1/skills*`, `/v1/stats`, `/v1/cleanup/*` and
+              `/v1/export/by-user` routes (all other routes use the nested
+              `Error` envelope). The shape varies by route: `skills`/`stats`
+              return `{ error: <message>, code: <CODE> }`; `cleanup`/`export`
+              return `{ error: <CODE>, message: <message> }`. Same information,
+              different field placement. These routes will migrate to the
+              nested `Error` envelope.
+            additionalProperties: true
+            properties:
+              error:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
+    LegacyError401:
+      description: Authentication missing or invalid (legacy flat envelope).
+      content:
+        application/json:
+          schema:
+            type: object
+            description: |
+              Legacy **flat** error envelope emitted by the not-yet-migrated
+              `/v1/skills*`, `/v1/stats`, `/v1/cleanup/*` and
+              `/v1/export/by-user` routes (all other routes use the nested
+              `Error` envelope). The shape varies by route: `skills`/`stats`
+              return `{ error: <message>, code: <CODE> }`; `cleanup`/`export`
+              return `{ error: <CODE>, message: <message> }`. Same information,
+              different field placement. These routes will migrate to the
+              nested `Error` envelope.
+            additionalProperties: true
+            properties:
+              error:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
+    LegacyError403:
+      description: Authorization denied (legacy flat envelope).
+      content:
+        application/json:
+          schema:
+            type: object
+            description: |
+              Legacy **flat** error envelope emitted by the not-yet-migrated
+              `/v1/skills*`, `/v1/stats`, `/v1/cleanup/*` and
+              `/v1/export/by-user` routes (all other routes use the nested
+              `Error` envelope). The shape varies by route: `skills`/`stats`
+              return `{ error: <message>, code: <CODE> }`; `cleanup`/`export`
+              return `{ error: <CODE>, message: <message> }`. Same information,
+              different field placement. These routes will migrate to the
+              nested `Error` envelope.
+            additionalProperties: true
+            properties:
+              error:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
+    LegacyError404:
+      description: Resource not found (legacy flat envelope).
+      content:
+        application/json:
+          schema:
+            type: object
+            description: |
+              Legacy **flat** error envelope emitted by the not-yet-migrated
+              `/v1/skills*`, `/v1/stats`, `/v1/cleanup/*` and
+              `/v1/export/by-user` routes (all other routes use the nested
+              `Error` envelope). The shape varies by route: `skills`/`stats`
+              return `{ error: <message>, code: <CODE> }`; `cleanup`/`export`
+              return `{ error: <CODE>, message: <message> }`. Same information,
+              different field placement. These routes will migrate to the
+              nested `Error` envelope.
+            additionalProperties: true
+            properties:
+              error:
+                type: string
+              code:
+                type: string
+              message:
+                type: string

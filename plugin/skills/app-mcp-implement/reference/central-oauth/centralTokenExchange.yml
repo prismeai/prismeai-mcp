@@ -1,15 +1,19 @@
 slug: centralTokenExchange
 name: 00_Maintainer/centralTokenExchange
-description: 'CORE webhook — token endpoint proxy for the central platform OAuth client. Accepts the same form fields as https://oauth2.googleapis.com/token (grant_type=authorization_code: code, code_verifier, redirect_uri | grant_type=refresh_token: refresh_token), injects the central client_id/client_secret (which NEVER leave the core workspace), forwards to Google and passes the response through (status + body). Tenant instances hit this URL as their tokenUrl when running on the central client (resolveOAuthClient). Safe by construction: it returns tokens only to callers presenting a valid one-time code+PKCE verifier or an existing refresh token — the client secret itself is never disclosed.'
+description: 'CORE webhook — token endpoint proxy for the central platform OAuth client. The provider token URL is read from its own central secret alongside the client credentials. Injects client_id/client_secret server-side and never logs or emits the request.'
 private: true
 when:
   endpoint: true
 do:
-  - set:
-      name: c
-      value: '{{config.centralAuth}}'
+  - comment: >-
+      Unresolved {{secret.X}} bindings are truthy literals (Gotcha 26); resolve
+      them in plain JS so an unconfigured core fails closed with 400 instead of
+      POSTing a literal client_secret to the provider.
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientId}}'}, output: cId}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientSecret}}'}, output: cSecret}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthTokenUrl}}'}, output: cTokenUrl}
   - conditions:
-      '!{{c.oauthClientId}} || !{{c.oauthClientSecret}}':
+      '!{{cId.resolved}} || !{{cSecret.resolved}} || !{{cTokenUrl.resolved}}':
         - set:
             name: $http
             value:
@@ -39,18 +43,19 @@ do:
               code: '{{body.code}}'
               code_verifier: '{{body.code_verifier}}'
               redirect_uri: '{{body.redirect_uri}}'
-              client_id: '{{c.oauthClientId}}'
-              client_secret: '{{c.oauthClientSecret}}'
+              client_id: '{{cId.value}}'
+              client_secret: '{{cSecret.value}}'
       default:
         - set:
             name: tokenBody
             value:
               grant_type: refresh_token
               refresh_token: '{{body.refresh_token}}'
-              client_id: '{{c.oauthClientId}}'
-              client_secret: '{{c.oauthClientSecret}}'
+              client_id: '{{cId.value}}'
+              client_secret: '{{cSecret.value}}'
+  - comment: 'emitErrors: false is MANDATORY here — a failing fetch emits runtime.fetch.failed with the request body, which would leak client_secret into the activity feed.'
   - fetch:
-      url: https://oauth2.googleapis.com/token
+      url: '{{cTokenUrl.value}}'
       method: POST
       headers:
         Content-Type: application/x-www-form-urlencoded

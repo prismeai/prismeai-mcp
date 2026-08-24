@@ -1,21 +1,29 @@
 slug: getOAuthClientPublic
 name: 00_Maintainer/getOAuthClientPublic
-description: 'CORE webhook — returns the PUBLIC part of the central platform OAuth client ({ configured, clientId, scopes }), never the secret. Called at runtime by resolveOAuthClient from tenant app-instance contexts (the core secret `googleWorkspacesCentralOAuth` only resolves in the core workspace context — secret refs interpolate against the RUNNING workspace''s store, so tenants cannot read it through config inheritance). The client secret stays on the core: token operations go through centralTokenExchange.'
+description: 'CORE webhook — returns the PUBLIC part of the central platform OAuth client ({ configured, clientId, scopes, authorizeUrl }), never the secret. Called at runtime by resolveOAuthClient from tenant app-instance contexts (the core secrets `googleWorkspacesCentralOAuth*` only resolve in the core workspace context — secret refs interpolate against the RUNNING workspace''s store, so tenants cannot read them through config inheritance). The client secret stays on the core: token operations go through centralTokenExchange.'
 private: true
 when:
   endpoint: true
 do:
-  - set:
-      name: c
-      value: '{{config.centralAuth}}'
+  - comment: >-
+      Before setOAuthClient has ever run, the declared secrets hold no value and
+      the bindings survive as UNRESOLVED literals — non-empty, therefore TRUTHY
+      (Gotcha 26). Testing them directly would answer configured:true and hand
+      tenants a literal "{{secret...}}" as the client id. resolvedSecret settles
+      it in plain JS.
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientId}}'}, output: cId}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientSecret}}'}, output: cSecret}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthScopes}}'}, output: cScopes}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthAuthorizeUrl}}'}, output: cAuthUrl}
   - conditions:
-      '{{c.oauthClientId}} && {{c.oauthClientSecret}}':
+      '{{cId.resolved}} && {{cSecret.resolved}}':
         - set:
             name: output
             value:
               configured: true
-              clientId: '{{c.oauthClientId}}'
-              scopes: '{{c.scopes}}'
+              clientId: '{{cId.value}}'
+              scopes: '{{cScopes.value}}'
+              authorizeUrl: '{{cAuthUrl.value}}'
         - break: {}
   - set:
       name: output

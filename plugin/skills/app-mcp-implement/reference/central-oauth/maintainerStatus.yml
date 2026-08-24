@@ -13,21 +13,21 @@ do:
         - set:
             name: allowed
             value: true
-  - comment: 'Public client part (clientId/scopes) for prefill — only when allowed. config.centralAuth resolves the core declared secret in the core context. The clientSecret is NEVER returned.'
-  - set:
-      name: c
-      value: {}
-  - conditions:
-      '{{allowed}}':
-        - set:
-            name: c
-            value: '{{config.centralAuth}}'
+  - comment: >-
+      Public client fields for prefill. The client secret is not returned.
+      Before setOAuthClient has run the bindings are UNRESOLVED literals —
+      non-empty and therefore TRUTHY (Gotcha 26) — which would report
+      configured:true and prefill the form with "{{secret...}}". resolvedSecret
+      normalises them to '' in plain JS first.
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientId}}'}, output: cId}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthClientSecret}}'}, output: cSecret}
+  - Custom Code.run: {function: resolvedSecret, parameters: {value: '{{config.centralOAuthScopes}}'}, output: cScopes}
   - set:
       name: output
       value:
         allowed: '{{allowed}}'
         authenticated: '{% {{user.id}} && true %}'
-        configured: '{% {{c.oauthClientId}} && {{c.oauthClientSecret}} && true %}'
-        clientId: '{{c.oauthClientId}}'
-        scopes: '{{c.scopes}}'
+        configured: '{% {{allowed}} && {{cId.resolved}} && {{cSecret.resolved}} && true %}'
+        clientId: '{% {{allowed}} && {{cId.value}} %}'
+        scopes: '{% {{allowed}} && {{cScopes.value}} %}'
 output: '{{output}}'

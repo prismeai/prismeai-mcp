@@ -40,6 +40,11 @@ const dict: Record<Lang, Record<string, string>> = {
     'field.oauthClientSecret': 'Consumer Secret',
     'field.jwtPrivateKey': 'JWT Private Key (PEM)',
     'field.scopes': 'Scopes',
+    'field.oauthScopes': 'OAuth scopes',
+    'field.oauthAuthorizeUrl': 'OAuth authorize URL',
+    'field.oauthTokenUrl': 'OAuth token URL',
+    'field.oauthRevokeUrl': 'OAuth revoke URL',
+    'field.apiVersion': 'REST API version',
     'field.instanceUrl': 'Instance URL',
     'field.accessToken': 'Access Token',
 
@@ -131,6 +136,11 @@ const dict: Record<Lang, Record<string, string>> = {
     'field.oauthClientSecret': 'Consumer Secret',
     'field.jwtPrivateKey': 'Clé privée JWT (PEM)',
     'field.scopes': 'Scopes',
+    'field.oauthScopes': 'Scopes OAuth',
+    'field.oauthAuthorizeUrl': 'URL d’autorisation OAuth',
+    'field.oauthTokenUrl': 'URL de token OAuth',
+    'field.oauthRevokeUrl': 'URL de révocation OAuth',
+    'field.apiVersion': 'Version de l’API REST',
     'field.instanceUrl': 'Instance URL',
     'field.accessToken': 'Access Token',
 

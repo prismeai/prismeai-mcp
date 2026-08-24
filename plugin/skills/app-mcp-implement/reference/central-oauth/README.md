@@ -1,10 +1,15 @@
 # Central platform OAuth client — token-service pattern
 
-Lifted verbatim from the validated `google-workspaces` connector (xjROdh7, sandbox;
-E2E-verified on tenant w6UiyHw, 2026-06-12). Gives every OAuth connector a
+Lifted from the validated `google-workspaces` connector and validated E2E.
+Gives every OAuth connector a
 zero-config tenant mode (`oauthCentral`, default): the platform maintainer
 provisions ONE provider OAuth client from the core workspace Builder, tenants
 just click Connect.
+
+All central-client and provider configuration is secret-backed. The declared
+central secret contains `{oauthClientId, oauthClientSecret, scopes, authorizeUrl,
+tokenUrl}`. The maintainer SPA writes every field to the secret store; no
+provider endpoint or default scope is versioned in these templates.
 
 ## Why a token service (read first)
 
@@ -14,13 +19,15 @@ App instances inherit the source workspace's `config.value` as defaults, BUT
 every tenant — the central client secret can never reach tenants through config.
 So the core serves it **operationally**:
 
-- `getOAuthClientPublic` — public webhook: `{configured, clientId, scopes}`. Never the secret.
+- `getOAuthClientPublic` — public webhook: `{configured, clientId, scopes,
+  authorizeUrl}`. Never the client secret or provider token URL.
 - `centralTokenExchange` — proxies the provider token endpoint, injecting the
   central `client_id`/`client_secret` server-side (grants: `authorization_code`+PKCE,
   `refresh_token`). The secret never leaves the core. `emitErrors: false` on its
-  fetch is MANDATORY (else the secret leaks into `runtime.fetch.failed` events).
-- `setOAuthClient` — maintainer webhook writing the core declared secret
-  `<camel>CentralOAuth = {oauthClientId, oauthClientSecret, scopes}`.
+  fetch uses `emitErrors: false` so the secret is not copied into `runtime.fetch.failed` events.
+- `setOAuthClient` — maintainer webhook writing three core secrets, one plain value per key:
+  `<camel>CentralOAuthClientId`, `<camel>CentralOAuthClientSecret`, and
+  `<camel>CentralOAuthScopes`.
   **Fail-closed role gate** (`user.role` ∈ owner/editor/admin **OR
   `user.platformRole = "superadmin"`**, absent = 403): the PATCH below runs with a
   privileged `auth: workspace: true` JWT, so the caller's RBAC is NOT re-checked by
@@ -33,7 +40,7 @@ So the core serves it **operationally**:
   secret). **Do NOT gate the SPA on `GET /security/secrets`** — that returns an
   empty `200 {}` for non-privileged users (not 403), so the form would render to
   everyone (SKILL.md Gotcha 28).
-- `resolveOAuthClient` — called from tenant context: tenant `config.auth` client
+- `resolveOAuthClient` — called from tenant context: tenant field-level client values
   (full override) → else central via the public webhook. Returns
   `{oauthClientId, oauthClientSecret?, scopes, redirectUri, tokenUrl, central}`.
   `tokenUrl` = provider token URL (tenant client / core fast-path) or the
@@ -54,8 +61,14 @@ code cannot exchange it (no verifier).
 
 ## Wiring checklist (placeholders: `google-workspaces` → `<slug>`, `googleWorkspaces` → `<camel>`, `gws` → `<pfx>`)
 
-1. `index.yml config.value`: `centralAuth: '{{secret.<camel>CentralOAuth}}'`.
-2. Copy the 7 automations; swap the Google token/authorize URLs for the provider's.
+1. Merge `index-secret-schema.yml.snippet`: it declares one `type: string`
+   entry per central field in `secrets.schema` and adds the matching
+   `index.yml config.value.centralOAuthClientId / centralOAuthClientSecret /
+   centralOAuthScopes / centralOAuthAuthorizeUrl / centralOAuthTokenUrl`
+   bindings. One secret key = one plain value; never an aggregate client object.
+2. Copy the 7 automations; provider token/authorize URLs and scopes come only
+   from the central secrets or the tenant auth secrets, never from template
+   literals.
 3. Custom Code: add `packOAuthState`/`unpackOAuthState` (see
    `customcode-packOAuthState.yml.snippet`).
 4. `buildAppAuth`: alias `oauthCentral` → `oauth` early; `resolveOAuthClient`
@@ -69,19 +82,26 @@ code cannot exchange it (no verifier).
    non-maintainers get an "Access restricted" card, never the form** — i18n keys
    (en+fr, incl. `maint.noAccessTitle`/`maint.noAccessBody`).
 7. `validateAgent`: first step short-circuits to `{valid:true, reason:'global_endpoint'}`
-   when `{{config.centralAuth.oauthClientId}}` is set, so the CORE/global MCP
-   endpoint accepts every agent (the allowlist is a tenant-only concern; per-user
-   OAuth is the global gate). No-op in tenants — `centralAuth` is a literal there
-   (Gotcha 26/29).
+   when the central client id **resolves**, so the CORE/global MCP endpoint
+   accepts every agent (the allowlist is a tenant-only concern; per-user OAuth
+   is the global gate). No-op in tenants — the core bindings remain unresolved
+   there (Gotcha 26/29). **Test it via the `resolvedSecret` Custom Code helper,
+   never as a bare `'{{config.centralOAuthClientId}}'` condition**: an
+   unresolved binding is a non-empty, TRUTHY literal, so the bare form
+   short-circuits on every tenant and turns the allowlist off (bypass). The
+   same applies to `resolveOAuthClient`, `getOAuthClientPublic`,
+   `maintainerStatus` and `centralTokenExchange`; the audit script enforces it.
 8. Re-`publish_app` after any core config/automation change — instances run the
    published snapshot (Gotcha 26 / 18-cache).
+9. Run `scripts/audit-secret-backed-config.py` before validation/push and verify
+   token caches use the tenant/client/scope fingerprint.
 
 ## One-click publish to the Capabilities catalog (`CatalogPublish`)
 
 The maintainer view also exposes an **"Add to catalog"** button
 (`src/CatalogPublish.tsx`, copied from the salesforce-next reference) that
 registers the connector in the org-wide **Capabilities catalog** (workspace
-`capabilities`, `3ueUyns`) — the registry Agent Factory reads when a builder adds
+`capabilities`) — the registry Agent Factory reads when a builder adds
 a catalog-backed tool. The platform's own central-OAuth connectors (Figma, Gitlab,
 Google Search) ARE exactly such entries.
 

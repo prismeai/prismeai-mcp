@@ -1,0 +1,5552 @@
+openapi: '3.0.3'
+info:
+  version: 1.0.0
+  title: Agent Factory API
+  description: |
+    Public REST API for the Agent Factory workspace - agents, conversations,
+    messages, tools, artifacts, sharing, ratings, and discovery.
+    Powered by Prisme.ai's runtime; all endpoints are exposed under each
+    workspace's webhook namespace.
+  contact:
+    name: Prisme.ai
+    url: https://prisme.ai
+servers:
+  - url: https://{host}/v2/workspaces/slug:agent-factory/webhooks
+    description: Prisme.ai workspace webhooks
+    variables:
+      host:
+        default: api.studio.prisme.ai
+        description: API host (override for self-hosted or sandbox)
+security:
+  - BearerAuth: []
+  - WorkspaceApiKeyAuth: []
+tags:
+  - name: Agents
+    description: Agent CRUD, discovery, AGENTS.md import/export.
+  - name: Access
+    description: Agent access bindings, sharing, and access requests.
+  - name: ApiKeys
+    description: Agent-scoped API key management (mint, revoke, rotate).
+  - name: Publishing
+    description: Publish or discard draft changes on an agent.
+  - name: Ratings
+    description: User ratings on published agents.
+  - name: Profiles
+    description: Agent profiles/presets catalog (simple, workflow, agent_light, agent_full, orchestrator).
+  - name: Activity
+    description: Activity feed for agents (events, errors, lifecycle changes).
+  - name: Analytics
+    description: Agent usage analytics (series + summary).
+  - name: Conversations
+    description: Conversations on an agent (CRUD, archive, star).
+  - name: Messages
+    description: Send messages to an agent (synchronous send + SSE stream).
+  - name: Tasks
+    description: Async task lifecycle (list, fetch, cancel, resolve, subscribe).
+  - name: Artifacts
+    description: Generated artifacts (files, code, content) attached to a task.
+  - name: Shares
+    description: Conversation, message, and artifact share-link snapshots.
+  - name: A2A
+    description: Agent-to-agent JSON-RPC 2.0 gateway (well-known agent.json + RPC).
+  - name: Tools
+    description: Per-agent tool catalogue (system tools, MCP servers, function tools).
+  - name: Retention
+    description: Per-agent and org-wide conversation retention policies.
+  - name: Evaluations
+    description: Agent evaluation runs and results.
+paths:
+  /v1/profiles:
+    get:
+      tags: [Profiles]
+      operationId: listProfiles
+      summary: List available agent profiles (presets)
+      description: |
+        Returns the catalog of agent profiles (`simple`, `workflow`,
+        `agent_light`, `agent_full`, `orchestrator`) with their feature
+        flags, limits, and recommended use cases.
+      responses:
+        '200':
+          description: Catalog of agent profiles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileListResponse'
+        '400':
+          description: Invalid arguments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only GET is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/activity:
+    get:
+      tags: [Activity]
+      operationId: getActivity
+      summary: Get the activity feed for an agent
+      description: |
+        Activity feed of agent interactions, errors, lifecycle and config
+        changes, conversations, artifacts, ratings, access changes, and
+        share events. Backed by Elasticsearch.
+      parameters:
+        - name: agent_id
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+          description: Agent identifier (required).
+        - name: groups
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 256
+          description: Comma-separated list of activity groups (`message`, `error`, `agent_lifecycle`, `conversation`, `artifact`, `rating`, `access`, `share`).
+        - name: since
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+          description: ISO timestamp lower bound.
+        - name: until
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+          description: ISO timestamp upper bound.
+        - name: correlationId
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+          description: Filter by correlationId to trace a single workflow.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size (default 25).
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page number (1-indexed, default 1).
+      responses:
+        '200':
+          description: Page of activity items.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityListResponse'
+        '400':
+          description: Missing `agent_id` or invalid arguments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only GET is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/analytics:
+    get:
+      tags: [Analytics]
+      operationId: getAgentAnalytics
+      summary: Get analytics (series + summary) for an agent
+      description: |
+        Returns metrics series and an aggregated summary for a single agent.
+        Series is read from Mongo; summary is cached and recomputed from
+        Elasticsearch on miss/stale (custom date ranges always recompute).
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: period
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 16
+            enum: [15m, 30m, 1h, 1d, 7d, 30d, 90d]
+          description: Preset period. Default `30d`.
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+          description: ISO start (custom range). Overrides `period`.
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+          description: ISO end (custom range, exclusive).
+        - name: granularity
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 16
+            enum: [5m, hourly, daily]
+          description: Override granularity (auto-picked from period otherwise).
+      responses:
+        '200':
+          description: Analytics payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentAnalytics'
+        '400':
+          description: Invalid arguments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents:
+    get:
+      tags: [Agents]
+      operationId: listAgents
+      summary: List agents
+      description: |
+        List agents with multi-scope filter. Supported scopes (comma-separated):
+        `own`, `shared`, `published`, `all`. Default `own`. The reserved
+        action `?action=explore` returns all public+restricted published
+        agents in the caller's organization.
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+          description: Comma-separated list (`own`, `shared`, `published`, `all`).
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 32
+            enum: [explore, write]
+          description: Reserved action (`explore` for store-style discovery, `write` to filter to writable scope).
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 32
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 32
+            enum: [updatedAt, createdAt]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size (max 100, default 20).
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 1-indexed page number.
+      responses:
+        '200':
+          description: Page of agents (with `published_config` stripped on list rows).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentListResponse'
+        '400':
+          description: Invalid arguments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Agents]
+      operationId: createAgent
+      summary: Create a new agent
+      description: |
+        Create a new agent in the caller's organization. The agent starts
+        in `draft` status and `private` visibility. A service account is
+        provisioned automatically; failure to provision rolls back the
+        creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentCreateInput'
+            example:
+              name: Test Agent
+              description: Agent created by automated test
+              instructions: You are a helpful test assistant.
+              model: gpt-4o-mini
+              temperature: 0.7
+      responses:
+        '200':
+          description: Agent created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentCreateResponse'
+        '400':
+          description: Validation error (e.g. missing `instructions`, too many sub_agents/starters).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: Service account provisioning failed (agent record rolled back).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}:
+    get:
+      tags: [Agents]
+      operationId: getAgent
+      summary: Get a single agent by ID
+      description: |
+        Returns the agent record. Owners see the full record (including
+        `published_config`). Non-owners with binding receive the record
+        with `published_config` stripped. Restricted agents seen by
+        callers without binding return only public-facing fields.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Agent record (Agent or AgentRestrictedView depending on caller's access).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Agent'
+                  - $ref: '#/components/schemas/AgentRestrictedView'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags: [Agents]
+      operationId: updateAgent
+      summary: Update an agent (partial update)
+      description: |
+        Partially update agent fields. Setting `status: draft` clears the
+        `published_config` snapshot. If the agent is `published`,
+        `has_draft_changes` is automatically set to `true`.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentUpdateInput'
+            example:
+              description: Updated description by test
+              temperature: 0.5
+      responses:
+        '200':
+          description: Updated agent record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '400':
+          description: Validation error (invalid visibility, status, sub_agents, starters, etc.).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Agents]
+      operationId: deleteAgent
+      summary: Delete an agent and its associated data
+      description: |
+        Cascading delete: removes IAM service account, conversations,
+        tasks, access bindings, artifact versions, artifacts, ratings,
+        agent metrics, shares, and retention policy. Cross-workspace
+        storage cleanup runs best-effort.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Agent deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedResult'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/discovery:
+    get:
+      tags: [Agents]
+      operationId: discoverAgents
+      summary: Get featured agents and categories
+      description: |
+        Discovery endpoint for the store homepage. Returns up to 10
+        featured published agents (sorted by rating), and the list of
+        distinct categories with counts.
+      responses:
+        '200':
+          description: Featured agents + categories.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscoveryResponse'
+        '400':
+          description: Invalid arguments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/import:
+    post:
+      tags: [Agents]
+      operationId: importAgent
+      summary: Import an agent from AGENTS.md
+      description: |
+        Parse an `AGENTS.md` document (YAML front matter + markdown
+        instructions) and either create a new agent from it or patch an
+        existing one.
+
+        Create vs update is decided solely by `target_agent_id`:
+          - omitted → CREATE (new agent, fresh id, SA provisioned)
+          - present → PATCH the matching agent (404 if not found in the
+            caller's org, 403 if the caller is neither the owner nor an
+            agent-factory admin)
+
+        Any `id:` carried by the file's frontmatter is ignored — round-trip
+        re-imports always create a new agent unless the caller explicitly
+        opts into a patch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentImportInput'
+            example:
+              agents_md: |
+                ---
+                name: "_test_import_export_agent"
+                description: "A test agent for import/export round-trip"
+                model: "gpt-4o-mini"
+                temperature: 0.7
+                max_tokens: 2048
+                ---
+
+                You are a test assistant created via AGENTS.md import.
+      responses:
+        '200':
+          description: Agent imported.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentImportResponse'
+        '400':
+          description: Validation error (missing or unparseable `agents_md`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only POST is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: Service account provisioning failed (agent record rolled back).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Governance service is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/citations/source_url:
+    get:
+      tags: [Agents]
+      operationId: resolveCitationSourceUrl
+      summary: Resolve a file_search citation link (302 redirect)
+      description: |
+        Stable, permanent link embedded in file_search `url_citation`
+        annotations for `uploaded_file` documents (web pages carry their
+        real `source_url` and never route here). On click: authorizes the
+        end user against the agent (`read`), verifies `knowledge_base_id` is
+        a file_search KB the agent uses (draft or published), resolves a
+        fresh short-lived URL from storage as a trusted source, and
+        302-redirects to it. Minting happens per click, so this link never
+        expires even though the native URL it resolves to is short-lived.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: knowledge_base_id
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+          description: The file_search knowledge base the cited document belongs to.
+        - name: document_id
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+          description: The cited document id.
+      responses:
+        '302':
+          description: |
+            Redirect to the freshly-minted short-lived native URL
+            (`Location` header). The target URL expires; re-click to
+            re-resolve.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        '400':
+          description: Missing knowledge_base_id or document_id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: |
+            The end user is not authorized on the agent, or the
+            knowledge_base_id is not attached to it as a file_search tool in
+            either its draft or published config.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: |
+            Citation source unavailable (dangling native file, or storage
+            could not resolve it).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only GET is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: Upstream storage resolution failed (technical error).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/export:
+    get:
+      tags: [Agents]
+      operationId: exportAgent
+      summary: Export an agent as AGENTS.md
+      description: |
+        Returns the agent's portable AGENTS.md document (YAML front
+        matter + markdown instructions). Response media type is
+        `text/markdown`; the response is sent with
+        `Content-Disposition: attachment; filename="agent-export.agents.md"`.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: AGENTS.md document.
+          content:
+            text/markdown:
+              schema:
+                type: string
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only GET is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/access:
+    get:
+      tags: [Access]
+      operationId: listAgentBindings
+      summary: List access bindings for an agent
+      description: List user/group/org bindings on this agent.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size (default 100).
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 1-indexed page number.
+      responses:
+        '200':
+          description: List of bindings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessBindingListResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Access]
+      operationId: shareAgent
+      summary: Share an agent with a principal (create binding)
+      description: |
+        Create a binding granting a user, group, or org access to this
+        agent. User and group principals are validated against the
+        agent's organization via `ai-governance-v2`. Default role is
+        `admin` if `role_slug` is omitted.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessShareInput'
+      responses:
+        '200':
+          description: Binding created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessShareResponse'
+        '400':
+          description: Validation error (invalid principal_type, missing principal_id, cross-org sharing, etc.).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Binding already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/access/{principalType}/{principalId}:
+    delete:
+      tags: [Access]
+      operationId: revokeAgentAccess
+      summary: Revoke an agent access binding
+      description: Delete the binding for the given (principal_type, principal_id) pair.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: principalType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [user, group, org]
+            maxLength: 32
+        - name: principalId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Binding deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedResult'
+        '400':
+          description: Invalid `principal_type`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No binding found for this principal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only DELETE is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/access/request:
+    post:
+      tags: [Access]
+      operationId: requestAgentAccess
+      summary: Request access to a published restricted agent
+      description: |
+        Submit an access request for a published `restricted` agent.
+        The agent owner / admins can approve or reject via
+        `/v1/agents/{agentId}/access/requests/{requestId}`.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessRequestInput'
+      responses:
+        '201':
+          description: Access request created (pending).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessRequest'
+        '400':
+          description: Cannot request access (e.g. self-owned agent).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - agent must be published and restricted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Existing binding or pending request already present.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/access/requests:
+    get:
+      tags: [Access]
+      operationId: listAgentAccessRequests
+      summary: List access requests for an agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+            maxLength: 32
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size (default 100).
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page of access requests.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessRequestListResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only GET is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/access/requests/{requestId}:
+    post:
+      tags: [Access]
+      operationId: respondToAccessRequest
+      summary: Approve or reject an access request
+      description: |
+        Resolve a pending access request. On `approve`, a binding is
+        created for the requester with `roleSlug: user`.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessRequestResolveInput'
+      responses:
+        '200':
+          description: Resolved request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessRequestResolveResponse'
+        '400':
+          description: Validation error (invalid action, request already resolved).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Access request not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only POST is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/api-keys:
+    get:
+      tags: [ApiKeys]
+      operationId: listAgentApiKeys
+      summary: List agent-scoped API keys
+      description: List org API keys owned by this agent.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size (default 100).
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of API keys (secrets are not returned).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                description: Result of `access-manager.listOrgApiKeys`.
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [ApiKeys]
+      operationId: createAgentApiKey
+      summary: Mint a new agent-scoped API key
+      description: |
+        Create an org-scoped API key owned by this agent. Permissions are
+        prefixed with `agent-factory:` server-side. The secret is returned
+        once on creation.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentApiKeyCreateInput'
+      responses:
+        '201':
+          description: API key created (secret returned once).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                description: Result of `access-manager.createOrgApiKey` - includes the one-time secret.
+        '400':
+          description: Validation error (missing fields, empty permissions).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/api-keys/{keyId}:
+    delete:
+      tags: [ApiKeys]
+      operationId: revokeAgentApiKey
+      summary: Revoke an agent API key
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 96
+      responses:
+        '200':
+          description: API key revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                description: Result of `access-manager.deleteOrgApiKey`.
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: API key not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only DELETE is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/api-keys/{keyId}/rotate:
+    post:
+      tags: [ApiKeys]
+      operationId: rotateAgentApiKey
+      summary: Rotate (regenerate) an agent API key secret
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 96
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentApiKeyRotateInput'
+      responses:
+        '200':
+          description: API key rotated (new secret returned once).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                description: Result of `access-manager.rotateOrgApiKey` - includes the new one-time secret.
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: API key not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only POST is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/publish:
+    post:
+      tags: [Publishing]
+      operationId: publishAgent
+      summary: Publish an agent
+      description: |
+        Snapshot the agent's current runtime fields into `published_config`,
+        flip status to `published`, and set the visibility (default `public`).
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentPublishInput'
+            example:
+              category: testing
+              tags:
+                - test
+                - automation
+      responses:
+        '200':
+          description: Publication summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPublishResponse'
+        '400':
+          description: Invalid visibility.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/discard-draft:
+    post:
+      tags: [Publishing]
+      operationId: discardAgentDraft
+      summary: Discard draft changes and revert to the published snapshot
+      description: |
+        Reverts live fields from `published_config`. Requires an agent in
+        `published` status with `has_draft_changes: true`.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Draft discarded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentDiscardDraftResponse'
+        '400':
+          description: No published snapshot or no draft changes to discard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/ratings:
+    post:
+      tags: [Ratings]
+      operationId: rateAgent
+      summary: Rate an agent (1-5)
+      description: |
+        Upserts the caller's rating on the agent and recomputes the
+        average from the ratings collection (source of truth).
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RatingInput'
+            example:
+              rating: 5
+      responses:
+        '200':
+          description: Updated rating aggregates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RatingResult'
+              example:
+                rating: 5
+                ratings_count: 1
+        '400':
+          description: Rating must be an integer between 1 and 5.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/refresh-metrics:
+    post:
+      tags: [Analytics]
+      operationId: refreshAgentAnalytics
+      summary: On-demand metrics refresh for an agent
+      description: |
+        Re-aggregates the cached analytics for the requested period. The
+        front-end passes `period_start` / `period_end` / `granularity` for
+        the window currently being viewed. The legacy fallback uses
+        `hours_back` (1..168) ending at the current hour boundary at hourly
+        granularity. Available to agent owners and writers.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: hours_back
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Legacy fallback - number of hours back from now (max 168).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshMetricsInput'
+      responses:
+        '200':
+          description: Refresh result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshMetricsResult'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only POST is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/conversations:
+    get:
+      tags: [Conversations]
+      operationId: listConversations
+      summary: List conversations for an agent
+      description: |
+        List the caller's conversations on this agent. Supports filtering
+        by archive/star state and a specific `contextId`.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: is_archived
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by archive state (`true`/`false`).
+        - name: is_starred
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by star state (`true`/`false`).
+        - name: contextId
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+          description: Filter to a single conversation by context id.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size (default 20, max 100).
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 1-indexed page number.
+      responses:
+        '200':
+          description: Page of conversations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationListResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Conversations]
+      operationId: createConversation
+      summary: Create a new conversation
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationCreateInput'
+            example:
+              title: Test Conversation
+      responses:
+        '200':
+          description: Created conversation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Conversations]
+      operationId: deleteAllConversations
+      summary: Delete all conversations for the caller on this agent
+      description: |
+        Cascades a bulk delete: all caller-owned conversations on this
+        agent, their tasks, and their artifact versions / artifacts.
+        Emits `conversations.deleted.all` for cache invalidation.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Bulk delete summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationsBulkDeleteResult'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/conversations/{contextId}:
+    get:
+      tags: [Conversations]
+      operationId: getConversation
+      summary: Get a single conversation with its message history
+      description: |
+        Returns the conversation envelope plus a paginated slice of its
+        task-message history (ordered most-recent first).
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: contextId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: messageLimit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size for the message history (default 100).
+        - name: messagePage
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 1-indexed page number for the message history.
+      responses:
+        '200':
+          description: Conversation + messages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationDetailResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Conversation not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags: [Conversations]
+      operationId: updateConversation
+      summary: Update conversation metadata (title, archive, star)
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: contextId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationUpdateInput'
+            example:
+              is_starred: true
+              title: Updated Title
+      responses:
+        '200':
+          description: Updated conversation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Conversation not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Conversations]
+      operationId: deleteConversation
+      summary: Delete a single conversation (cascades to tasks + artifacts)
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: contextId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Conversation deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedResult'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Conversation not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/messages/send:
+    post:
+      tags: [Messages]
+      operationId: sendMessage
+      summary: Send a message to an agent (A2A, non-streaming)
+      description: |
+        A2A-compliant message send. The body follows the A2A flat
+        `MessageSendParams` shape - a `message` envelope with
+        `message_id`, `role`, `parts[]`, and an optional `contextId`.
+        Parts are discriminated by field presence: `TextPart` (`text`),
+        `FilePart` (`url` or `raw`), `DataPart` (`data`).
+
+        An always-on rate-limit floor (200/h per user) applies, plus any
+        agent-configured limit. The HITL approval flow is supported and
+        will park the task in `input-required` until resolved through
+        `/v1/agents/{agentId}/tasks/{taskId}/resolve`.
+
+        Send the `x-draft-mode: true` header to bypass `published_config`
+        resolution and exercise live (draft) configuration - owners and
+        agent-factory writers only.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: x-draft-mode
+          in: header
+          required: false
+          schema:
+            type: boolean
+          description: |
+            When true, the call exercises the agent's live (draft) config
+            instead of `published_config`. Reserved for owners/writers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageSendInput'
+            example:
+              message:
+                message_id: msg-test-2
+                role: user
+                parts:
+                  - text: What is 2+2? Reply with just the number.
+      responses:
+        '200':
+          description: Completed task with the agent's reply.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageSendResponse'
+        '400':
+          description: Validation error (e.g. missing `agent_id`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded (200/h floor or agent-configured).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/messages/stream:
+    post:
+      tags: [Messages]
+      operationId: streamMessage
+      summary: Stream an agent reply via SSE (A2A)
+      description: |
+        A2A-compliant streaming send. The request body uses the same
+        `MessageSendParams` shape as `messages/send`. The response is
+        delivered as Server-Sent Events (`text/event-stream`): each
+        event is one of `task.status`, `task.message`, `task.artifact`,
+        `task.completed`, `task.failed`, `task.canceled`. Clients must
+        read until they see a terminal event.
+
+        The `x-draft-mode: true` header bypasses `published_config`
+        resolution. The same HITL approval flow as `messages/send`
+        applies - a streaming task may park in `input-required` until
+        resolved.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: x-draft-mode
+          in: header
+          required: false
+          schema:
+            type: boolean
+          description: |
+            When true, the stream exercises the agent's live (draft)
+            config instead of `published_config`. Owners/writers only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageSendInput'
+      responses:
+        '200':
+          description: |
+            Server-Sent Events stream of A2A task lifecycle events.
+            Terminates after a `task.completed`, `task.failed`, or
+            `task.canceled` event.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Stream of `data: <json>` lines, each carrying an A2A
+                  task lifecycle event. See description for event types.
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/tasks:
+    get:
+      tags: [Tasks]
+      operationId: listTasks
+      summary: List tasks for an agent
+      description: |
+        List the caller's tasks on this agent, with optional
+        `context_id` and `status` filters.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: context_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+          description: Filter to one conversation.
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [working, completed, canceled, failed, input-required]
+            maxLength: 32
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size (default 20).
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page of tasks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/tasks/{taskId}:
+    get:
+      tags: [Tasks]
+      operationId: getTask
+      summary: Get a single task by ID
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Task record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/tasks/{taskId}/cancel:
+    post:
+      tags: [Tasks]
+      operationId: cancelTask
+      summary: Cancel a running task (A2A)
+      description: |
+        Sets the task `status.state` to `canceled` and stamps a
+        `_completed_at`. Tasks already in `completed` or `canceled`
+        return a 4xx.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Task canceled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskCancelResult'
+        '400':
+          description: Task is already terminal (`completed` or `canceled`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/tasks/{taskId}/resolve:
+    post:
+      tags: [Tasks]
+      operationId: resolveTask
+      summary: Resolve a pending HITL approval (external approver)
+      description: |
+        External approval endpoint for tasks parked in
+        `input-required`. The caller is the approver - distinct from
+        the chatting user - and is authorized via the task's
+        `pending_approval.approvers` list. On `approved: true`, the
+        agent loop resumes; on `approved: false`, the task is failed
+        with the supplied reason.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskResolveInput'
+      responses:
+        '200':
+          description: Resolved task summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResolveResponse'
+        '400':
+          description: Validation error (`approved` missing or non-boolean).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Caller is not an authorized approver for this task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only POST is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Resolved successfully but the resumed action failed mid-execution.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/tasks/{taskId}/subscribe:
+    get:
+      tags: [Tasks]
+      operationId: getTaskSnapshot
+      summary: Get a task snapshot (A2A subscribe - non-streaming)
+      description: |
+        Returns the current task state plus history. Stateless: closes
+        the response immediately. For real-time updates on non-terminal
+        tasks, clients subscribe to the native event-bus SSE channel
+        for `task.output.completed` lifecycle events. The `terminal`
+        flag indicates whether further updates are still possible.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Task snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSnapshot'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Task not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/artifacts:
+    get:
+      tags: [Artifacts]
+      operationId: listArtifacts
+      summary: List artifacts owned by the caller
+      description: |
+        List artifacts the authenticated user owns, optionally filtered
+        by `agent_id`, `conversation_id`, and `artifact_type`.
+      parameters:
+        - name: agent_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+        - name: conversation_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+        - name: artifact_type
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size (default 50).
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page of artifacts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactListResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only GET is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/artifacts/{artifactId}:
+    get:
+      tags: [Artifacts]
+      operationId: getArtifact
+      summary: Get an artifact (with current version content)
+      parameters:
+        - name: artifactId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Artifact record + resolved version content.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactDetail'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the owner (or platform admin) can read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Artifact not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags: [Artifacts]
+      operationId: updateArtifact
+      summary: Update artifact content (full replace OR line patches)
+      description: |
+        Two mutation modes - exactly one of `content` (full replace,
+        creates a new version) or `patches` (line-level operations,
+        applied atomically) MUST be present. `base_version` opts into
+        optimistic concurrency control.
+      parameters:
+        - name: artifactId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArtifactPatchInput'
+            example:
+              content: Updated greeting message
+              change_summary: Updated greeting message
+      responses:
+        '200':
+          description: New version persisted.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                description: |
+                  Helper-defined update result - includes the new
+                  `current_version`, `total_versions`, and (for `patches`
+                  mode) the resolved diff/version metadata.
+        '400':
+          description: Validation error - neither `content` nor `patches` provided.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the owner can mutate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Artifact not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Optimistic concurrency conflict (`base_version` mismatch).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Artifacts]
+      operationId: deleteArtifact
+      summary: Delete an artifact and all of its versions
+      parameters:
+        - name: artifactId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Artifact deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactDeleteResult'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - only the owner can delete.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Artifact not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/conversations/{contextId}/share:
+    post:
+      tags: [Shares]
+      operationId: createConversationShare
+      summary: Create a share snapshot of a conversation or single message
+      description: |
+        Creates an immutable snapshot of a conversation (or a single
+        message when `message_id` is provided) plus any artifacts it
+        references. Returns both a UI URL and a public-facing API URL.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: contextId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationShareInput'
+            example: {}
+      responses:
+        '200':
+          description: Share created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationShareResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Conversation or referenced `message_id` not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/artifacts/{artifactId}/shares:
+    post:
+      tags: [Shares]
+      operationId: createArtifactShare
+      summary: Create (or refresh) a share for an artifact
+      description: |
+        Returns the existing share for `(artifact_id, user_id)` if one
+        exists, with the snapshot refreshed from the artifact's current
+        version. Otherwise creates a new share.
+      parameters:
+        - name: artifactId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArtifactShareInput'
+      responses:
+        '200':
+          description: Share created or refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactShareResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Artifact not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/shares:
+    get:
+      tags: [Shares]
+      operationId: listShares
+      summary: List shares created by the caller
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [conversation, message, artifact]
+            maxLength: 32
+        - name: agent_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size (default 20).
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page of shares.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareListResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed (only GET is accepted).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/shares/{shareId}:
+    get:
+      tags: [Shares]
+      operationId: getShare
+      summary: Get a share owned by the caller
+      parameters:
+        - name: shareId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Share record (owner view).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Share'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Share not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Shares]
+      operationId: deleteShare
+      summary: Delete a share owned by the caller
+      parameters:
+        - name: shareId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Share deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedResult'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Share not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/shared/{shareId}:
+    get:
+      tags: [Shares]
+      operationId: getSharedConversation
+      summary: Public-facing share viewer (auth-required)
+      description: |
+        Returns the share snapshot. Despite the `/shared/` prefix this
+        endpoint still requires authentication - `iak_*` instance keys
+        and end-user JWTs both work, but anonymous callers are rejected.
+        The response sets `is_mine: true` when the caller owns the share.
+      parameters:
+        - name: shareId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Share view (snapshot + ownership flag).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareView'
+        '401':
+          description: Anonymous access - authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Share not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/a2a:
+    get:
+      tags: [A2A]
+      operationId: legacyA2aTaskSnapshot
+      summary: Legacy A2A gateway - task snapshot dispatch (GET)
+      description: |
+        Backward-compatible legacy gateway. `GET /v1/a2a?taskId=xxx`
+        looks up the task's `_agent_id` and forwards to the per-agent
+        endpoint `GET /v1/agents/{agentId}/a2a?taskId=xxx`. New clients
+        should call the per-agent path directly.
+      parameters:
+        - name: taskId
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Task snapshot (forwarded from the per-agent endpoint).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSnapshot'
+        '404':
+          description: Task not found (rendered as a JSON-RPC error envelope).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonRpcErrorEnvelope'
+    post:
+      tags: [A2A]
+      operationId: legacyAgentToAgentCall
+      summary: Legacy A2A gateway - JSON-RPC 2.0 dispatch (POST)
+      description: |
+        Backward-compatible legacy JSON-RPC 2.0 gateway. The body MUST
+        include `params.id` (the target agent ID); the gateway forwards
+        the call to `POST /v1/agents/{agentId}/a2a`. Returns the
+        forwarded JSON-RPC response or a JSON-RPC error envelope.
+
+        Recognised methods on the underlying per-agent endpoint:
+        `message/send`, `message/stream`, `tasks/get`, `tasks/cancel`,
+        `tasks/sendSubscribe`, `agent/getCard`, `agent/getExtendedCard`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LegacyJsonRpcRequest'
+      responses:
+        '200':
+          description: |
+            JSON-RPC 2.0 response. `result` is the forwarded result
+            envelope; alternatively `error` carries a JSON-RPC error
+            object when the dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonRpcResponse'
+        '400':
+          description: Invalid JSON-RPC envelope (returned as a JSON-RPC error response).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonRpcErrorEnvelope'
+  /v1/agents/{agentId}/a2a:
+    get:
+      tags: [A2A]
+      operationId: agentTaskSnapshotA2a
+      summary: A2A task snapshot (per-agent, GET)
+      description: |
+        Per-agent A2A gateway snapshot endpoint. `GET ?taskId=xxx`
+        validates the task belongs to this agent then forwards to
+        `getTaskSnapshot`. Returns a JSON-RPC error envelope when the
+        task does not belong to the agent.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: taskId
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Task snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskSnapshot'
+        '404':
+          description: Task not found for this agent (JSON-RPC error envelope).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonRpcErrorEnvelope'
+    post:
+      tags: [A2A]
+      operationId: agentToAgentCall
+      summary: A2A JSON-RPC 2.0 dispatch (per-agent)
+      description: |
+        Per-agent JSON-RPC 2.0 entry point. The agent ID is taken from
+        the path - `params.id` is ignored. Recognised methods include
+        `message/send`, `message/stream`, `tasks/get`, `tasks/cancel`,
+        `tasks/sendSubscribe`, `agent/getCard`, `agent/getExtendedCard`.
+        For first-class consumers the dedicated REST endpoints
+        (`/messages/send`, `/messages/stream`, `/tasks/{taskId}`, etc.)
+        are preferred - this endpoint exists for A2A interoperability.
+
+        Note: `tasks/sendSubscribe` directly streams Server-Sent Events
+        without a JSON-RPC wrapper - it does not produce the
+        `application/json` body documented here.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JsonRpcRequest'
+      responses:
+        '200':
+          description: |
+            JSON-RPC 2.0 response. Carries `result` on success or
+            `error` on failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonRpcResponse'
+        '400':
+          description: Invalid JSON-RPC envelope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonRpcErrorEnvelope'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/.well-known/agent.json:
+    get:
+      tags: [A2A]
+      operationId: getAgentCard
+      summary: A2A discovery card (.well-known/agent.json)
+      description: |
+        A2A 0.3 discovery card. Owners (and same-org callers) see the
+        live card; outside callers receive the `published_config` view.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: A2A AgentCard payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentCard'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/extendedAgentCard:
+    get:
+      tags: [A2A]
+      operationId: getExtendedAgentCard
+      summary: A2A extended card (full agent config)
+      description: |
+        Same shape as the public `.well-known/agent.json` plus the
+        agent's `tools`, `guardrails`, `sub_agents`, `model`, and
+        `temperature`. Auth-gated for callers with read access.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Extended A2A AgentCard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtendedAgentCard'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/tools:
+    get:
+      tags: [Tools]
+      operationId: listAgentTools
+      summary: List the tools attached to an agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Tool list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolListResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Tools]
+      operationId: addAgentTool
+      summary: Attach a tool to an agent
+      description: |
+        Adds a tool to the agent's `tools[]`. `type` MUST be one of
+        `file_search`, `mcp`, or `function`. The tool name must match
+        `^[a-zA-Z0-9_-]+$` (OpenAI tool-name constraint). When the
+        agent is published, `has_draft_changes` is set to `true`.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolAddInput'
+            example:
+              type: file_search
+              name: test_file_search
+              description: Test file search tool
+              vector_store_id: vs_test_123
+              catalog_id: template-file-search
+      responses:
+        '200':
+          description: Tool added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tool'
+        '400':
+          description: Validation error (invalid type, bad tool name, missing fields).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: A tool with the same name already exists on this agent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/tools/{toolId}:
+    get:
+      tags: [Tools]
+      operationId: getAgentTool
+      summary: Get a single tool from an agent
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Tool record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tool'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Tool not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Tools]
+      operationId: removeAgentTool
+      summary: Remove a tool from an agent
+      description: |
+        Removes the tool from `tools[]`. When the agent is published,
+        `has_draft_changes` is set to `true`.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: toolId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Tool removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletedResult'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Tool not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/retention:
+    get:
+      tags: [Retention]
+      operationId: getAgentRetention
+      summary: Get an agent's retention policy
+      description: |
+        Returns the raw agent-level retention policy (or null if none)
+        plus the resolved `effective` values (agent → org → platform
+        defaults).
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Policy + effective values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRetentionResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [Retention]
+      operationId: updateAgentRetention
+      summary: Upsert an agent retention policy
+      description: |
+        Upserts the agent-level retention policy. Each field is
+        validated against the org limit; admins (platform admin or
+        agent-factory admin) may set `admin_override: true` to exceed
+        the org limits.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRetentionInput'
+      responses:
+        '200':
+          description: Upserted policy + effective values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRetentionResponse'
+        '400':
+          description: Validation error or value exceeds org limit (and not admin-overridden).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [Retention]
+      operationId: deleteAgentRetention
+      summary: Delete the agent-level retention policy (revert to org/defaults)
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: 'Deletion result. `deleted: false` when no agent-level policy existed.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionDeleteResult'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/orgs/{orgSlug}/retention:
+    get:
+      tags: [Retention]
+      operationId: getOrgRetention
+      summary: Get the org-level retention policy
+      description: |
+        Org-scoped retention policy. Admin-only (platform admin or
+        agent-factory admin). Returns the raw policy document plus the
+        resolved `effective` values (org override → platform defaults).
+      parameters:
+        - name: orgSlug
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        '200':
+          description: Org retention policy + effective values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgRetentionResponse'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Platform or agent-factory admin access required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags: [Retention]
+      operationId: updateOrgRetention
+      summary: Upsert the org-level retention policy
+      parameters:
+        - name: orgSlug
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgRetentionInput'
+      responses:
+        '200':
+          description: Upserted policy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgRetentionResponse'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Platform or agent-factory admin access required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Resource not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/agents/{agentId}/evaluations:
+    get:
+      tags: [Evaluations]
+      operationId: listEvaluations
+      summary: List or fetch an evaluation
+      description: |
+        Without `eval_id`, returns the page of evaluations owned by the
+        caller for this agent. With `eval_id`, returns that single
+        evaluation (404 if not found).
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+        - name: eval_id
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+          description: When set, returns a single evaluation by ID.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Page size (default 20).
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Evaluation list or single evaluation.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          additionalProperties: true
+                  - type: object
+                    additionalProperties: true
+                    description: Single evaluation record (when `eval_id` is set).
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Evaluation not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Evaluations]
+      operationId: runEvaluation
+      summary: Start a new evaluation run
+      description: |
+        Kicks off an evaluation against a stored input file. Persists a
+        `tasks` record with `_type: evaluation` and emits
+        `evaluation.started` for the worker pool to pick up.
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluationRunInput'
+      responses:
+        '200':
+          description: Evaluation accepted (status `running`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationRunResponse'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent or input file not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        User session JWT or instance API key (`iak_*`).
+        Send as `Authorization: Bearer <token>`.
+    WorkspaceApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-prismeai-api-key
+      description: Workspace-scoped API key.
+  schemas:
+    # ----------------------------------------------------------------
+    # Common envelopes
+    # ----------------------------------------------------------------
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Stable PascalCase or SNAKE_CASE error code (e.g. AgentNotFound, VALIDATION_ERROR, FORBIDDEN, METHOD_NOT_ALLOWED).
+        message:
+          type: string
+          description: Human-readable error message.
+        details:
+          type: object
+          description: Optional structured context for the error.
+          additionalProperties: true
+    DeletedResult:
+      type: object
+      description: Generic delete acknowledgement.
+      properties:
+        deleted:
+          type: boolean
+          example: true
+    # ----------------------------------------------------------------
+    # Agents
+    # ----------------------------------------------------------------
+    SubAgentRef:
+      type: object
+      description: Sub-agent delegation entry on an agent.
+      properties:
+        agent_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+    Approver:
+      type: object
+      description: |
+        Designated reviewer for a `tool_permissions` rule. When at least one
+        approver is set, the platform emits a `task.approval.required` event
+        and the approval is resolved through
+        `POST /v1/agents/{agent_id}/tasks/{task_id}/resolve` by anyone matching
+        the entry. Validation rejects unknown `type` values or `user`/`group`
+        entries missing an `id`; it does NOT verify that the referenced
+        principal exists.
+      properties:
+        type:
+          type: string
+          enum: [owner, user, group]
+        id:
+          type: string
+          description: Required for `user` and `group`. Ignored for `owner`.
+      required: [type]
+    ToolPermissionRule:
+      type: object
+      description: |
+        Per-tool override on the default policy. Targets a function tool by
+        name, or an MCP server by its parent name (the rule then cascades to
+        every child tool the server exposes at runtime; a child-name rule wins
+        over a parent rule on conflict).
+      properties:
+        tool:
+          type: string
+        policy:
+          type: string
+          enum: [auto, always_ask, ask_external, ask_first]
+        conditions:
+          type: object
+          description: |
+            Optional `jsonmatch` pattern compared against the tool call's
+            arguments. The rule's policy only fires when the pattern matches;
+            otherwise the call runs without prompting.
+          additionalProperties: true
+        approvers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Approver'
+      required: [tool, policy]
+    ToolPermissions:
+      type: object
+      description: |
+        Human-in-the-Loop configuration. Sets a default policy plus optional
+        per-tool overrides. Policies:
+          - `auto` — run immediately (default).
+          - `always_ask` — halt every call on approval.
+          - `ask_external` — halt only on MCP tool calls.
+          - `ask_first` — halt the first time a tool runs in a session; cache
+            keyed per child name unless an MCP parent rule is configured (then
+            cached per parent).
+      properties:
+        default:
+          type: string
+          enum: [auto, always_ask, ask_external, ask_first]
+          default: auto
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolPermissionRule'
+    ToolActivationRule:
+      type: object
+      description: |
+        Per-tool override on the default activation. Targets a function tool by
+        name, or an MCP server by its parent name (activation cascades to every
+        child tool the server exposes at runtime).
+      properties:
+        tool:
+          type: string
+        activation:
+          type: string
+          enum: [auto, user_first]
+      required: [tool, activation]
+    ToolActivation:
+      type: object
+      description: |
+        Controls whether the model can use a given tool on a given turn.
+        `user_first` tools are replaced by a same-named, schema-less stub with
+        a "disabled" description on each turn, unless the user explicitly
+        summons the tool from the chat input via `metadata.tool_choice`.
+        Eligible tool types: `function` and `mcp`. `file_search`, `skill`,
+        `guardrail`, and `system` types are exempt and always behave as `auto`.
+      properties:
+        default:
+          type: string
+          enum: [auto, user_first]
+          default: auto
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolActivationRule'
+    Agent:
+      type: object
+      description: |
+        Agent record (full view). Owners see this complete record including
+        `published_config`. Non-owners with binding receive the same shape with
+        `published_config` stripped server-side. Restricted-agent rows
+        additionally carry `access_status` (`granted` or `none`) when seen in
+        list/discovery views.
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        instructions:
+          type: string
+        model:
+          type: string
+        fallback_models:
+          type: array
+          items:
+            type: string
+        temperature:
+          type: number
+        icon_url:
+          type: string
+        skills:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tool'
+        tool_permissions:
+          $ref: '#/components/schemas/ToolPermissions'
+        tool_activation:
+          $ref: '#/components/schemas/ToolActivation'
+        guardrails:
+          type: object
+          additionalProperties: true
+        sub_agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubAgentRef'
+        starters:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        allowed_models:
+          type: array
+          items:
+            type: string
+        max_tokens:
+          type: integer
+        max_turns:
+          type: integer
+        token_budget:
+          type: integer
+        tool_call_budget:
+          type: integer
+        canvas_enabled:
+          type: boolean
+        visibility:
+          type: string
+          enum: [public, private, restricted]
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [draft, published]
+        profile:
+          type: string
+          enum: [simple, workflow, agent_light, agent_full, orchestrator]
+        owner_id:
+          type: string
+        orgSlug:
+          type: string
+        subscription_id:
+          type: string
+        serviceAccountId:
+          type: string
+        published_config:
+          type: object
+          additionalProperties: true
+          description: Snapshot of runtime fields at last publish (owners only).
+        published_at:
+          type: string
+          format: date-time
+        has_draft_changes:
+          type: boolean
+        rating:
+          type: number
+        ratings_count:
+          type: integer
+        messages_count:
+          type: integer
+        conversations_count:
+          type: integer
+        access_status:
+          type: string
+          enum: [granted, none]
+          description: Only present on restricted-agent rows in list/discovery views.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AgentRestrictedView:
+      type: object
+      description: |
+        Public-facing fields returned to callers without binding when the agent
+        is `restricted`. Subset of the full Agent record.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        icon_url:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        visibility:
+          type: string
+          enum: [restricted]
+        starters:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        status:
+          type: string
+        rating:
+          type: number
+        ratings_count:
+          type: integer
+        orgSlug:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+        owner_id:
+          type: string
+        messages_count:
+          type: integer
+        conversations_count:
+          type: integer
+    AgentCreateInput:
+      type: object
+      required: [instructions]
+      properties:
+        name:
+          type: string
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 4096
+        instructions:
+          type: string
+          maxLength: 100000
+          description: System prompt / agent instructions.
+        model:
+          type: string
+          maxLength: 128
+        fallback_models:
+          type: array
+          items:
+            type: string
+        temperature:
+          type: number
+        profile:
+          type: string
+          maxLength: 64
+          enum: [simple, workflow, agent_light, agent_full, orchestrator]
+        skills:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        sub_agents:
+          type: array
+          description: Sub-agent delegations (max 20).
+          items:
+            $ref: '#/components/schemas/SubAgentRef'
+        starters:
+          type: array
+          description: Conversation starter prompts (max 10).
+          items:
+            type: object
+            additionalProperties: true
+    AgentUpdateInput:
+      type: object
+      description: Partial agent update payload. Any subset of the writable Agent fields.
+      properties:
+        name:
+          type: string
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 4096
+        instructions:
+          type: string
+          maxLength: 100000
+        model:
+          type: string
+          maxLength: 128
+        fallback_models:
+          type: array
+          items:
+            type: string
+        temperature:
+          type: number
+        icon_url:
+          type: string
+        skills:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        guardrails:
+          type: object
+          additionalProperties: true
+        sub_agents:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        tool_permissions:
+          $ref: '#/components/schemas/ToolPermissions'
+        tool_activation:
+          $ref: '#/components/schemas/ToolActivation'
+        allowed_models:
+          type: array
+          items:
+            type: string
+        max_tokens:
+          type: integer
+        max_turns:
+          type: integer
+        token_budget:
+          type: integer
+        tool_call_budget:
+          type: integer
+        canvas_enabled:
+          type: boolean
+        visibility:
+          type: string
+          enum: [public, private, restricted]
+          maxLength: 32
+        category:
+          type: string
+          maxLength: 128
+        tags:
+          type: array
+          items:
+            type: string
+        starters:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        status:
+          type: string
+          enum: [draft, published]
+          maxLength: 32
+        profile:
+          type: string
+          enum: [simple, workflow, agent_light, agent_full, orchestrator]
+          maxLength: 64
+    AgentCreateResponse:
+      type: object
+      description: Slim record returned on agent create / import.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [draft]
+        serviceAccountId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AgentImportInput:
+      type: object
+      required: [agents_md]
+      properties:
+        agents_md:
+          type: string
+          maxLength: 200000
+          description: Full AGENTS.md document (front matter + markdown).
+        target_agent_id:
+          type: string
+          maxLength: 128
+          description: |
+            Optional — when set, patches the matching agent instead of
+            creating a new one. Frontmatter `id:` is ignored; only this
+            field triggers the patch path.
+    AgentImportResponse:
+      allOf:
+        - $ref: '#/components/schemas/AgentCreateResponse'
+        - type: object
+          properties:
+            imported:
+              type: boolean
+              example: true
+            action:
+              type: string
+              enum: [created, updated]
+              description: |
+                Indicates whether the call created a new agent or patched
+                an existing one (based on `target_agent_id`).
+    AgentListResponse:
+      type: object
+      description: Page of agents (with `published_config` stripped on list rows).
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Agent'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+    DiscoveryCategory:
+      type: object
+      properties:
+        value:
+          type: string
+        count:
+          type: integer
+    DiscoveryResponse:
+      type: object
+      description: Featured agents + categories for the discovery surface.
+      properties:
+        featured:
+          type: array
+          items:
+            $ref: '#/components/schemas/Agent'
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryCategory'
+    # ----------------------------------------------------------------
+    # Publishing
+    # ----------------------------------------------------------------
+    AgentPublishInput:
+      type: object
+      properties:
+        visibility:
+          type: string
+          enum: [public, restricted]
+          maxLength: 32
+          description: Defaults to `public`.
+        category:
+          type: string
+          maxLength: 128
+        tags:
+          type: array
+          items:
+            type: string
+    AgentPublishResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [published]
+        visibility:
+          type: string
+          enum: [public, restricted]
+        published_at:
+          type: string
+          format: date-time
+    AgentDiscardDraftResponse:
+      type: object
+      properties:
+        discarded:
+          type: boolean
+          example: true
+        agent_id:
+          type: string
+    # ----------------------------------------------------------------
+    # Ratings
+    # ----------------------------------------------------------------
+    RatingInput:
+      type: object
+      required: [rating]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+    RatingResult:
+      type: object
+      properties:
+        rating:
+          type: number
+          description: New average rating (rounded to 1 decimal).
+        ratings_count:
+          type: integer
+          description: Total number of ratings.
+    # ----------------------------------------------------------------
+    # Profiles
+    # ----------------------------------------------------------------
+    Profile:
+      type: object
+      description: Agent profile preset.
+      properties:
+        id:
+          type: string
+          enum: [simple, workflow, agent_light, agent_full, orchestrator]
+        description:
+          type: string
+        level:
+          type: string
+        features:
+          type: object
+          additionalProperties: true
+        limits:
+          type: object
+          additionalProperties: true
+        use_cases:
+          type: array
+          items:
+            type: string
+    ProfileListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Profile'
+    # ----------------------------------------------------------------
+    # Tools
+    # ----------------------------------------------------------------
+    Tool:
+      type: object
+      description: |
+        Tool entry attached to an agent. Discriminated by `type` -
+        `file_search` (requires `vector_store_id`), `mcp` (uses `server`,
+        `headers`, `scope`), or `function` (uses `url`, `parameters`,
+        `headers`).
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [file_search, mcp, function]
+        name:
+          type: string
+          pattern: '^[a-zA-Z0-9_-]+$'
+        display_name:
+          type: string
+        description:
+          type: string
+        catalog_id:
+          type: string
+        auth:
+          type: object
+          additionalProperties: true
+        icon_url:
+          type: string
+        vector_store_id:
+          type: string
+          description: Required for `file_search`.
+        server:
+          type: string
+          description: MCP server URL (for `mcp`).
+        headers:
+          type: object
+          additionalProperties: true
+        scope:
+          type: string
+        url:
+          type: string
+          description: Required for `function`.
+        parameters:
+          type: object
+          additionalProperties: true
+          description: JSON Schema describing the function tool's parameters.
+    ToolAddInput:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [file_search, mcp, function]
+          maxLength: 64
+        name:
+          type: string
+          maxLength: 128
+          pattern: '^[a-zA-Z0-9_-]+$'
+        display_name:
+          type: string
+          maxLength: 256
+        description:
+          type: string
+          maxLength: 4096
+        catalog_id:
+          type: string
+          maxLength: 128
+        auth:
+          type: object
+          additionalProperties: true
+        icon_url:
+          type: string
+          maxLength: 2048
+        vector_store_id:
+          type: string
+          maxLength: 128
+          description: Required for `file_search`.
+        server:
+          type: string
+          maxLength: 2048
+          description: MCP server URL (for `mcp`).
+        headers:
+          type: object
+          additionalProperties: true
+        scope:
+          type: string
+          maxLength: 256
+        url:
+          type: string
+          maxLength: 2048
+          description: Required for `function`.
+        parameters:
+          type: object
+          additionalProperties: true
+          description: JSON Schema describing the function tool's parameters.
+    ToolListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tool'
+    # ----------------------------------------------------------------
+    # Conversations
+    # ----------------------------------------------------------------
+    Conversation:
+      type: object
+      description: Conversation envelope (one row per A2A `contextId`).
+      properties:
+        contextId:
+          type: string
+        agent_id:
+          type: string
+        title:
+          type: string
+        is_archived:
+          type: boolean
+        is_starred:
+          type: boolean
+        messages_count:
+          type: integer
+        last_message_at:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    ConversationCreateInput:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 512
+          description: Optional title. If omitted, the client localizes a default title.
+    ConversationUpdateInput:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 512
+        is_archived:
+          type: boolean
+        is_starred:
+          type: boolean
+    ConversationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conversation'
+    ConversationDetailResponse:
+      type: object
+      properties:
+        conversation:
+          $ref: '#/components/schemas/Conversation'
+        messages:
+          type: array
+          description: Task-message records (A2A history entries).
+          items:
+            type: object
+            additionalProperties: true
+    ConversationsBulkDeleteResult:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+          example: true
+        count:
+          type: integer
+          description: Number of conversations deleted.
+    # ----------------------------------------------------------------
+    # Messages / A2A
+    # ----------------------------------------------------------------
+    MessagePart:
+      type: object
+      description: |
+        A2A message part. Discriminated by field presence:
+        `TextPart` (`text`), `FilePart` (`url`/`raw`, `mediaType`,
+        `filename`), `DataPart` (`data`, `mediaType`).
+      additionalProperties: true
+    Message:
+      type: object
+      description: A2A v0.3 flat message envelope.
+      properties:
+        message_id:
+          type: string
+          maxLength: 256
+        role:
+          type: string
+          enum: [user, agent]
+        contextId:
+          type: string
+          maxLength: 64
+        taskId:
+          type: string
+        parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessagePart'
+    MessageSendInput:
+      type: object
+      required: [message]
+      properties:
+        message:
+          $ref: '#/components/schemas/Message'
+    ToolCallSummary:
+      type: object
+      properties:
+        name:
+          type: string
+        arguments:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+    MessageSendResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          nullable: true
+          additionalProperties: true
+        task:
+          type: object
+          properties:
+            id:
+              type: string
+            contextId:
+              type: string
+            status:
+              $ref: '#/components/schemas/TaskStatus'
+            output:
+              type: object
+              properties:
+                messages:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Message'
+            usage:
+              type: object
+              additionalProperties: true
+            tool_calls:
+              type: array
+              items:
+                $ref: '#/components/schemas/ToolCallSummary'
+    # ----------------------------------------------------------------
+    # Tasks
+    # ----------------------------------------------------------------
+    TaskState:
+      type: string
+      description: A2A task state.
+      enum: [working, completed, canceled, failed, input-required]
+    TaskStatus:
+      type: object
+      properties:
+        state:
+          $ref: '#/components/schemas/TaskState'
+        timestamp:
+          type: string
+        message:
+          type: object
+          additionalProperties: true
+    Task:
+      type: object
+      description: A2A task record.
+      properties:
+        id:
+          type: string
+        contextId:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        history:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        artifacts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    TaskListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+    TaskCancelResult:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          example: canceled
+    TaskResolveInput:
+      type: object
+      required: [approved]
+      properties:
+        approved:
+          type: boolean
+          description: Approve or reject the pending tool call.
+        reason:
+          type: string
+          maxLength: 2048
+          description: Optional rationale, surfaced in audit trail.
+    TaskResolveResponse:
+      type: object
+      properties:
+        task_id:
+          type: string
+        status:
+          type: object
+          additionalProperties: true
+        resolution:
+          type: string
+          enum: [approved, rejected]
+        resolved_by:
+          type: string
+    TaskSnapshot:
+      allOf:
+        - $ref: '#/components/schemas/Task'
+        - type: object
+          properties:
+            terminal:
+              type: boolean
+              description: True when state is `completed`, `canceled`, or `failed`.
+    # ----------------------------------------------------------------
+    # Artifacts
+    # ----------------------------------------------------------------
+    ArtifactDetail:
+      type: object
+      description: Artifact record with the resolved current-version content.
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        artifact_type:
+          type: string
+        mime_type:
+          type: string
+        language:
+          type: string
+        filename:
+          type: string
+        current_version:
+          type: integer
+        total_versions:
+          type: integer
+        content:
+          type: string
+        conversation_id:
+          type: string
+        agent_id:
+          type: string
+        user_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ArtifactListResponse:
+      type: object
+      description: Paginated list of artifacts (no `total` returned by this endpoint).
+      properties:
+        artifacts:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            description: Artifact record (see `ArtifactDetail`).
+        page:
+          type: integer
+        limit:
+          type: integer
+    ArtifactPatchInput:
+      type: object
+      description: |
+        Two mutation modes - exactly one of `content` (full replace,
+        creates a new version) or `patches` (line-level operations,
+        applied atomically) MUST be present.
+      properties:
+        content:
+          type: string
+          description: Full replacement content (creates a new version).
+        patches:
+          type: array
+          description: Line-level operations applied atomically.
+          items:
+            type: object
+            additionalProperties: true
+        change_summary:
+          type: string
+          maxLength: 512
+        base_version:
+          type: integer
+          description: Expected current version for optimistic concurrency.
+    ArtifactDeleteResult:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+          example: true
+        artifact_id:
+          type: string
+    # ----------------------------------------------------------------
+    # Shares
+    # ----------------------------------------------------------------
+    ConversationShareInput:
+      type: object
+      properties:
+        message_id:
+          type: string
+          maxLength: 128
+          description: |
+            Optional - when set, share is scoped to this single message
+            (`type: "message"` instead of `"conversation"`).
+    ConversationShareResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [conversation, message]
+        url:
+          type: string
+          description: UI URL on the caller's origin (`/share/{share_id}`).
+        apiUrl:
+          type: string
+          description: Public API URL pointing at `/v1/shared/{shareId}`.
+        created_at:
+          type: string
+          format: date-time
+    ArtifactShareInput:
+      type: object
+      properties:
+        access_level:
+          type: string
+          enum: [view]
+          maxLength: 32
+          description: Default `view`.
+    ArtifactShareResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [artifact]
+        artifact_id:
+          type: string
+        url:
+          type: string
+        apiUrl:
+          type: string
+        access_level:
+          type: string
+    ShareListItem:
+      type: object
+      description: Share row as returned by the owner's list endpoint.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [conversation, message, artifact]
+        context_id:
+          type: string
+        message_id:
+          type: string
+        artifact_id:
+          type: string
+        agent_id:
+          type: string
+        title:
+          type: string
+        agent_name:
+          type: string
+        artifact_type:
+          type: string
+        url:
+          type: string
+          description: Workspace-relative public viewer URL.
+        created_at:
+          type: string
+          format: date-time
+    ShareListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShareListItem'
+    Share:
+      type: object
+      description: Share record (owner view).
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [conversation, message, artifact]
+        context_id:
+          type: string
+        message_id:
+          type: string
+        agent_id:
+          type: string
+        url:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        snapshot:
+          type: object
+          additionalProperties: true
+          description: |
+            The frozen snapshot - for `conversation`/`message` shares this
+            includes `messages`, `artifacts`, `agent_name`, `agent_icon_url`.
+            For `artifact` shares it carries `content`, `artifact_type`,
+            `mime_type`, `version`, `access_level`.
+    ShareView:
+      type: object
+      description: Public-facing view returned by `/v1/shared/{shareId}`.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [conversation, message, artifact]
+        created_at:
+          type: string
+          format: date-time
+        snapshot:
+          type: object
+          additionalProperties: true
+        is_mine:
+          type: boolean
+    # ----------------------------------------------------------------
+    # Access bindings & requests
+    # ----------------------------------------------------------------
+    AccessBinding:
+      type: object
+      description: Access binding granting a principal a role on an agent.
+      properties:
+        agent_id:
+          type: string
+        principal_type:
+          type: string
+          enum: [user, group, org]
+        principal_id:
+          type: string
+        email:
+          type: string
+        orgSlug:
+          type: string
+        granted_by:
+          type: string
+        role_slug:
+          type: string
+    AccessBindingListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccessBinding'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+    AccessShareInput:
+      type: object
+      required: [principal_type, principal_id]
+      properties:
+        principal_type:
+          type: string
+          enum: [user, group, org]
+          maxLength: 32
+        principal_id:
+          type: string
+          maxLength: 128
+          description: User id (or email for user type, resolved server-side), group id, or org slug.
+        role_slug:
+          type: string
+          maxLength: 64
+          description: Role to grant. Defaults to `admin`.
+    AccessShareResponse:
+      type: object
+      properties:
+        created:
+          type: boolean
+          example: true
+        binding:
+          $ref: '#/components/schemas/AccessBinding'
+    AccessRequest:
+      type: object
+      description: Pending or resolved access request for a restricted agent.
+      additionalProperties: true
+      properties:
+        _id:
+          type: string
+        agent_id:
+          type: string
+        requester_id:
+          type: string
+        requester_email:
+          type: string
+        orgSlug:
+          type: string
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        message:
+          type: string
+        resolved_by:
+          type: string
+        rejection_reason:
+          type: string
+    AccessRequestInput:
+      type: object
+      properties:
+        message:
+          type: string
+          maxLength: 1024
+          description: Optional rationale for the access request.
+    AccessRequestListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccessRequest'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+    AccessRequestResolveInput:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [approve, reject]
+          maxLength: 16
+        rejection_reason:
+          type: string
+          maxLength: 1024
+    AccessRequestResolveResponse:
+      type: object
+      properties:
+        _id:
+          type: string
+        agent_id:
+          type: string
+        requester_id:
+          type: string
+        requester_email:
+          type: string
+        status:
+          type: string
+          enum: [approved, rejected]
+        resolved_by:
+          type: string
+        rejection_reason:
+          type: string
+    # ----------------------------------------------------------------
+    # API keys
+    # ----------------------------------------------------------------
+    AgentApiKeyCreateInput:
+      type: object
+      required: [name, slug, permissions]
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        slug:
+          type: string
+          maxLength: 96
+        permissions:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            maxLength: 96
+          description: Permissions (will be prefixed with `agent-factory:` server-side).
+        expiresAt:
+          type: string
+          description: ISO timestamp.
+    AgentApiKeyRotateInput:
+      type: object
+      properties:
+        expiresAt:
+          type: string
+          description: New expiration ISO timestamp (optional).
+    # ----------------------------------------------------------------
+    # Activity feed
+    # ----------------------------------------------------------------
+    ActivityItem:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        group:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        correlationId:
+          type: string
+        userId:
+          type: string
+        agent_id:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+          description: Sanitized event payload (sensitive fields stripped).
+    ActivityListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityItem'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+    # ----------------------------------------------------------------
+    # Analytics
+    # ----------------------------------------------------------------
+    AnalyticsPeriod:
+      type: object
+      properties:
+        type:
+          type: string
+        start:
+          type: string
+        end:
+          type: string
+        granularity:
+          type: string
+    AnalyticsSeriesPoint:
+      type: object
+      properties:
+        date:
+          type: string
+        users:
+          type: integer
+        conversations:
+          type: integer
+        messages:
+          type: integer
+        rating:
+          type: number
+        cost:
+          type: number
+        status:
+          type: string
+          enum: [incomplete, complete]
+    AnalyticsMeta:
+      type: object
+      properties:
+        generated_at:
+          type: string
+        data_points:
+          type: integer
+        includes_current_interval:
+          type: boolean
+        summary_cached:
+          type: boolean
+        data_computed_at:
+          type: string
+        next_refresh_at:
+          type: string
+    AgentAnalytics:
+      type: object
+      description: Analytics payload (series + summary) for a single agent.
+      properties:
+        agent_id:
+          type: string
+        agent_name:
+          type: string
+        period:
+          $ref: '#/components/schemas/AnalyticsPeriod'
+        summary:
+          type: object
+          additionalProperties: true
+          description: Aggregated KPIs (users, engagement, quality, performance, cost, models, tools).
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyticsSeriesPoint'
+        meta:
+          $ref: '#/components/schemas/AnalyticsMeta'
+    RefreshMetricsInput:
+      type: object
+      properties:
+        period_start:
+          type: string
+          description: ISO timestamp - start of the refresh window.
+        period_end:
+          type: string
+          description: ISO timestamp - end of the refresh window (exclusive).
+        granularity:
+          type: string
+          enum: [5m, hourly, daily]
+          description: Aggregation granularity. Default `hourly`.
+    RefreshMetricsResult:
+      type: object
+      properties:
+        status:
+          type: string
+          example: refreshed
+        agent_id:
+          type: string
+        granularity:
+          type: string
+          enum: [5m, hourly, daily]
+        period_start:
+          type: string
+        period_end:
+          type: string
+        entries_written:
+          type: integer
+        error:
+          type: string
+          description: Set if a partial failure occurred during aggregation.
+    # ----------------------------------------------------------------
+    # Retention
+    # ----------------------------------------------------------------
+    RetentionEffective:
+      type: object
+      description: Resolved retention values (agent → org → platform defaults).
+      properties:
+        conversations_retention_days:
+          type: integer
+          nullable: true
+        documents_retention_days:
+          type: integer
+          nullable: true
+        tasks_retention_days:
+          type: integer
+          nullable: true
+        artifacts_retention_days:
+          type: integer
+          nullable: true
+    AgentRetentionInput:
+      type: object
+      properties:
+        conversations_retention_days:
+          type: integer
+          nullable: true
+        documents_retention_days:
+          type: integer
+          nullable: true
+        tasks_retention_days:
+          type: integer
+          nullable: true
+        artifacts_retention_days:
+          type: integer
+          nullable: true
+        admin_override:
+          type: boolean
+          description: Admins only - opt out of org-limit enforcement.
+    OrgRetentionInput:
+      type: object
+      properties:
+        conversations_retention_days:
+          type: integer
+          nullable: true
+        documents_retention_days:
+          type: integer
+          nullable: true
+        tasks_retention_days:
+          type: integer
+          nullable: true
+        artifacts_retention_days:
+          type: integer
+          nullable: true
+    AgentRetentionResponse:
+      type: object
+      properties:
+        policy:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: |
+            Raw `retention_policies` document for this agent
+            (`scope: "agent"`). Null when no override is set.
+        effective:
+          $ref: '#/components/schemas/RetentionEffective'
+    OrgRetentionResponse:
+      type: object
+      properties:
+        policy:
+          type: object
+          nullable: true
+          additionalProperties: true
+        effective:
+          $ref: '#/components/schemas/RetentionEffective'
+    RetentionDeleteResult:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+    # ----------------------------------------------------------------
+    # Evaluations
+    # ----------------------------------------------------------------
+    EvaluationRunInput:
+      type: object
+      required: [file_id]
+      properties:
+        file_id:
+          type: string
+          maxLength: 128
+          description: Storage `file_id` containing the evaluation inputs.
+        name:
+          type: string
+          maxLength: 256
+        criteria:
+          type: string
+          maxLength: 4096
+          description: Free-text grading criteria.
+        judge_model:
+          type: string
+          maxLength: 128
+          description: LLM-as-judge model. Default `gpt-4o`.
+    EvaluationRunResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          example: running
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    # ----------------------------------------------------------------
+    # A2A - JSON-RPC envelopes & cards
+    # ----------------------------------------------------------------
+    JsonRpcError:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+    JsonRpcResponse:
+      type: object
+      description: A2A JSON-RPC 2.0 response.
+      properties:
+        jsonrpc:
+          type: string
+          enum: ['2.0']
+        id:
+          type: string
+          nullable: true
+          description: Echoes the request id (string or null per JSON-RPC 2.0).
+        result:
+          type: object
+          additionalProperties: true
+        error:
+          $ref: '#/components/schemas/JsonRpcError'
+    JsonRpcErrorEnvelope:
+      type: object
+      description: |
+        Bare JSON-RPC error envelope returned without a successful `result`
+        (e.g. when the legacy gateway cannot resolve the target agent).
+      properties:
+        jsonrpc:
+          type: string
+          enum: ['2.0']
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: -32000
+            message:
+              type: string
+        id:
+          type: string
+          nullable: true
+          description: Echoes the request id (string or null per JSON-RPC 2.0).
+    JsonRpcRequest:
+      type: object
+      description: Per-agent A2A JSON-RPC 2.0 request.
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc:
+          type: string
+          enum: ['2.0']
+        method:
+          type: string
+          maxLength: 64
+        params:
+          type: object
+          additionalProperties: true
+        id:
+          type: string
+          maxLength: 128
+    LegacyJsonRpcRequest:
+      type: object
+      description: |
+        Legacy `/v1/a2a` JSON-RPC request. `params.id` MUST be present -
+        it identifies the target agent for gateway dispatch.
+      required: [jsonrpc, method, params]
+      properties:
+        jsonrpc:
+          type: string
+          enum: ['2.0']
+        method:
+          type: string
+          maxLength: 64
+          description: A2A method name (e.g. `message/send`, `tasks/get`).
+        params:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: string
+              maxLength: 128
+              description: Target agent ID - required by the legacy gateway.
+          additionalProperties: true
+        id:
+          type: string
+          maxLength: 128
+          description: JSON-RPC request id - echoed back in the response.
+    AgentCardInterface:
+      type: object
+      properties:
+        url:
+          type: string
+        protocolBinding:
+          type: string
+    AgentCardCapabilities:
+      type: object
+      properties:
+        streaming:
+          type: boolean
+        pushNotifications:
+          type: boolean
+        stateTransitionHistory:
+          type: boolean
+    AgentCard:
+      type: object
+      description: A2A 0.3 discovery card.
+      additionalProperties: true
+      properties:
+        protocolVersions:
+          type: array
+          items:
+            type: string
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        supportedInterfaces:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentCardInterface'
+        capabilities:
+          $ref: '#/components/schemas/AgentCardCapabilities'
+        securitySchemes:
+          type: object
+          additionalProperties: true
+        security:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        defaultInputModes:
+          type: array
+          items:
+            type: string
+        defaultOutputModes:
+          type: array
+          items:
+            type: string
+        skills:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        iconUrl:
+          type: string
+    ExtendedAgentCard:
+      type: object
+      description: |
+        Extended A2A AgentCard. Public AgentCard fields + `tools`,
+        `guardrails`, `sub_agents`, `model`, `temperature`.
+      additionalProperties: true

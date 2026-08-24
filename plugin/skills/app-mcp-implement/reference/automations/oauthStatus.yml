@@ -20,7 +20,7 @@ do:
   - comment: Non-oauth tenants (jwt / clientCredentials / accessToken) have no per-user connection — report connected so a wrongly-wired status_url never gates their tools.
   - set:
       name: statusMode
-      value: '{% {{config.auth.mode}} || "jwt" %}'
+      value: '{% {{config.authMode}} || "jwt" %}'
   - conditions:
       '{{statusMode}} != "oauth"':
         - set:
@@ -31,6 +31,19 @@ do:
         - break: {}
   - conditions:
       '!{{user.salesforceNext.oauth.accessToken}}':
+        - break: {}
+  - Custom Code.run:
+      function: makeTokenCacheKey
+      parameters:
+        tenantId: '{{global.workspaceId}}'
+        clientId: '{{config.oauthClientId}}'
+        scopes: '{{config.oauthScopes}}'
+      output: tokenCache
+  - conditions:
+      '{{tokenCache.error}} or {{user.salesforceNext.oauth.cacheKey}} != {{tokenCache.key}}':
+        - delete:
+            name: user.salesforceNext.oauth
+            scope: user
         - break: {}
   - comment: Fast path — cached access token still valid (120s skew), no provider round-trip.
   - conditions:

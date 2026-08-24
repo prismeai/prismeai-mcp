@@ -11,14 +11,18 @@
 // per-user OAuth is the access gate (validateAgent short-circuits to global —
 // README point 7). One catalog entry covers the whole org. See cat.* i18n keys.
 //
-// ACCESS GATE (Gotcha 28): the maintainer view must NEVER show the editable form to a
+// ACCESS GATE (Gotcha 28): do not show the editable form to a
 // non-maintainer. Do NOT infer the role from GET /security/secrets — accessManager.findAll
 // returns an empty 200 {} for non-privileged users (NOT 403), indistinguishable from a
 // not-yet-configured maintainer. Gate on the authoritative `maintainerStatus` webhook
 // (returns { allowed } from user.role, mirroring setOAuthClient). See
 // reference/central-oauth/maintainerStatus.yml.
 
-const CENTRAL_OAUTH_SECRET = 'googleWorkspacesCentralOAuth'
+const CENTRAL_OAUTH_CLIENT_ID_SECRET = 'googleWorkspacesCentralOAuthClientId'
+const CENTRAL_OAUTH_CLIENT_SECRET_SECRET = 'googleWorkspacesCentralOAuthClientSecret'
+const CENTRAL_OAUTH_SCOPES_SECRET = 'googleWorkspacesCentralOAuthScopes'
+const CENTRAL_OAUTH_AUTHORIZE_URL_SECRET = 'googleWorkspacesCentralOAuthAuthorizeUrl'
+const CENTRAL_OAUTH_TOKEN_URL_SECRET = 'googleWorkspacesCentralOAuthTokenUrl'
 // Machine name for the catalog entry (snake_case, matches the connector's MCP tool name).
 const CONNECTOR_TOOL_NAME = 'google_workspaces'
 // The connector's OWN (core) workspace slug — STABLE across environments. Used to
@@ -32,9 +36,8 @@ const CENTRAL_SLUG = 'google-workspaces'
 // Maintainer setup — shown when the SPA is loaded from the CORE workspace itself
 // (no ?workspaceId= tenant param, which the consumer configAppUrl always carries).
 // Lets the maintainer store the central platform Google OAuth client, used as
-// fallback by every tenant that does not provide its own client. The whole client
-// object lives in the core declared secret `googleWorkspacesCentralOAuth`,
-// resolved by resolveOAuthClient through the config.value.centralAuth binding.
+// fallback by every tenant that does not provide its own client. Each field lives
+// under its own core secret as one plain value.
 function MaintainerSetup(props: Props) {
   const { sdk, workspace } = props
   const host = resolveHost(sdk)
@@ -52,19 +55,6 @@ function MaintainerSetup(props: Props) {
   const centralSlug = CENTRAL_SLUG
   const coreMcpEndpoint = `${host}/workspaces/slug:${centralSlug}/webhooks/mcp`
   const centralWh = (s: string) => `${host}/workspaces/slug:${centralSlug}/webhooks/${s}`
-  const catalogAuth: CatalogAuth = {
-    type: 'oauth2',
-    // MUST match the connector's actual webhook slugs (oauthConnect/oauthStatus/
-    // oauthDisconnect) — NOT the legacy initiateOAuth/checkAuthStatus/disconnectOAuth
-    // names. A mismatch makes the catalog entry's connect_url 404 ("no matching
-    // trigger for endpoint initiateOAuth") so agents can't initiate OAuth, even though
-    // the per-agent Install button (which uses wh('oauthConnect')) works. See Gotcha 33.
-    status_url: centralWh('oauthStatus'),
-    connect_url: centralWh('oauthConnect'),
-    disconnect_url: centralWh('oauthDisconnect'),
-    scopes: (scopes || GOOGLE_SCOPES).split(/[\s,]+/).filter(Boolean),
-  }
-
   const [loading, setLoading] = useState(true)
   const [forbidden, setForbidden] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -72,7 +62,16 @@ function MaintainerSetup(props: Props) {
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [scopes, setScopes] = useState('')
+  const [authorizeUrl, setAuthorizeUrl] = useState('')
+  const [tokenUrl, setTokenUrl] = useState('')
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const catalogAuth: CatalogAuth = {
+    type: 'oauth2',
+    status_url: centralWh('oauthStatus'),
+    connect_url: centralWh('oauthConnect'),
+    disconnect_url: centralWh('oauthDisconnect'),
+    scopes: scopes.split(/[\s,]+/).filter(Boolean),
+  }
 
   useEffect(() => {
     void (async () => {
@@ -97,11 +96,17 @@ function MaintainerSetup(props: Props) {
         }
         if (!r.ok) throw new Error(t('msg.saveFailed', { status: r.status }))
         const secrets = (await r.json().catch(() => ({}))) || {}
-        const c = (secrets[CENTRAL_OAUTH_SECRET]?.value as { oauthClientId?: string; oauthClientSecret?: string; scopes?: string }) || {}
-        setClientId(c.oauthClientId || '')
-        setClientSecret(c.oauthClientSecret || '')
-        setScopes(c.scopes || '')
-        setHasClient(!!(c.oauthClientId && c.oauthClientSecret))
+        const storedClientId = String(secrets[CENTRAL_OAUTH_CLIENT_ID_SECRET]?.value || '')
+        const storedClientSecret = String(secrets[CENTRAL_OAUTH_CLIENT_SECRET_SECRET]?.value || '')
+        const storedScopes = String(secrets[CENTRAL_OAUTH_SCOPES_SECRET]?.value || '')
+        const storedAuthorizeUrl = String(secrets[CENTRAL_OAUTH_AUTHORIZE_URL_SECRET]?.value || '')
+        const storedTokenUrl = String(secrets[CENTRAL_OAUTH_TOKEN_URL_SECRET]?.value || '')
+        setClientId(storedClientId)
+        setClientSecret(storedClientSecret)
+        setScopes(storedScopes)
+        setAuthorizeUrl(storedAuthorizeUrl)
+        setTokenUrl(storedTokenUrl)
+        setHasClient(!!(storedClientId && storedClientSecret && storedScopes && storedAuthorizeUrl && storedTokenUrl))
       } catch (e: any) {
         setMsg({ kind: 'err', text: e?.message || String(e) })
       } finally {
@@ -116,11 +121,18 @@ function MaintainerSetup(props: Props) {
     try {
       if (!clientId.trim()) throw new Error(t('maint.clientIdRequired'))
       if (!clientSecret.trim()) throw new Error(t('maint.clientSecretRequired'))
+      if (!scopes.trim() || !authorizeUrl.trim() || !tokenUrl.trim()) throw new Error(t('maint.providerConfigRequired'))
       const r = await fetch(setClientUrl, {
         method: 'POST',
         headers: apiHeaders(sdk),
         credentials: 'include',
-        body: JSON.stringify({ clientId: clientId.trim(), clientSecret: clientSecret.trim(), scopes: scopes.trim() || GOOGLE_SCOPES }),
+        body: JSON.stringify({
+          clientId: clientId.trim(),
+          clientSecret: clientSecret.trim(),
+          scopes: scopes.trim(),
+          authorizeUrl: authorizeUrl.trim(),
+          tokenUrl: tokenUrl.trim(),
+        }),
       })
       const d = await r.json().catch(() => ({}))
       if (!r.ok || !d?.ok) throw new Error(d?.error || (r.status === 403 ? t('msg.forbidden') : t('msg.saveFailed', { status: r.status })))
@@ -193,16 +205,24 @@ function MaintainerSetup(props: Props) {
               />
               <div className="space-y-1.5">
                 <Label htmlFor="m-cid">{t('field.oauthClientId')}</Label>
-                <Input id="m-cid" value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="…apps.googleusercontent.com" />
+                <Input id="m-cid" value={clientId} onChange={(e) => setClientId(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="m-csec">{t('field.oauthClientSecret')}</Label>
-                <SecretInput id="m-csec" value={clientSecret} onChange={setClientSecret} placeholder="GOCSPX-…" />
+                <SecretInput id="m-csec" value={clientSecret} onChange={setClientSecret} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="m-csco">{t('field.scopes')}</Label>
-                <Input id="m-csco" value={scopes} onChange={(e) => setScopes(e.target.value)} placeholder={GOOGLE_SCOPES} />
+                <Input id="m-csco" value={scopes} onChange={(e) => setScopes(e.target.value)} />
                 <p className="text-xs text-muted-foreground">{t('maint.scopesHint')}</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="m-auth-url">{t('field.oauthAuthorizeUrl')}</Label>
+                <Input id="m-auth-url" value={authorizeUrl} onChange={(e) => setAuthorizeUrl(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="m-token-url">{t('field.oauthTokenUrl')}</Label>
+                <Input id="m-token-url" value={tokenUrl} onChange={(e) => setTokenUrl(e.target.value)} />
               </div>
               <Button disabled={busy} onClick={save}>
                 {t('maint.save')}

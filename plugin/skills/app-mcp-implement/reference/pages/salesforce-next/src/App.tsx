@@ -15,10 +15,8 @@ import { CatalogPublish, type CatalogAuth } from './CatalogPublish'
 /**
  * Salesforce Next — connector config SPA (model B: direct platform API).
  *
- * Auth is stored as a single tenant secret object `salesforceNextAuth`
- * ({mode, loginHost, jwtUsername, oauthClientId, oauthClientSecret,
- * jwtPrivateKey, accessToken, instanceUrl}); the mode select drives which fields
- * show. Reads/writes the tenant secrets straight through the platform API with
+ * Each auth field is stored under its own tenant secret as one plain value; the mode select
+ * drives which fields show. Reads/writes the tenant secrets straight through the platform API with
  * the user's session — the platform enforces the user's rights natively. All
  * user-facing strings go through `t()` (src/lib/i18n.ts).
  */
@@ -36,14 +34,28 @@ interface AuthConfig {
   jwtPrivateKey?: string
   accessToken?: string
   instanceUrl?: string
-  scopes?: string
+  oauthAuthorizeUrl?: string
+  oauthTokenUrl?: string
+  oauthRevokeUrl?: string
+  oauthScopes?: string
+  apiVersion?: string
 }
 interface Agent {
   id: string
   name?: string
 }
 
-const AUTH_SECRET = 'salesforceNextAuth'
+const AUTH_SECRETS: Record<keyof AuthConfig, string> = {
+  mode: 'salesforceNextAuthMode',
+  loginHost: 'salesforceNextLoginHost',
+  jwtUsername: 'salesforceNextJwtUsername',
+  oauthClientId: 'salesforceNextOAuthClientId',
+  oauthClientSecret: 'salesforceNextOAuthClientSecret',
+  jwtPrivateKey: 'salesforceNextJwtPrivateKey',
+  accessToken: 'salesforceNextAccessToken',
+  instanceUrl: 'salesforceNextInstanceUrl',
+  scopes: 'salesforceNextScopes',
+}
 const ALLOWLIST_SECRET = 'salesforceNextAuthorizedAgents'
 
 // Available auth modes (labels localized via t('mode.<value>')).
@@ -59,24 +71,34 @@ const MODES: { value: Mode }[] = [
 const FIELDS: Record<Mode, { key: keyof AuthConfig; secret?: boolean; area?: boolean; placeholder?: string }[]> = {
   jwt: [
     { key: 'loginHost', placeholder: 'https://login.salesforce.com' },
+    { key: 'oauthTokenUrl', placeholder: 'https://login.salesforce.com/services/oauth2/token' },
+    { key: 'oauthScopes', placeholder: 'api refresh_token offline_access' },
+    { key: 'apiVersion', placeholder: 'v00.0' },
     { key: 'jwtUsername', placeholder: 'integration@org.com' },
     { key: 'oauthClientId', secret: true, placeholder: '3MVG9…' },
     { key: 'jwtPrivateKey', secret: true, area: true, placeholder: '-----BEGIN RSA PRIVATE KEY-----' },
   ],
   clientCredentials: [
     { key: 'loginHost', placeholder: 'https://login.salesforce.com' },
+    { key: 'oauthTokenUrl', placeholder: 'https://login.salesforce.com/services/oauth2/token' },
+    { key: 'apiVersion', placeholder: 'v00.0' },
     { key: 'oauthClientId', secret: true, placeholder: '3MVG9…' },
     { key: 'oauthClientSecret', secret: true, placeholder: '••••••' },
   ],
   oauth: [
     { key: 'loginHost', placeholder: 'https://login.salesforce.com' },
+    { key: 'oauthAuthorizeUrl', placeholder: 'https://login.salesforce.com/services/oauth2/authorize' },
+    { key: 'oauthTokenUrl', placeholder: 'https://login.salesforce.com/services/oauth2/token' },
+    { key: 'oauthRevokeUrl', placeholder: 'https://login.salesforce.com/services/oauth2/revoke' },
     { key: 'oauthClientId', secret: true, placeholder: '3MVG9…' },
     { key: 'oauthClientSecret', secret: true, placeholder: '••••••' },
-    { key: 'scopes', placeholder: 'api refresh_token offline_access' },
+    { key: 'oauthScopes', placeholder: 'api refresh_token offline_access' },
+    { key: 'apiVersion', placeholder: 'v00.0' },
   ],
   accessToken: [
     { key: 'instanceUrl', placeholder: 'https://myorg.my.salesforce.com' },
     { key: 'accessToken', secret: true, placeholder: '00D…' },
+    { key: 'apiVersion', placeholder: 'v00.0' },
   ],
 }
 
@@ -207,7 +229,9 @@ function ConfigApp(props: Props) {
       const r = await fetch(secretsUrl, { headers: apiHeaders(sdk), credentials: 'include' })
       if (r.status === 403 || r.status === 401) throw new Error(t('msg.notAllowed'))
       const secrets = (await r.json()) || {}
-      const a = (secrets[AUTH_SECRET]?.value as AuthConfig) || {}
+      const a = Object.fromEntries(
+        Object.entries(AUTH_SECRETS).map(([field, secret]) => [field, secrets[secret]?.value]),
+      ) as Partial<AuthConfig>
       setAuth({ ...a, mode: (a.mode as Mode) || 'jwt' })
       const csv = String(secrets[ALLOWLIST_SECRET]?.value || '')
       const ids = csv.split(',').map((s) => s.trim()).filter(Boolean)
@@ -256,22 +280,25 @@ function ConfigApp(props: Props) {
     })()
   }, [tenantId, tenantSlug, host, sdk])
 
-  async function patchSecret(name: string, value: unknown) {
+  async function patchSecrets(values: Record<string, string>) {
     const r = await fetch(secretsUrl, {
       method: 'PATCH',
       headers: apiHeaders(sdk),
       credentials: 'include',
-      body: JSON.stringify({ [name]: { value } }),
+      body: JSON.stringify(Object.fromEntries(Object.entries(values).map(([name, value]) => [name, { value }]))),
     })
     if (!r.ok) throw new Error(r.status === 403 ? t('msg.forbidden') : t('msg.saveFailed', { status: r.status }))
   }
 
+  async function patchSecret(name: string, value: string) {
+    await patchSecrets({ [name]: value })
+  }
+
   async function persistAuth() {
-    // Only keep the fields relevant to the selected mode (+ mode itself).
     const keep: (keyof AuthConfig)[] = ['mode', ...FIELDS[auth.mode].map((f) => f.key)]
-    const payload: AuthConfig = { mode: auth.mode }
-    for (const k of keep) if (auth[k]) (payload as any)[k] = auth[k]
-    await patchSecret(AUTH_SECRET, payload)
+    const values = Object.fromEntries(Object.values(AUTH_SECRETS).map((name) => [name, ''])) as Record<string, string>
+    for (const key of keep) values[AUTH_SECRETS[key]] = String(auth[key] || '')
+    await patchSecrets(values)
   }
 
   async function saveAuth() {
@@ -442,7 +469,7 @@ function ConfigApp(props: Props) {
           status_url: wh('oauthStatus'),
           connect_url: wh('oauthConnect'),
           disconnect_url: wh('oauthDisconnect'),
-          scopes: (auth.scopes || 'api refresh_token offline_access').split(/[\s,]+/).filter(Boolean),
+      scopes: (auth.oauthScopes || '').split(/[\s,]+/).filter(Boolean),
         }
       }
       const tr = await fetch(`${agentFactory}/agents/${a.id}/tools`, {
@@ -496,7 +523,7 @@ function ConfigApp(props: Props) {
           status_url: wh('oauthStatus'),
           connect_url: wh('oauthConnect'),
           disconnect_url: wh('oauthDisconnect'),
-          scopes: (auth.scopes || 'api refresh_token offline_access').split(/[\s,]+/).filter(Boolean),
+        scopes: (auth.oauthScopes || '').split(/[\s,]+/).filter(Boolean),
         }
       : null
 

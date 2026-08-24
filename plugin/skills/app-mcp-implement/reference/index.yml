@@ -1,11 +1,9 @@
-id: PvCEGmC
-name: Salesforce Next
+name: SalesforceNext
 slug: salesforce-next
-description: App + MCP connector for Salesforce CRM (REST API v62.0) — tenant-context model. The MCP endpoint runs in the tenant app-instance context; agents are identified through injected scope and checked against the tenant allowlist. Service-to-service auth uses OAuth2 JWT Bearer (Connected App) for both MCP and App-mode calls.
+description: App + MCP connector for Salesforce CRM — tenant-context model. Provider endpoints, API version, OAuth scopes and credentials are configured through tenant secrets.
 labels:
 - app-mcp
-- production:app
-photo: https://api.sandbox.prisme.ai/v2/files/PvCEGmC/F_WsSaPFE6Inge7jMJHcE.salesforce-next-logo.png
+photo: <uploaded-logo-url>
 customDomains: []
 repositories: {}
 config:
@@ -15,24 +13,31 @@ config:
   # in sync on every redeploy. The SPA must detect the maintainer view via
   # `workspace.slug === CENTRAL_SLUG` (NOT the absence of ?workspaceId=) and read
   # tenant/instance from props. The configAppUrl link below stays as the fallback.
-  block: https://api.sandbox.prisme.ai/v2/files/PvCEGmC/YfUjk5Wd1i0BfRSM9gYKv.bundle.js
+  block: <uploaded-bundle-url>
   schema:
     configAppUrl:
       type: string
       title: Configuration app
       description: Open this link to configure the connector (authentication + authorized agents) for this workspace. Auto-generated on install.
       readOnly: true
-    apiVersion:
-      type: string
-      title: REST API Version
-      description: Salesforce REST API version (e.g. v62.0).
   value:
-    apiVersion: v62.0
-    salesforceNextAuth: '{{secret.salesforceNextAuth}}'
+    salesforceNextAuthMode: '{{secret.salesforceNextAuthMode}}'
+    salesforceNextLoginHost: '{{secret.salesforceNextLoginHost}}'
+    salesforceNextOAuthAuthorizeUrl: '{{secret.salesforceNextOAuthAuthorizeUrl}}'
+    salesforceNextOAuthTokenUrl: '{{secret.salesforceNextOAuthTokenUrl}}'
+    salesforceNextOAuthRevokeUrl: '{{secret.salesforceNextOAuthRevokeUrl}}'
+    salesforceNextApiVersion: '{{secret.salesforceNextApiVersion}}'
+    salesforceNextJwtUsername: '{{secret.salesforceNextJwtUsername}}'
+    salesforceNextOAuthClientId: '{{secret.salesforceNextOAuthClientId}}'
+    salesforceNextOAuthClientSecret: '{{secret.salesforceNextOAuthClientSecret}}'
+    salesforceNextJwtPrivateKey: '{{secret.salesforceNextJwtPrivateKey}}'
+    salesforceNextAccessToken: '{{secret.salesforceNextAccessToken}}'
+    salesforceNextInstanceUrl: '{{secret.salesforceNextInstanceUrl}}'
+    salesforceNextOAuthScopes: '{{secret.salesforceNextOAuthScopes}}'
     salesforceNextAuthorizedAgents: '{{secret.salesforceNextAuthorizedAgents}}'
     bundles:
       salesforce-next:
-        bundle: https://api.sandbox.prisme.ai/v2/files/PvCEGmC/YfUjk5Wd1i0BfRSM9gYKv.bundle.js
+        bundle: <uploaded-bundle-url>
         name: salesforce-next
         version: 0.1.0
     mcpTools:
@@ -844,14 +849,60 @@ config:
             description: Response format for the MCP client.
 secrets:
   schema:
-    salesforceNextAuth:
-      type: object
-      title: Salesforce auth config
-      description: Auth mode + credentials, managed by the connector config app.
+    salesforceNextAuthMode:
+      type: string
+      title: Salesforce auth mode
+      ui:widget: password
+    salesforceNextLoginHost:
+      type: string
+      title: Salesforce login host
+      ui:widget: password
+    salesforceNextOAuthAuthorizeUrl:
+      type: string
+      title: Salesforce OAuth authorize URL
+      ui:widget: password
+    salesforceNextOAuthTokenUrl:
+      type: string
+      title: Salesforce OAuth token URL
+      ui:widget: password
+    salesforceNextOAuthRevokeUrl:
+      type: string
+      title: Salesforce OAuth revoke URL
+      ui:widget: password
+    salesforceNextApiVersion:
+      type: string
+      title: Salesforce API version
+      ui:widget: password
+    salesforceNextJwtUsername:
+      type: string
+      title: Salesforce JWT username
+      ui:widget: password
+    salesforceNextOAuthClientId:
+      type: string
+      title: Salesforce OAuth client id
+      ui:widget: password
+    salesforceNextOAuthClientSecret:
+      type: string
+      title: Salesforce OAuth client secret
+      ui:widget: password
+    salesforceNextJwtPrivateKey:
+      type: string
+      title: Salesforce JWT private key
+      ui:widget: password
+    salesforceNextAccessToken:
+      type: string
+      title: Salesforce access token
+      ui:widget: password
+    salesforceNextInstanceUrl:
+      type: string
+      title: Salesforce instance URL
+      ui:widget: password
+    salesforceNextOAuthScopes:
+      type: string
+      title: Salesforce OAuth scopes
       ui:widget: password
     salesforceNextAuthorizedAgents:
       type: string
       title: Authorized agents (allowlist)
       description: Comma-separated agentIds, managed by the config app.
       ui:widget: password
-registerWorkspace: true

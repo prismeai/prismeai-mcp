@@ -2,7 +2,7 @@ slug: oauthCallback
 name: OAuth/oauthCallback
 description: >-
   OAuth2 authorization-code callback. Validates state, exchanges the code at
-  {loginHost}/services/oauth2/token (config.auth creds + stored code_verifier),
+  {loginHost}/services/oauth2/token (field-level config creds + stored code_verifier),
   stores the token in user scope, then redirects (meta-refresh, CSP-safe) to the
   config SPA callback view (?view=oauthCallback&status=…) which shows the result
   and auto-closes the popup. The redirect URI must equal config.oauthCallbackUrl.
@@ -31,24 +31,32 @@ do:
       name: pending
       value: '{{user.salesforceNext.oauthPending}}'
   - conditions:
-      '!{{query.code}} || !{{query.state}} || {{query.state}} != {{pending.state}}':
+      '!{{query.code}} or !{{query.state}} or {{query.state}} != {{pending.state}}':
         - set:
             name: redirectTo
             value: '{{spaBase}}&status=error&message=invalid_state'
         - break: {}
   - set:
       name: a
-      value: '{{config.auth}}'
+      value:
+        loginHost: '{{config.loginHost}}'
+        oauthClientId: '{{config.oauthClientId}}'
+        oauthClientSecret: '{{config.oauthClientSecret}}'
   - Custom Code.run:
-      function: normalizeLoginHost
+      function: makeTokenCacheKey
       parameters:
-        rawHost: '{{a.loginHost}}'
-      output: lh
-  - set:
-      name: loginHost
-      value: '{{lh.host}}'
+        tenantId: '{{global.workspaceId}}'
+        clientId: '{{a.oauthClientId}}'
+        scopes: '{{a.oauthScopes}}'
+      output: tokenCache
+  - conditions:
+      '{{tokenCache.error}} or !{{a.oauthTokenUrl}}':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message=missing_secret_backed_oauth_config'
+        - break: {}
   - fetch:
-      url: '{{loginHost}}/services/oauth2/token'
+      url: '{{a.oauthTokenUrl}}'
       method: POST
       headers:
         Content-Type: application/x-www-form-urlencoded
@@ -66,7 +74,7 @@ do:
       '{{tokenResp.status}} != 200':
         - set:
             name: redirectTo
-            value: '{{spaBase}}&status=error&message={{tokenResp.body.error}}'
+            value: '{{spaBase}}&status=error&message=token_exchange_rejected'
         - break: {}
   - set:
       name: oauthTtlSec
@@ -78,7 +86,8 @@ do:
         accessToken: '{{tokenResp.body.access_token}}'
         refreshToken: '{{tokenResp.body.refresh_token}}'
         instanceUrl: '{{tokenResp.body.instance_url}}'
-        scopes: '{{tokenResp.body.scope}}'
+        scopes: '{{a.oauthScopes}}'
+        cacheKey: '{{tokenCache.key}}'
         connectedAt: '{{run.date}}'
         expiresAt: '{% date({{run.date}}).ts + ({{oauthTtlSec}} * 1000) %}'
   - comment: >-
@@ -91,9 +100,10 @@ do:
       function: makeTokenSecretName
       parameters:
         userId: '{{user.id}}'
+        cacheKey: '{{tokenCache.key}}'
       output: tokName
   - conditions:
-      '!{{tokName.error}} && {{tokenResp.body.refresh_token}}':
+      '!{{tokName.error}} and {{tokenResp.body.refresh_token}}':
         - try:
             do:
               - run:
