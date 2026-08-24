@@ -1,8 +1,8 @@
 # Manual Setup Guide
 
-This guide covers manual MCP configuration for Claude Desktop, Cursor, and other clients that do not install Codex or Claude Code plugins directly.
+This guide covers manual MCP configuration for Claude Desktop, Cursor, and other clients that do not install plugins directly.
 
-For Claude Code or Codex, prefer the plugin install flow in [README.md](../README.md) or [Quick Start](./QUICK_START.md). For local repository development, use [Development](./DEVELOPMENT.md).
+For Claude Code, Codex, or VS Code Copilot, prefer the plugin install flow in [README.md](../README.md) or [Quick Start](./QUICK_START.md). For local repository development, use [Development](./DEVELOPMENT.md).
 
 ## Prerequisites
 
@@ -134,6 +134,41 @@ Config file location:
 Use the same configuration format as Claude Desktop above.
 
 After configuration, restart Cursor to load the MCP server.
+
+## VS Code Copilot Configuration
+
+VS Code installs this repository as an agent plugin, which wires the MCP server for you — use [VS Code Copilot](../README.md#vs-code-copilot) in the README instead. Configure it manually only when the plugin install is unavailable, for example behind a marketplace allowlist that excludes `prismeai/prismeai-mcp`.
+
+VS Code uses its own MCP schema: the top-level key is `servers` (not `mcpServers`) and each entry declares a `type`.
+
+Config file location:
+- **Per project**: `.vscode/mcp.json` in the workspace
+- **Global**: Command Palette → `MCP: Open User Configuration`
+
+```json
+{
+  "servers": {
+    "prisme-ai-builder": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/prismeai-mcp/plugin/build/index.js"],
+      "env": {
+        "PRISME_CONFIG_DIR": "${userHome}/.prisme-ai-mcp"
+      }
+    }
+  }
+}
+```
+
+The same entry can be added from a terminal:
+
+```bash
+code --add-mcp '{"name":"prisme-ai-builder","type":"stdio","command":"node","args":["'"$HOME"'/dev/prismeai-mcp/plugin/build/index.js"],"env":{"PRISME_CONFIG_DIR":"'"$HOME"'/.prisme-ai-mcp"}}'
+```
+
+Register tokens with `set-token` against the same `--config-dir` as `PRISME_CONFIG_DIR`, then start the server from the Command Palette with `MCP: List Servers` → **Start Server**. Enable the tools in Copilot Chat's **Agent** mode through the tools picker.
+
+Every environment variable in the table above applies, including `PRISME_FORCE_READONLY` and `PRISME_DISABLE_FEEDBACK_TOOLS`. A manual server entry exposes the tools only — the bundled skills come with the plugin install.
 
 ## Multi-Environment Details
 
