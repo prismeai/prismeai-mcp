@@ -7,13 +7,17 @@ photo: <uploaded-logo-url>
 customDomains: []
 repositories: {}
 config:
-  # Inline config UI (Gotcha 31): point `block` at the SAME bundle URL as
+  # Inline config UI (Gotcha 31): point `block` at the SAME bundle ref as
   # config.value.bundles[<slug>].bundle so the one-product builder renders the
   # SPA inline as the config UI (instead of the schema form). Keep block + bundles
-  # in sync on every redeploy. The SPA must detect the maintainer view via
-  # `workspace.slug === CENTRAL_SLUG` (NOT the absence of ?workspaceId=) and read
-  # tenant/instance from props. The configAppUrl link below stays as the fallback.
-  block: <uploaded-bundle-url>
+  # in sync on every redeploy. Bundle refs are RELATIVE paths
+  # (files/<workspaceId>/<slug>-config-bundle-<YYYYMMDD>.js) — never absolute
+  # URLs — so the workspace stays portable across environments; AppRenderer
+  # resolves them against the current API host. The SPA must detect the
+  # maintainer view via `workspace.slug === CENTRAL_SLUG` (NOT the absence of
+  # ?workspaceId=) and read tenant/instance from props. The configAppUrl link
+  # below stays as the fallback.
+  block: files/<workspace-id>/<uploaded-bundle-file>.js
   schema:
     configAppUrl:
       type: string
@@ -37,9 +41,12 @@ config:
     salesforceNextAuthorizedAgents: '{{secret.salesforceNextAuthorizedAgents}}'
     bundles:
       salesforce-next:
-        bundle: <uploaded-bundle-url>
+        # Relative path, same value as config.block above. Example:
+        # files/7oQvI6Q/BPxcvrXvnzTiJzzRlB71e.salesforce-next-config-bundle-20260804.js
+        bundle: files/<workspace-id>/<uploaded-bundle-file>.js
         name: salesforce-next
         version: 0.1.0
+        builtAt: '<deploy-iso-timestamp>'
     mcpTools:
     - name: versions
       description: 'Discovery — REST API versions, available resources, org limits and recently-viewed items.
