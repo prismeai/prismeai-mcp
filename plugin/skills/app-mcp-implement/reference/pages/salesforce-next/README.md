@@ -194,10 +194,10 @@ The deploy script does eight steps in order:
 | 0 | **Conflict detection** | Reads `.prismeai/last-pull.json`, refuses if remote diverged from your last pull. Pre-flight check; no state change. | `--force` flag, `PRISMEAI_FORCE=true` |
 | 1 | **Automations sync** | Walks `automations/**/*.yml`, parses each, upserts via `POST/PATCH /workspaces/:id/automations[/:slug]`. Deletes any remote slug not present locally. | `PRISMEAI_SKIP_AUTOMATIONS_SYNC=true` |
 | 2 | **Source files sync** | Walks `src/` + root config files, SHA-256 hashes each, diffs against existing `metadata.type=source` files. Uploads new, replaces changed, deletes removed. | `PRISMEAI_SKIP_SOURCE_SYNC=true` |
-| 3 | **Bundle upload** | `POST /workspaces/:id/files` (`public=true`) — returns the CDN URL. | — |
+| 3 | **Bundle upload** | `POST /workspaces/:id/files` (`public=true`) as `<slug>-config-bundle-<YYYYMMDD>.js` — returns the file URL. | — |
 | 4 | **embed.js upload** | Fetches `${PRISMEAI_PLATFORM_URL}/embed.js` and uploads as a public file. Only needed for 3rd-party `<script>` embedding. | unset `PRISMEAI_PLATFORM_URL` |
-| 5 | **Patch workspace config** | `PATCH /workspaces/:id` writes `config.value.bundles[<slug>] = { bundle, embed?, version, name, builtAt }`. **This is the live pointer `AppRenderer` reads on every page load.** | — |
-| 6 | **Cleanup orphan bundles** | Lists all public `bundle.js` / `embed.js` files; deletes any not currently referenced in `bundles[*]`. Stops storage growth. | `PRISMEAI_SKIP_BUNDLE_CLEANUP=true` |
+| 5 | **Patch workspace config** | `PATCH /workspaces/:id` writes `config.value.bundles[<slug>] = { bundle, embed?, version, name, builtAt }`, where `bundle` (and `config.block`) is the **relative path** `files/<workspaceId>/<file>.js` — never an absolute URL, so the workspace stays portable across environments. **This is the live pointer `AppRenderer` reads on every page load.** | — |
+| 6 | **Cleanup orphan bundles** | Lists all public `*-config-bundle-*.js` (plus legacy `bundle.js`) / `embed.js` files; deletes any not currently referenced in `bundles[*]`. Stops storage growth. | `PRISMEAI_SKIP_BUNDLE_CLEANUP=true` |
 | 7 | **Smoke test** | Resolves `/pages/<slug>/_bundle`, fetches the bundle JS, parse-checks via `new Function(...)`, verifies the CJS exports pattern is present. Catches "deploy succeeded but bundle is broken". | `PRISMEAI_SKIP_SMOKE=true` |
 | 8 | **Version snapshot** | `POST /workspaces/:id/versions` creates a Prisme.ai workspace version. | `PRISMEAI_SKIP_VERSION_SNAPSHOT=true` |
 

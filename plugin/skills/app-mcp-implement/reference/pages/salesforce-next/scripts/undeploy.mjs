@@ -97,11 +97,20 @@ console.log(`✓ Workspace config updated. /apps/${slug} no longer serves a bund
 
 if (PURGE) {
   console.log(`→ Purging bundle/embed files`)
+  // Refs are stored as relative paths (files/...); legacy configs may hold
+  // absolute URLs. Normalize both sides before comparing against f.url.
+  const toRelative = (u) => {
+    if (!u) return null
+    if (!/^https?:\/\//.test(u)) return u.replace(/^\//, '')
+    if (u.startsWith(`${API_BASE}/`)) return u.slice(API_BASE.length + 1)
+    const m = u.match(/\/v2\/(files\/.+)$/)
+    return m ? m[1] : u
+  }
+  const targets = new Set([toRelative(target.bundle), toRelative(target.embed)].filter(Boolean))
   const list = await api('GET', `/workspaces/${PRISMEAI_WORKSPACE_ID}/files?limit=1000`)
   const files = Array.isArray(list) ? list : list?.result || []
   const toDelete = files.filter(f =>
-    f.public === true &&
-    (f.url === target.bundle || (target.embed && f.url === target.embed))
+    f.public === true && targets.has(toRelative(f.url))
   )
   for (const f of toDelete) {
     await api('DELETE', `/workspaces/${PRISMEAI_WORKSPACE_ID}/files/${encodeURIComponent(f.id)}`)

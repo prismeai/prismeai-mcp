@@ -15,7 +15,9 @@
  *      a 3rd-party site. Skipped unless PRISMEAI_PLATFORM_URL is set.
  *
  *   4. PATCH workspace.config.value.bundles[<slug>] so AppRenderer picks up
- *      the new bundle URL.
+ *      the new bundle. The pointer is stored as a RELATIVE path
+ *      (files/<workspaceId>/<slug>-config-bundle-<YYYYMMDD>.js), never an
+ *      absolute URL, so the workspace stays portable across environments.
  *
  *   5. POST /workspaces/:id/versions to snapshot a Prisme version.
  *
@@ -126,6 +128,23 @@ const API_BASE = PRISMEAI_API_URL.replace(/\/$/, '')
 const AUTH_HEADERS = PRISMEAI_ACCESS_TOKEN
   ? { Authorization: `Bearer ${PRISMEAI_ACCESS_TOKEN}` }
   : { 'x-prismeai-api-key': PRISMEAI_API_KEY }
+
+// config.value.bundles / config.block store the bundle as a RELATIVE path
+// (`files/<workspaceId>/<file>.js`), never an absolute URL, so the workspace
+// stays portable across environments (dev/prod API hosts differ). AppRenderer
+// resolves the relative path against the current API host.
+function toRelativeFilePath(url) {
+  if (!url) return null
+  if (!/^https?:\/\//.test(url)) return url.replace(/^\//, '')
+  if (url.startsWith(`${API_BASE}/`)) return url.slice(API_BASE.length + 1)
+  const m = url.match(/\/v2\/(files\/.+)$/)
+  return m ? m[1] : null
+}
+
+function toAbsoluteFileUrl(ref) {
+  if (!ref) return ref
+  return /^https?:\/\//.test(ref) ? ref : `${API_BASE}/${ref.replace(/^\//, '')}`
+}
 
 // HTTP timeout (default 30s) + retry on 5xx/network errors with exponential
 // backoff. 4xx are deterministic client errors and never retried.
@@ -520,13 +539,18 @@ async function uploadSourceFile(relPath, content, hash) {
 // 2. Upload bundle (parity with useAppBuild step 2)
 // ---------------------------------------------------------------------------
 
-async function uploadBundle() {
+async function uploadBundle(slug) {
   const bundleBytes = await readFile(BUNDLE_PATH).catch(() =>
     fail('dist/bundle.js not found — run `npm run build` first.')
   )
-  console.log(`→ Uploading bundle (${(bundleBytes.length / 1024).toFixed(1)} KB)`)
+  // New filename each deploy (AppRenderer/browser cache aggressively):
+  // <slug>-config-bundle-<YYYYMMDD>.js — the platform prefixes a random id on
+  // top, so same-day redeploys still get a distinct URL.
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const filename = `${slug}-config-bundle-${stamp}.js`
+  console.log(`→ Uploading bundle ${filename} (${(bundleBytes.length / 1024).toFixed(1)} KB)`)
   const fd = new FormData()
-  fd.append('file', new Blob([bundleBytes], { type: 'application/javascript' }), 'bundle.js')
+  fd.append('file', new Blob([bundleBytes], { type: 'application/javascript' }), filename)
   fd.append('public', 'true')
   const res = await api('POST', `/workspaces/${PRISMEAI_WORKSPACE_ID}/files`, { body: fd })
   if (!Array.isArray(res) || !res[0]?.url) {
@@ -575,6 +599,14 @@ async function patchWorkspaceConfig({ bundleUrl, embedUrl, ws, slug }) {
   const existingBundles = existing.bundles || {}
   const builtAt = new Date().toISOString()
 
+  // Store RELATIVE paths (files/<workspaceId>/<file>.js), not absolute URLs —
+  // keeps the workspace config portable across environments. config.block must
+  // stay identical to bundles[<slug>].bundle (Gotcha 31), so both get the
+  // relative form. Falls back to the absolute URL only if the file is not
+  // API-hosted (e.g. direct S3 URL we can't relativize).
+  const bundleRef = toRelativeFilePath(bundleUrl) || bundleUrl
+  const embedRef = embedUrl ? (toRelativeFilePath(embedUrl) || embedUrl) : null
+
   // A PATCH on /workspaces/<id> REPLACES the `config` object with what we send,
   // so we must echo back the WHOLE existing config (notably `config.schema`,
   // which defines the configAppUrl link field shown in Studio) and only override
@@ -585,16 +617,16 @@ async function patchWorkspaceConfig({ bundleUrl, embedUrl, ws, slug }) {
       config: {
         ...(ws?.config || {}),
         // Inline config UI (Gotcha 31): keep config.block synced to the new bundle.
-        block: bundleUrl,
+        block: bundleRef,
         value: {
           ...existing,
           bundles: {
             ...existingBundles,
             [slug]: {
-              bundle: bundleUrl,
-              ...(embedUrl ? { embed: embedUrl } : {}),
+              bundle: bundleRef,
+              ...(embedRef ? { embed: embedRef } : {}),
               version: PRISMEAI_APP_VERSION,
-              name: ws?.name || slug,
+              name: slug,
               builtAt,
             },
           },
@@ -648,10 +680,19 @@ async function cleanupOrphanBundles() {
   // Fetch the workspace fresh to get the canonical current bundles map
   const ws = await api('GET', `/workspaces/${PRISMEAI_WORKSPACE_ID}`)
   const bundles = ws?.config?.value?.bundles || {}
+  // Entries may be relative (files/...) or legacy absolute URLs — index both
+  // forms so comparisons against f.url never miss the live bundle.
   const referenced = new Set()
+  const addRef = (ref) => {
+    if (!ref) return
+    referenced.add(ref)
+    referenced.add(toAbsoluteFileUrl(ref))
+    const rel = toRelativeFilePath(ref)
+    if (rel) referenced.add(rel)
+  }
   for (const entry of Object.values(bundles)) {
-    if (entry?.bundle) referenced.add(entry.bundle)
-    if (entry?.embed) referenced.add(entry.embed)
+    addRef(entry?.bundle)
+    addRef(entry?.embed)
   }
 
   // List public files (bundles + embeds are uploaded with public=true)
@@ -659,12 +700,13 @@ async function cleanupOrphanBundles() {
   const files = Array.isArray(list) ? list : list?.result || []
   const candidates = files.filter(f =>
     f.public === true &&
-    (f.name === 'bundle.js' || f.name === 'embed.js')
+    (/-config-bundle-\d{8}\.js$/.test(f.name || '') || f.name === 'bundle.js' || f.name === 'embed.js')
   )
 
   let deleted = 0, kept = 0
   for (const f of candidates) {
-    if (referenced.has(f.url)) {
+    const rel = toRelativeFilePath(f.url)
+    if (referenced.has(f.url) || (rel && referenced.has(rel))) {
       kept++
       continue
     }
@@ -697,11 +739,12 @@ async function smokeTest({ slug }) {
 
   // 1. Resolve via the same endpoint AppRenderer uses
   const resolved = await api('GET', `/pages/${encodeURIComponent(slug)}/_bundle`)
-  const bundleUrl = resolved?.bundles?.[slug]?.bundle
-  if (!bundleUrl) fail(`Smoke: /pages/${slug}/_bundle has no bundles[${slug}].bundle`)
+  const bundleRef = resolved?.bundles?.[slug]?.bundle
+  if (!bundleRef) fail(`Smoke: /pages/${slug}/_bundle has no bundles[${slug}].bundle`)
 
-  // 2. Fetch the bundle (public URL, no auth)
-  const bundleRes = await fetch(bundleUrl)
+  // 2. Fetch the bundle (public file, no auth) — the stored ref is a relative
+  //    path (files/...), resolve it against the API host like AppRenderer does.
+  const bundleRes = await fetch(toAbsoluteFileUrl(bundleRef))
   if (!bundleRes.ok) fail(`Smoke: bundle URL returned ${bundleRes.status} ${bundleRes.statusText}`)
   const code = await bundleRes.text()
   if (code.length === 0) fail(`Smoke: bundle URL returned empty body`)
@@ -838,11 +881,11 @@ try {
   await syncAutomations();             mark('automations', SKIP_AUTOMATIONS_SYNC ? 'skipped' : 'done')
   await syncSourceFiles();             mark('source', SKIP_SOURCE_SYNC ? 'skipped' : 'done')
 
-  bundleUrl = await uploadBundle();    mark('bundle', 'done')
-  embedUrl = await uploadEmbed();      mark('embed', embedUrl ? 'done' : 'skipped')
-
   const ws = await api('GET', `/workspaces/${PRISMEAI_WORKSPACE_ID}`)
   slug = process.env.PRISMEAI_BUNDLE_SLUG || ws?.slug || PRISMEAI_WORKSPACE_ID
+
+  bundleUrl = await uploadBundle(slug); mark('bundle', 'done')
+  embedUrl = await uploadEmbed();      mark('embed', embedUrl ? 'done' : 'skipped')
 
   await patchWorkspaceConfig({ bundleUrl, embedUrl, ws, slug });  mark('config', 'done')
   await publishApp();                  mark('publish', SKIP_PUBLISH ? 'skipped' : 'done')
