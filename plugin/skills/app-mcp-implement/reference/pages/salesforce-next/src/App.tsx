@@ -453,8 +453,8 @@ function ConfigApp(props: Props) {
       }
 
       // 3. add the MCP tool to the agent (names + endpoint + scope; no key).
-      //    For per-user OAuth, attach the capability `auth` block so agent-factory
-      //    drives the per-user connect/status/disconnect flow against this connector.
+      //    `auth` is set in every mode: oauthStatus answers for the current mode, so a
+      //    later switch to a per-user mode still reaches this agent.
       const toolBody: Record<string, unknown> = {
         type: 'mcp',
         name: 'salesforce_next',
@@ -463,14 +463,12 @@ function ConfigApp(props: Props) {
         server: mcpEndpoint,
         scope: 'context_id,agent_id,user_id',
       }
-      if (auth.mode === 'oauth') {
-        toolBody.auth = {
-          type: 'oauth',
-          status_url: wh('oauthStatus'),
-          connect_url: wh('oauthConnect'),
-          disconnect_url: wh('oauthDisconnect'),
-      scopes: (auth.oauthScopes || '').split(/[\s,]+/).filter(Boolean),
-        }
+      toolBody.auth = {
+        type: 'oauth',
+        status_url: wh('oauthStatus'),
+        connect_url: wh('oauthConnect'),
+        disconnect_url: wh('oauthDisconnect'),
+    scopes: (auth.oauthScopes || '').split(/[\s,]+/).filter(Boolean),
       }
       const tr = await fetch(`${agentFactory}/agents/${a.id}/tools`, {
         method: 'POST',
@@ -512,20 +510,17 @@ function ConfigApp(props: Props) {
     ? agents.filter((a) => (a.name || '').toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
     : agents
 
-  // Capability `auth` block (OAuth per-user): carries the connect/status/disconnect
-  // URLs so agent-factory drives the per-user flow on the catalog entry. NOTE the
+  // Capability `auth` block, set in every mode like the tool's: carries the
+  // connect/status/disconnect URLs agent-factory uses for the per-user flow. NOTE the
   // type is `oauth2` here (the Capabilities catalog convention) — distinct from the
   // `oauth` type used for the per-agent tool in installCapability.
-  const catalogAuth: CatalogAuth | null =
-    auth.mode === 'oauth'
-      ? {
-          type: 'oauth2',
-          status_url: wh('oauthStatus'),
-          connect_url: wh('oauthConnect'),
-          disconnect_url: wh('oauthDisconnect'),
-        scopes: (auth.oauthScopes || '').split(/[\s,]+/).filter(Boolean),
-        }
-      : null
+  const catalogAuth: CatalogAuth = {
+    type: 'oauth2',
+    status_url: wh('oauthStatus'),
+    connect_url: wh('oauthConnect'),
+    disconnect_url: wh('oauthDisconnect'),
+  scopes: (auth.oauthScopes || '').split(/[\s,]+/).filter(Boolean),
+  }
 
   return (
     <TooltipProvider delayDuration={200}>
