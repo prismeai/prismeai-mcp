@@ -28,6 +28,7 @@ do:
             value:
               connected: true
               authMethod: '{{statusMode}}'
+              perUser: false
         - break: {}
   - conditions:
       '!{{user.salesforceNext.oauth.accessToken}}':
