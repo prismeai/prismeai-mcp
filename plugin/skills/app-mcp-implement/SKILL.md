@@ -383,6 +383,8 @@ connector.
     
     **Never send both** `downloadUrl` and `text`: Storage prefers `content` over `fetch_url`, so the URL would never be fetched. Decide the shape in Phase 1 — it determines whether large binaries can be ingested at all.
 
+35. **Set the tool / catalog `auth` block in EVERY auth mode — never gate it on the form's mode.** `installCapability` (`toolBody.auth`) and `catalogAuth` must always carry `{type, status_url, connect_url, disconnect_url, scopes}`, whatever `auth.mode` is. The block is baked into the agent's tool (and into every tool added from the catalog entry) at install/publish time, so gating it on `auth.mode === 'oauth'` froze the mode of that moment: an admin who later switched a shared-token connector to a per-user mode left every already-equipped agent with no Connect card and an endless "not connected" (prismeai-platform#379). Always wiring is safe because `oauthStatus` answers `connected: true` outside per-user modes (keep that branch), and `oauthDisconnect` only touches per-user state. Agent Factory and capabilities backfill the tools/entries installed before this rule on every import (`admin-backfill-tool-auth`, `backfill-catalog-tool-auth`), deriving the block from the `<base>.mcp` server URL — so keep the `<instance>.mcp` / `<instance>.oauthStatus|oauthConnect|oauthDisconnect` webhook naming. `scopes` stays display-only (the Connect card's "Required permissions"); `oauthConnect` resolves the real scopes server-side.
+
 ---
 
 ## Reference
