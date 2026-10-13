@@ -4,6 +4,8 @@ Prisme.ai MCP is distributed as a plugin for **Claude Code**, **Codex**, and **V
 
 Clients that are not plugin hosts — Cursor, Claude Desktop — consume the bundled MCP server directly; see [Manual Setup](./docs/MANUAL_SETUP.md).
 
+New to the plugin? Follow the [step-by-step installation guide](https://prismeai.github.io/prismeai-mcp/) (English and French), published from [`site/`](./site/index.html).
+
 ## What You Get
 
 | Component | Description |
@@ -226,6 +228,7 @@ Only plugin maintainers need source-based local setup. Use [Development](./docs/
 | `plugin/skills/` | Bundled Prisme.ai skills |
 | `plugin/agents/` | Claude Code agents |
 | `plugin/llmDoc/` | Prisme.ai documentation exposed to tools |
+| `site/index.html` | Standalone installation guide, deployed to GitHub Pages by `.github/workflows/pages.yml` |
 
 Manual MCP clients bypass all of this and point directly at `plugin/build/index.js`.
 
