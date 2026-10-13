@@ -1,0 +1,1177 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Installer le MCP Prisme.ai</title>
+<meta name="description" content="Guide pas à pas pour installer le MCP Prisme.ai dans Claude Code, Codex, VS Code, Claude Desktop, Cursor ou tout autre client MCP.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg width='116' height='116' viewBox='0 0 116 116' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M58.0049 0.5C71.1792 0.5 81.8592 11.1799 81.8592 24.3542H34.1508C34.1508 11.1799 44.8306 0.5 58.0049 0.5Z' fill='%2398C3F8'/%3E%3Cpath d='M29.373 57.75C29.373 41.9408 42.1888 29.125 57.998 29.125C73.8073 29.125 86.623 41.9408 86.623 57.75C86.623 73.5592 73.8073 86.375 57.998 86.375C42.1888 86.375 29.373 73.5592 29.373 57.75Z' fill='%23255BE0'/%3E%3Cpath d='M24.6042 33.8958C11.4299 33.8958 0.75 44.5756 0.75 57.7499C0.75 70.9242 11.4299 81.6042 24.6042 81.6042V33.8958Z' fill='%2398C3F8'/%3E%3Cpath d='M115.25 57.7499C115.25 70.9242 104.57 81.6042 91.3959 81.6042V33.8958C104.57 33.8958 115.25 44.5756 115.25 57.7499Z' fill='%232541A8'/%3E%3Cpath d='M34.1508 91.1471C34.1508 104.321 44.8306 115.001 58.0049 115.001C71.1792 115.001 81.8592 104.321 81.8592 91.1471H34.1508Z' fill='%232541A8'/%3E%3Cpath d='M91.3959 10.0415C99.3007 10.0415 105.708 16.4494 105.708 24.354H91.3959V10.0415Z' fill='%234480ED'/%3E%3Cpath d='M91.3959 105.458C99.3007 105.458 105.708 99.0505 105.708 91.1458H91.3959V105.458Z' fill='%23233B85'/%3E%3Cpath d='M10.2947 24.3539C10.2947 16.4493 16.7026 10.0414 24.6072 10.0414V24.3539H10.2947Z' fill='%23C2DAFB'/%3E%3Cpath d='M10.2947 91.1471C10.2947 99.0519 16.7026 105.46 24.6072 105.46V91.1471H10.2947Z' fill='%234480ED'/%3E%3C/svg%3E">
+<style>
+@font-face{font-family:"PP Telegraf";src:url("https://uploads.prisme.ai/yj7mmn-/ffcs3WSD7NIciPjlrySpO.PPTelegraf-Regular.otf") format("opentype");font-weight:100 600;font-display:swap}
+@font-face{font-family:"PP Telegraf";src:url("https://uploads.prisme.ai/yj7mmn-/lpdrPfRwHqg0SiRWe_hec.PPTelegraf-Ultrabold.otf") format("opentype");font-weight:700 900;font-display:swap}
+
+:root{
+  --brand:#255BE0; --brand-deep:#2541A8; --brand-night:#233B85; --brand-mid:#4480ED; --sky:#98C3F8; --mist:#C2DAFB;
+  --gradient:linear-gradient(95deg,#7AA8FF 0%,#255BE0 52%,#2541A8 100%);
+  --ink:#242428; --canvas:#F5F5F6; --card:#FFFFFF; --muted:#5F606B; --label:#8A8FA3;
+  --border:#E4E5EA; --soft:#EEF3FE; --soft-ink:#1C3F9E;
+  --code-bg:#141831; --code-fg:#E4E8F7; --code-dim:#8E96BD; --code-border:#262B4D;
+  --warn-bg:#FFF6E6; --warn-border:#F5A623; --warn-ink:#7A4B00;
+  --ok:#1E8E5A;
+  --radius:14px;
+  --font:"PP Telegraf","Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --brand:#5D8BEF; --soft:#18213F; --soft-ink:#B9CCFA;
+    --ink:#ECECF1; --canvas:#0D0E13; --card:#16171E; --muted:#A6A8B6; --label:#8A8FA3;
+    --border:#2A2C37; --code-bg:#0A0C1A; --code-border:#20254A;
+    --warn-bg:#2A2110; --warn-ink:#F5C877; --ok:#4CC38A;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --brand:#5D8BEF; --soft:#18213F; --soft-ink:#B9CCFA;
+  --ink:#ECECF1; --canvas:#0D0E13; --card:#16171E; --muted:#A6A8B6; --label:#8A8FA3;
+  --border:#2A2C37; --code-bg:#0A0C1A; --code-border:#20254A;
+  --warn-bg:#2A2110; --warn-ink:#F5C877; --ok:#4CC38A;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--font);font-size:16.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--brand);text-underline-offset:3px}
+code{font-family:var(--mono);font-size:.88em;background:var(--soft);color:var(--soft-ink);padding:.1em .4em;border-radius:6px;word-break:break-word}
+h1,h2,h3{line-height:1.2;margin:0}
+h2{font-size:clamp(1.45rem,2.6vw,1.8rem);font-weight:700;letter-spacing:-.01em}
+h3{font-size:1.08rem;font-weight:700;margin:1.6rem 0 .5rem}
+p{margin:.6rem 0}
+ul,ol{padding-left:1.25rem;margin:.6rem 0}
+li{margin:.3rem 0}
+.eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--label)}
+
+/* Top bar */
+.topbar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--canvas) 85%,transparent);backdrop-filter:saturate(1.4) blur(10px);-webkit-backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--border)}
+.topbar-inner{max-width:1180px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;gap:16px}
+.logo{display:inline-flex;color:var(--ink)}
+.logo svg{height:28px;width:auto}
+.topbar .eyebrow{border-left:1px solid var(--border);padding-left:16px}
+.spacer{flex:1}
+.theme-btn{font:inherit;font-size:.85rem;color:var(--ink);background:var(--card);border:1px solid var(--border);border-radius:999px;padding:6px 14px;cursor:pointer}
+.theme-btn:hover{border-color:var(--brand)}
+
+html:not([data-lang="en"]) .l10n[lang="en"],html[data-lang="en"] .l10n[lang="fr"]{display:none!important}
+.lang-switch{display:inline-flex;gap:2px;background:var(--card);border:1px solid var(--border);border-radius:999px;padding:3px}
+.lang-btn{font:inherit;font-size:.78rem;font-weight:600;letter-spacing:.05em;color:var(--muted);background:transparent;border:0;border-radius:999px;padding:4px 11px;cursor:pointer}
+.lang-btn:hover{color:var(--ink)}
+.lang-btn[aria-pressed="true"]{background:var(--brand);color:#fff}
+
+/* Hero */
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+.hero{position:relative;overflow:hidden;margin:28px 0 8px;border-radius:24px;background:var(--gradient);color:#fff;padding:56px 48px}
+.hero h1{font-size:clamp(2rem,5vw,3.2rem);font-weight:700;letter-spacing:-.02em;max-width:15ch}
+.hero p{font-size:1.12rem;max-width:56ch;opacity:.94;margin-top:16px}
+.hero .eyebrow{color:rgba(255,255,255,.75)}
+.hero-mark{position:absolute;right:-40px;top:50%;transform:translateY(-50%);width:340px;height:340px;opacity:.16;pointer-events:none}
+.hero-mark path{fill:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
+.chip{font-size:.85rem;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:999px}
+
+/* Layout */
+.layout{display:grid;grid-template-columns:240px minmax(0,1fr);gap:48px;padding:32px 0 64px}
+.toc{position:sticky;top:84px;align-self:start}
+.toc ol{list-style:none;padding:0;margin:10px 0 0;counter-reset:t}
+.toc li{margin:0}
+.toc a{display:flex;gap:10px;padding:7px 10px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:.93rem}
+.toc a:hover{background:var(--card);color:var(--ink)}
+.toc a.active{background:var(--soft);color:var(--soft-ink);font-weight:500}
+.toc a span{font-family:var(--mono);font-size:.78rem;color:var(--label);min-width:1.4em;padding-top:2px}
+main{min-width:0;max-width:800px}
+.steps>li,.panel,.tabs,details,.card{min-width:0}
+section{scroll-margin-top:80px;padding:8px 0 40px;border-bottom:1px solid var(--border);margin-bottom:40px}
+section:last-of-type{border-bottom:0}
+.sec-head{display:flex;align-items:center;gap:14px;margin-bottom:12px}
+.num{flex:none;width:40px;height:40px;border-radius:12px;background:var(--gradient);color:#fff;display:grid;place-items:center;font-weight:700;font-size:1.05rem;box-shadow:0 6px 18px -8px rgba(37,91,224,.7)}
+.num.alt{background:var(--soft);color:var(--soft-ink);box-shadow:none}
+.lead{color:var(--muted);font-size:1.04rem}
+
+/* Cards */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:18px 0}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px 18px 16px}
+.card h4{margin:0 0 6px;font-size:1rem;font-weight:600;display:flex;align-items:center;gap:10px}
+.card p{margin:0;color:var(--muted);font-size:.93rem}
+.card .tools{margin-top:10px;font-family:var(--mono);font-size:.74rem;color:var(--label);line-height:1.7}
+.dot{width:10px;height:10px;border-radius:3px;flex:none}
+
+/* Callouts */
+.callout{display:flex;gap:14px;border-radius:var(--radius);padding:16px 18px;margin:18px 0;border:1px solid var(--border);background:var(--card)}
+.callout .ico{flex:none;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-weight:700;font-size:.95rem}
+.callout p{margin:.2rem 0}
+.callout.info{background:var(--soft);border-color:transparent}
+.callout.info .ico{background:var(--brand);color:#fff}
+.callout.warn{background:var(--warn-bg);border-color:var(--warn-border)}
+.callout.warn .ico{background:var(--warn-border);color:#fff}
+.callout.warn strong{color:var(--warn-ink)}
+.callout.ok .ico{background:var(--ok);color:#fff}
+
+/* Steps inside a section */
+.steps{list-style:none;padding:0;margin:16px 0;counter-reset:s}
+.steps>li{position:relative;padding:0 0 18px 44px;margin:0;counter-increment:s}
+.steps>li::before{content:counter(s);position:absolute;left:0;top:0;width:28px;height:28px;border-radius:50%;background:var(--card);border:1.5px solid var(--brand);color:var(--brand);font-weight:700;font-size:.85rem;display:grid;place-items:center}
+.steps>li::after{content:"";position:absolute;left:13.5px;top:32px;bottom:4px;width:1.5px;background:var(--border)}
+.steps>li:last-child::after{display:none}
+.steps>li>strong:first-child{display:block;margin-bottom:2px}
+
+/* Code */
+.code{position:relative;margin:12px 0 16px;border-radius:12px;background:var(--code-bg);border:1px solid var(--code-border);overflow:hidden}
+.code .bar{display:flex;align-items:center;justify-content:space-between;padding:7px 8px 7px 14px;border-bottom:1px solid var(--code-border);font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--code-dim)}
+.code pre{margin:0;padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:.84rem;line-height:1.65;color:var(--code-fg);tab-size:2}
+.code pre code{background:none;color:inherit;padding:0;font-size:inherit;border-radius:0;word-break:normal}
+.code .c{color:var(--code-dim)}
+.code .k{color:#98C3F8}
+.code .s{color:#A9E1C3}
+.copy{font:inherit;font-size:.72rem;letter-spacing:.04em;text-transform:none;color:var(--code-fg);background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:4px 10px;cursor:pointer}
+.copy:hover{background:rgba(255,255,255,.14)}
+.copy.done{color:#A9E1C3;border-color:#A9E1C3}
+
+/* Tabs */
+.tabs{margin-top:18px;background:var(--card);border:1px solid var(--border);border-radius:18px;overflow:hidden}
+.tablist{display:flex;gap:4px;padding:8px;overflow-x:auto;border-bottom:1px solid var(--border);background:var(--canvas);scrollbar-width:thin}
+.tab{font:inherit;font-size:.92rem;white-space:nowrap;border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:8px}
+.tab:hover{color:var(--ink);background:var(--card)}
+.tab[aria-selected="true"]{background:var(--card);color:var(--ink);font-weight:600;box-shadow:0 1px 0 var(--border),0 0 0 1px var(--border)}
+.tab .badge{font-size:.68rem;font-weight:500;padding:1px 7px;border-radius:999px;background:var(--soft);color:var(--soft-ink)}
+.panel{padding:22px 24px 8px}
+.panel[hidden]{display:none}
+.panel h3:first-child{margin-top:0}
+.panel-title{display:block;font-size:1.05rem;font-weight:700;margin:0 0 8px;color:var(--brand)}
+.js .panel-title{display:none}
+.tablist{display:none}
+.js .tablist{display:flex}
+
+/* Tables */
+.table-wrap{overflow-x:auto;margin:14px 0;border:1px solid var(--border);border-radius:12px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+th{font-family:var(--mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--label);font-weight:500;background:var(--canvas)}
+tr:last-child td{border-bottom:0}
+td code{white-space:nowrap}
+
+/* Accordions */
+details{background:var(--card);border:1px solid var(--border);border-radius:12px;margin:10px 0;padding:0 18px}
+summary{cursor:pointer;padding:14px 0;font-weight:600;list-style:none;display:flex;gap:12px;align-items:center}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"+";flex:none;width:22px;height:22px;border-radius:6px;background:var(--soft);color:var(--soft-ink);display:grid;place-items:center;font-weight:700}
+details[open] summary::before{content:"–"}
+details>div{padding:0 0 14px 34px;color:var(--ink)}
+
+/* Prompt examples */
+.prompts{display:grid;gap:10px;margin:14px 0}
+.prompt{display:flex;gap:12px;align-items:flex-start;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+.prompt::before{content:"›";color:var(--brand);font-weight:700;font-size:1.2rem;line-height:1.2}
+
+footer{border-top:1px solid var(--border);padding:32px 0 48px;color:var(--muted);font-size:.9rem}
+footer .row{display:flex;flex-wrap:wrap;gap:16px 32px;align-items:center;justify-content:space-between}
+footer .logo svg{height:22px}
+
+@media (max-width:920px){
+  .layout{grid-template-columns:minmax(0,1fr);gap:8px}
+  .toc{position:static;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+  .toc ol{columns:2;column-gap:8px}
+}
+@media (max-width:600px){
+  .topbar-inner,.wrap{padding-left:16px;padding-right:16px}
+  .topbar .eyebrow{display:none}
+  .topbar-inner{gap:10px}
+  .topbar .logo svg{height:22px}
+  .theme-btn{padding:6px 10px;font-size:.8rem}
+  .hero{padding:36px 22px;border-radius:18px;margin-top:16px}
+  .hero-mark{width:220px;height:220px;right:-70px;top:auto;bottom:-60px;transform:none}
+  .toc ol{columns:1}
+  .panel{padding:18px 16px 4px}
+  .steps>li{padding-left:40px}
+  details>div{padding-left:0}
+  body{font-size:16px}
+}
+
+@media print{
+  .topbar,.theme-btn,.lang-switch,.copy,.toc,.tablist{display:none!important}
+  body{background:#fff;color:#000;font-size:11pt}
+  .layout{display:block;padding:0}
+  .hero{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .panel[hidden]{display:block!important}
+  .panel{border-top:1px solid #ddd}
+  .panel-title{display:block;font-size:1.05rem;font-weight:700;margin:0 0 8px;color:#255BE0}
+  .code{-webkit-print-color-adjust:exact;print-color-adjust:exact;break-inside:avoid}
+  .code pre{white-space:pre-wrap;word-break:break-all}
+  section{break-inside:auto}
+  details{break-inside:avoid}
+  details>div{display:block}
+  a{color:inherit}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="logo" href="https://prisme.ai" aria-label="Prisme.ai"><svg role="img" aria-hidden="true" width="441" height="79" viewBox="0 0 441 79" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M127.745 16.21C140.033 16.21 149.097 24.4892 149.097 38.9562C149.097 52.5516 140.033 61.7024 127.745 61.7024C120.25 61.7024 115.196 58.6522 112.494 54.3818V78.6096H105.348V16.7329H111.535L112.494 23.8792C115.457 19.7831 120.25 16.21 127.745 16.21ZM127.048 55.3404C135.85 55.3404 141.776 48.6299 141.776 38.9562C141.776 29.2825 135.85 22.5719 127.048 22.5719C118.333 22.5719 112.407 29.2825 112.407 38.7819C112.407 48.5427 118.333 55.3404 127.048 55.3404Z" fill="currentColor"/><path d="M177.831 16.7329H179.835V23.7049H176.262C166.937 23.7049 164.41 31.4613 164.41 38.5204V61.1795H157.263V16.7329H163.451L164.41 23.4434C166.501 20.0446 169.9 16.7329 177.831 16.7329Z" fill="currentColor"/><path d="M189.69 9.23793C187.075 9.23793 185.071 7.32062 185.071 4.61896C185.071 1.91731 187.075 0 189.69 0C192.305 0 194.309 1.91731 194.309 4.61896C194.309 7.32062 192.305 9.23793 189.69 9.23793ZM186.03 61.1795V16.7329H193.176V61.1795H186.03Z" fill="currentColor"/><path d="M201.136 46.5383H208.457C208.718 51.7673 213.337 55.6019 220.745 55.6019C227.02 55.6019 231.464 52.9002 231.464 48.8042C231.464 43.2265 226.584 42.7908 219.96 42.0064C210.025 40.7863 202.095 38.7819 202.095 29.544C202.095 21.439 209.502 16.1228 219.525 16.21C229.634 16.2971 236.955 21.0032 237.652 30.2412H230.331C229.808 25.7093 225.625 22.3105 219.525 22.3105C213.337 22.3105 209.154 24.925 209.154 29.021C209.154 33.9015 213.86 34.5115 220.309 35.2959C230.418 36.516 238.523 38.4333 238.523 48.2813C238.523 56.5605 230.593 61.7024 220.745 61.7024C209.241 61.7024 201.31 56.2991 201.136 46.5383Z" fill="currentColor"/><path d="M296.045 16.21C305.283 16.21 312.865 21.5261 312.865 35.5573V61.1795H305.718V35.9931C305.718 27.278 301.884 22.7462 295.173 22.7462C287.765 22.7462 283.234 28.3239 283.234 37.3875V61.1795H276.087V35.9931C276.087 27.278 272.166 22.7462 265.368 22.7462C258.047 22.7462 253.603 28.8468 253.603 37.7361V61.1795H246.456V16.7329H252.644L253.603 22.8334C255.956 19.6088 259.703 16.21 266.588 16.21C272.776 16.21 278.092 18.9988 280.619 24.6635C283.321 19.8703 288.114 16.21 296.045 16.21Z" fill="currentColor"/><path d="M342.001 61.7024C328.667 61.7024 319.952 52.5516 319.952 38.9562C319.952 25.4479 328.493 16.21 341.043 16.21C353.592 16.21 361.785 24.1406 362.133 37.3003C362.133 38.259 362.046 39.3048 361.959 40.3506H327.447V40.9606C327.709 49.4142 333.025 55.3404 341.479 55.3404C347.753 55.3404 352.634 52.0287 354.115 46.2768H361.349C359.606 55.1661 352.285 61.7024 342.001 61.7024ZM327.883 34.4244H354.464C353.767 26.7551 348.538 22.4848 341.13 22.4848C334.594 22.4848 328.58 27.1909 327.883 34.4244Z" fill="currentColor"/><path d="M366.523 56.822C366.523 53.8589 368.614 51.9416 371.49 51.9416C374.366 51.9416 376.458 53.8589 376.458 56.822C376.458 59.7851 374.366 61.7024 371.49 61.7024C368.614 61.7024 366.523 59.7851 366.523 56.822Z" fill="currentColor"/><path d="M424.657 54.6432H426.923V61.1795H423.001C417.075 61.1795 415.07 58.6522 414.983 54.2946C412.194 58.3036 407.75 61.7024 400.08 61.7024C390.32 61.7024 383.696 56.822 383.696 48.717C383.696 39.8277 389.884 34.8601 401.562 34.8601H414.634V31.8099C414.634 26.0579 410.538 22.5719 403.566 22.5719C397.292 22.5719 393.108 25.535 392.237 30.0669H385.091C386.136 21.3518 393.196 16.21 403.915 16.21C415.245 16.21 421.781 21.8747 421.781 32.2456V51.6801C421.781 54.0332 422.652 54.6432 424.657 54.6432ZM414.634 43.0522V40.8735H400.865C394.503 40.8735 390.93 43.2266 390.93 48.2813C390.93 52.6388 394.677 55.6019 400.603 55.6019C409.493 55.6019 414.634 50.46 414.634 43.0522Z" fill="currentColor"/><path d="M436.077 9.23793C433.462 9.23793 431.458 7.32062 431.458 4.61896C431.458 1.91731 433.462 0 436.077 0C438.691 0 440.696 1.91731 440.696 4.61896C440.696 7.32062 438.691 9.23793 436.077 9.23793ZM432.417 61.1795V16.7329H439.563V61.1795H432.417Z" fill="currentColor"/><path d="M35.5031 4.5C43.6723 4.5 50.2948 11.1225 50.2948 19.2917H20.7114C20.7114 11.1225 27.3339 4.5 35.5031 4.5Z" fill="#98C3F8"/><path d="M17.7488 40C17.7488 30.1969 25.6957 22.25 35.4988 22.25C45.3019 22.25 53.2488 30.1969 53.2488 40C53.2488 49.8031 45.3019 57.75 35.4988 57.75C25.6957 57.75 17.7488 49.8031 17.7488 40Z" fill="#255BE0"/><path d="M14.7917 25.2083C6.62246 25.2083 0 31.8307 0 39.9999C0 48.1692 6.62246 54.7917 14.7917 54.7917V25.2083Z" fill="#98C3F8"/><path d="M71.0001 39.9999C71.0001 48.1692 64.3776 54.7917 56.2084 54.7917V25.2083C64.3776 25.2083 71.0001 31.8307 71.0001 39.9999Z" fill="#2541A8"/><path d="M20.7114 60.7091C20.7114 68.8783 27.3339 75.5008 35.5031 75.5008C43.6723 75.5008 50.2948 68.8783 50.2948 60.7091H20.7114Z" fill="#2541A8"/><path d="M56.2084 10.4166C61.11 10.4166 65.0834 14.39 65.0834 19.2916H56.2084V10.4166Z" fill="#4480ED"/><path d="M56.2084 69.5832C61.11 69.5832 65.0834 65.6099 65.0834 60.7082H56.2084V69.5832Z" fill="#233B85"/><path d="M5.91855 19.2915C5.91855 14.39 9.89202 10.4165 14.7935 10.4165V19.2915H5.91855Z" fill="#C2DAFB"/><path d="M5.91855 60.7091C5.91855 65.6108 9.89202 69.5841 14.7935 69.5841V60.7091H5.91855Z" fill="#4480ED"/></svg></a>
+    <span class="eyebrow"><span class="l10n" lang="fr">Guide d'installation · MCP</span><span class="l10n" lang="en">Installation guide · MCP</span></span>
+    <span class="spacer"></span>
+    <button class="theme-btn" id="themeBtn" type="button" aria-label="Changer de thème">Thème : auto</button>
+    <div class="lang-switch" role="group" aria-label="Langue / Language"><button type="button" class="lang-btn" data-set-lang="fr" aria-pressed="true" lang="fr">FR</button><button type="button" class="lang-btn" data-set-lang="en" aria-pressed="false" lang="en">EN</button></div>
+  </div>
+</header>
+
+<div class="wrap">
+<div class="l10n" lang="fr">
+  <div class="hero">
+    <svg class="hero-mark" viewBox="0 0 116 116" aria-hidden="true">
+      <path d="M58.0049 0.5C71.1792 0.5 81.8592 11.1799 81.8592 24.3542H34.1508C34.1508 11.1799 44.8306 0.5 58.0049 0.5Z"/>
+      <path d="M29.373 57.75C29.373 41.9408 42.1888 29.125 57.998 29.125C73.8073 29.125 86.623 41.9408 86.623 57.75C86.623 73.5592 73.8073 86.375 57.998 86.375C42.1888 86.375 29.373 73.5592 29.373 57.75Z"/>
+      <path d="M24.6042 33.8958C11.4299 33.8958 0.75 44.5756 0.75 57.7499C0.75 70.9242 11.4299 81.6042 24.6042 81.6042V33.8958Z"/>
+      <path d="M115.25 57.7499C115.25 70.9242 104.57 81.6042 91.3959 81.6042V33.8958C104.57 33.8958 115.25 44.5756 115.25 57.7499Z"/>
+      <path d="M34.1508 91.1471C34.1508 104.321 44.8306 115.001 58.0049 115.001C71.1792 115.001 81.8592 104.321 81.8592 91.1471H34.1508Z"/>
+      <path d="M91.3959 10.0415C99.3007 10.0415 105.708 16.4494 105.708 24.354H91.3959V10.0415Z"/>
+      <path d="M91.3959 105.458C99.3007 105.458 105.708 99.0505 105.708 91.1458H91.3959V105.458Z"/>
+      <path d="M10.2947 24.3539C10.2947 16.4493 16.7026 10.0414 24.6072 10.0414V24.3539H10.2947Z"/>
+      <path d="M10.2947 91.1471C10.2947 99.0519 16.7026 105.46 24.6072 105.46V91.1471H10.2947Z"/>
+    </svg>
+    <span class="eyebrow">Model Context Protocol · prisme-ai-builder</span>
+    <h1>Installer le MCP Prisme.ai</h1>
+    <p>Pilotez votre plateforme Prisme.ai depuis votre assistant IA : workspaces, automations, apps, fichiers, événements et AI Knowledge. Comptez une dizaine de minutes, en quatre étapes.</p>
+    <div class="chips">
+      <span class="chip">Claude Code</span><span class="chip">Codex</span><span class="chip">VS Code Copilot</span><span class="chip">Claude Desktop</span><span class="chip">Cursor</span><span class="chip">Tout client MCP</span>
+    </div>
+  </div>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Sommaire">
+      <span class="eyebrow">Sommaire</span>
+      <ol>
+        <li><a href="#prerequis"><span>00</span>Prérequis</a></li>
+        <li><a href="#installer"><span>01</span>Installer</a></li>
+        <li><a href="#jeton"><span>02</span>Créer un jeton</a></li>
+        <li><a href="#enregistrer"><span>03</span>Enregistrer le jeton</a></li>
+        <li><a href="#verifier"><span>04</span>Vérifier</a></li>
+        <li><a href="#possibilites"><span>+</span>Ce que vous pouvez faire</a></li>
+        <li><a href="#options"><span>+</span>Options</a></li>
+        <li><a href="#maj"><span>+</span>Mettre à jour</a></li>
+        <li><a href="#depannage"><span>?</span>Dépannage</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <!-- ============ PRÉREQUIS ============ -->
+      <section id="prerequis">
+        <div class="sec-head"><div class="num alt">00</div><h2>Avant de commencer</h2></div>
+        <p class="lead">Le MCP Prisme.ai est un petit serveur local que votre assistant IA lance en arrière-plan. Il appelle l'API Prisme.ai avec vos propres droits : l'assistant voit et fait exactement ce que votre compte permet, rien de plus.</p>
+
+        <div class="grid">
+          <div class="card">
+            <h4><span class="dot" style="background:#255BE0"></span>Node.js 18 ou plus</h4>
+            <p>Le serveur MCP s'exécute avec <code>node</code>. Aucune autre installation n'est nécessaire.</p>
+          </div>
+          <div class="card">
+            <h4><span class="dot" style="background:#4480ED"></span>Un compte Prisme.ai</h4>
+            <p>Avec accès au Studio de votre environnement, par exemple <code>studio.prisme.ai</code>.</p>
+          </div>
+          <div class="card">
+            <h4><span class="dot" style="background:#98C3F8"></span>Un client MCP</h4>
+            <p>Claude Code, Codex, VS Code Copilot, Claude Desktop, Cursor ou tout autre client compatible.</p>
+          </div>
+        </div>
+
+        <p>Vérifiez que Node.js est bien disponible dans un terminal :</p>
+        <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copier</button></div><pre><code>node --version
+<span class="c"># Attendu : v18.x.x ou supérieur</span></code></pre></div>
+        <p>Si la commande est introuvable, installez Node.js depuis <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> (ou via <code>nvm</code> / <code>fnm</code>), puis <strong>ouvrez un nouveau terminal</strong>.</p>
+
+        <div class="callout info"><div class="ico">i</div><div>
+          <p><strong>Lancez votre outil depuis un terminal.</strong> Une application ouverte depuis le Dock ou le menu Démarrer ne voit pas toujours le Node.js installé dans votre profil de shell. En cas de doute, démarrez-la depuis le terminal où <code>node --version</code> fonctionne.</p>
+        </div></div>
+      </section>
+
+      <!-- ============ ÉTAPE 1 ============ -->
+      <section id="installer">
+        <div class="sec-head"><div class="num">1</div><h2>Installer le MCP dans votre outil</h2></div>
+        <p class="lead">Choisissez votre outil. Claude Code, Codex et VS Code Copilot installent le MCP comme un <strong>plugin</strong> en deux commandes. Les autres clients pointent directement vers le serveur.</p>
+
+        <div class="tabs">
+          <div class="tablist" role="tablist" aria-label="Choix du client">
+            <button class="tab" role="tab" data-client="claude-code" id="tab-claude-code" aria-controls="panel-claude-code" aria-selected="true">Claude Code <span class="badge">plugin</span></button>
+            <button class="tab" role="tab" data-client="codex" id="tab-codex" aria-controls="panel-codex" aria-selected="false" tabindex="-1">Codex <span class="badge">plugin</span></button>
+            <button class="tab" role="tab" data-client="vscode" id="tab-vscode" aria-controls="panel-vscode" aria-selected="false" tabindex="-1">VS Code Copilot <span class="badge">plugin</span></button>
+            <button class="tab" role="tab" data-client="desktop" id="tab-desktop" aria-controls="panel-desktop" aria-selected="false" tabindex="-1">Claude Desktop</button>
+            <button class="tab" role="tab" data-client="cursor" id="tab-cursor" aria-controls="panel-cursor" aria-selected="false" tabindex="-1">Cursor</button>
+            <button class="tab" role="tab" data-client="other" id="tab-other" aria-controls="panel-other" aria-selected="false" tabindex="-1">Autre client</button>
+          </div>
+
+          <!-- Claude Code -->
+          <div class="panel" role="tabpanel" id="panel-claude-code" aria-labelledby="tab-claude-code">
+            <p class="panel-title">Claude Code</p>
+            <ol class="steps">
+              <li><strong>Ajoutez la marketplace Prisme.ai</strong>Dans une session Claude Code, tapez :
+                <div class="code"><div class="bar"><span>Claude Code</span><button class="copy" type="button">Copier</button></div><pre><code>/plugin marketplace add prismeai/prismeai-mcp</code></pre></div></li>
+              <li><strong>Installez le plugin</strong>
+                <div class="code"><div class="bar"><span>Claude Code</span><button class="copy" type="button">Copier</button></div><pre><code>/plugin install prisme-ai@prismeai-mcp</code></pre></div></li>
+              <li><strong>Rechargez</strong>Si les outils n'apparaissent pas tout de suite, tapez <code>/reload-plugins</code> ou redémarrez la session.</li>
+            </ol>
+            <div class="callout ok"><div class="ico">✓</div><div><p>Le plugin apporte le serveur MCP <code>prisme-ai-builder</code> et des <strong>skills</strong> prêts à l'emploi, par exemple <code>/prisme-ai:guide</code> qui présente tout ce qui est disponible.</p></div></div>
+          </div>
+
+          <!-- Codex -->
+          <div class="panel" role="tabpanel" id="panel-codex" aria-labelledby="tab-codex">
+            <p class="panel-title">Codex</p>
+            <ol class="steps">
+              <li><strong>Ajoutez la marketplace et le plugin</strong>Depuis un terminal :
+                <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copier</button></div><pre><code>codex plugin marketplace add prismeai/prismeai-mcp
+codex plugin add prisme-ai@prismeai-mcp</code></pre></div></li>
+              <li><strong>Démarrez une nouvelle session Codex</strong>Ou redémarrez l'application de bureau pour charger le plugin.</li>
+            </ol>
+            <div class="callout info"><div class="ico">i</div><div><p>Codex peut charger les outils MCP à la demande : formulez une demande qui concerne clairement Prisme.ai (« liste mes workspaces Prisme.ai sur prod ») pour qu'il les active.</p></div></div>
+          </div>
+
+          <!-- VS Code -->
+          <div class="panel" role="tabpanel" id="panel-vscode" aria-labelledby="tab-vscode">
+            <p class="panel-title">VS Code Copilot</p>
+            <p>Nécessite une version de VS Code qui prend en charge les <em>agent plugins</em>.</p>
+            <ol class="steps">
+              <li><strong>Déclarez la marketplace</strong>Ouvrez la palette de commandes, lancez <code>Preferences: Open User Settings (JSON)</code> et ajoutez :
+                <div class="code"><div class="bar"><span>settings.json</span><button class="copy" type="button">Copier</button></div><pre><code><span class="k">"chat.plugins.marketplaces"</span>: [<span class="s">"prismeai/prismeai-mcp"</span>]</code></pre></div></li>
+              <li><strong>Installez le plugin</strong>Ouvrez la vue Extensions (<code>⇧⌘X</code> / <code>Ctrl+Shift+X</code>), recherchez <code>@agentPlugins</code> et installez <strong>prisme-ai</strong>.</li>
+              <li><strong>C'est prêt</strong>Le serveur <code>prisme-ai-builder</code> démarre dès que le plugin est activé. Utilisez Copilot Chat en mode <strong>Agent</strong>.</li>
+            </ol>
+            <h3>Pour toute une équipe</h3>
+            <p>Ajoutez ce fichier au dépôt du projet, dans <code>.github/copilot/settings.json</code>, pour que VS Code propose le plugin à chacun :</p>
+            <div class="code"><div class="bar"><span>.github/copilot/settings.json</span><button class="copy" type="button">Copier</button></div><pre><code>{
+  <span class="k">"extraKnownMarketplaces"</span>: {
+    <span class="k">"prismeai-mcp"</span>: {
+      <span class="k">"source"</span>: { <span class="k">"source"</span>: <span class="s">"github"</span>, <span class="k">"repo"</span>: <span class="s">"prismeai/prismeai-mcp"</span> }
+    }
+  },
+  <span class="k">"enabledPlugins"</span>: {
+    <span class="k">"prisme-ai@prismeai-mcp"</span>: true
+  }
+}</code></pre></div>
+            <details><summary>Installation manuelle (si les plugins sont bloqués chez vous)</summary><div>
+              <p>Clonez le dépôt (voir l'onglet <em>Claude Desktop</em>), puis ouvrez <code>MCP: Open User Configuration</code>. Notez que VS Code utilise la clé <code>servers</code>, pas <code>mcpServers</code> :</p>
+              <div class="code"><div class="bar"><span>mcp.json</span><button class="copy" type="button">Copier</button></div><pre><code>{
+  <span class="k">"servers"</span>: {
+    <span class="k">"prisme-ai-builder"</span>: {
+      <span class="k">"type"</span>: <span class="s">"stdio"</span>,
+      <span class="k">"command"</span>: <span class="s">"node"</span>,
+      <span class="k">"args"</span>: [<span class="s">"/chemin/absolu/vers/prismeai-mcp/plugin/build/index.js"</span>],
+      <span class="k">"env"</span>: {
+        <span class="k">"PRISME_CONFIG_DIR"</span>: <span class="s">"${userHome}/.prisme-ai-mcp"</span>
+      }
+    }
+  }
+}</code></pre></div>
+              <p>Démarrez ensuite le serveur avec <code>MCP: List Servers</code> → <strong>Start Server</strong>. Cette méthode fournit les outils, mais pas les skills du plugin.</p>
+            </div></details>
+          </div>
+
+          <!-- Claude Desktop -->
+          <div class="panel" role="tabpanel" id="panel-desktop" aria-labelledby="tab-desktop">
+            <p class="panel-title">Claude Desktop</p>
+            <ol class="steps">
+              <li><strong>Récupérez le serveur MCP</strong>Clonez le dépôt public dans un dossier de votre choix. Aucune compilation ni <code>npm install</code> n'est nécessaire.
+                <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copier</button></div><pre><code>git clone https://github.com/prismeai/prismeai-mcp.git
+cd prismeai-mcp &amp;&amp; pwd
+<span class="c"># Notez le chemin affiché : vous en aurez besoin juste après</span></code></pre></div></li>
+              <li><strong>Ouvrez le fichier de configuration</strong>Dans Claude Desktop : <em>Réglages → Développeur → Modifier la configuration</em>, ou directement :
+                <ul>
+                  <li>macOS : <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
+                  <li>Windows : <code>%APPDATA%\Claude\claude_desktop_config.json</code></li>
+                </ul></li>
+              <li><strong>Déclarez le serveur</strong>Remplacez le chemin par celui noté à l'étape 1 et <code>vous</code> par votre nom d'utilisateur :
+                <div class="code"><div class="bar"><span>claude_desktop_config.json</span><button class="copy" type="button">Copier</button></div><pre><code>{
+  <span class="k">"mcpServers"</span>: {
+    <span class="k">"prisme-ai-builder"</span>: {
+      <span class="k">"command"</span>: <span class="s">"node"</span>,
+      <span class="k">"args"</span>: [<span class="s">"/chemin/absolu/vers/prismeai-mcp/plugin/build/index.js"</span>],
+      <span class="k">"env"</span>: {
+        <span class="k">"PRISME_CONFIG_DIR"</span>: <span class="s">"/Users/vous/.prisme-ai-mcp"</span>
+      }
+    }
+  }
+}</code></pre></div>
+                Si le fichier contient déjà d'autres serveurs, ajoutez seulement le bloc <code>"prisme-ai-builder"</code> à l'intérieur de <code>"mcpServers"</code>.</li>
+              <li><strong>Redémarrez Claude Desktop</strong>Quittez complètement l'application, puis relancez-la.</li>
+            </ol>
+            <div class="callout info"><div class="ico">i</div><div><p>Ne mettez <strong>pas</strong> votre jeton dans ce fichier : l'étape 3 l'enregistre de façon sécurisée dans le dossier <code>.prisme-ai-mcp</code>.</p></div></div>
+          </div>
+
+          <!-- Cursor -->
+          <div class="panel" role="tabpanel" id="panel-cursor" aria-labelledby="tab-cursor">
+            <p class="panel-title">Cursor</p>
+            <ol class="steps">
+              <li><strong>Récupérez le serveur MCP</strong>
+                <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copier</button></div><pre><code>git clone https://github.com/prismeai/prismeai-mcp.git
+cd prismeai-mcp &amp;&amp; pwd</code></pre></div></li>
+              <li><strong>Ouvrez la configuration MCP de Cursor</strong>
+                <ul>
+                  <li>macOS / Linux : <code>~/.cursor/mcp.json</code></li>
+                  <li>Windows : <code>%APPDATA%\Cursor\mcp.json</code></li>
+                </ul></li>
+              <li><strong>Ajoutez le serveur</strong>
+                <div class="code"><div class="bar"><span>mcp.json</span><button class="copy" type="button">Copier</button></div><pre><code>{
+  <span class="k">"mcpServers"</span>: {
+    <span class="k">"prisme-ai-builder"</span>: {
+      <span class="k">"command"</span>: <span class="s">"node"</span>,
+      <span class="k">"args"</span>: [<span class="s">"/chemin/absolu/vers/prismeai-mcp/plugin/build/index.js"</span>],
+      <span class="k">"env"</span>: {
+        <span class="k">"PRISME_CONFIG_DIR"</span>: <span class="s">"/Users/vous/.prisme-ai-mcp"</span>
+      }
+    }
+  }
+}</code></pre></div></li>
+              <li><strong>Redémarrez Cursor</strong>Le serveur apparaît ensuite dans <em>Settings → MCP</em>.</li>
+            </ol>
+          </div>
+
+          <!-- Autre -->
+          <div class="panel" role="tabpanel" id="panel-other" aria-labelledby="tab-other">
+            <p class="panel-title">Autre client MCP</p>
+            <p>Tout client qui sait lancer un serveur MCP en <strong>stdio</strong> (Windsurf, Zed, Cline, etc.) peut utiliser le MCP Prisme.ai. Clonez le dépôt comme pour Claude Desktop, puis renseignez ces trois éléments dans la configuration MCP de votre outil :</p>
+            <div class="table-wrap"><table>
+              <tr><th>Champ</th><th>Valeur</th></tr>
+              <tr><td>Nom</td><td><code>prisme-ai-builder</code></td></tr>
+              <tr><td>Commande</td><td><code>node</code></td></tr>
+              <tr><td>Arguments</td><td><code>/chemin/absolu/vers/prismeai-mcp/plugin/build/index.js</code></td></tr>
+              <tr><td>Variable d'environnement</td><td><code>PRISME_CONFIG_DIR</code> = votre dossier personnel suivi de <code>/.prisme-ai-mcp</code></td></tr>
+            </table></div>
+            <p>La plupart des outils acceptent le format JSON <code>mcpServers</code> présenté dans l'onglet <em>Claude Desktop</em>.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ÉTAPE 2 ============ -->
+      <section id="jeton">
+        <div class="sec-head"><div class="num">2</div><h2>Créer un jeton d'accès</h2></div>
+        <p class="lead">Le MCP s'authentifie avec un jeton d'API personnel, créé depuis le Studio de votre environnement.</p>
+        <ol class="steps">
+          <li><strong>Ouvrez la page des jetons</strong>Connectez-vous au Studio puis rendez-vous sur <code>/settings/tokens</code>. En production : <a href="https://studio.prisme.ai/settings/tokens" target="_blank" rel="noopener">studio.prisme.ai/settings/tokens</a>. Sur l'hébergement OVH : <a href="https://studio.fr.prisme.ai/settings/tokens" target="_blank" rel="noopener">studio.fr.prisme.ai/settings/tokens</a>.</li>
+          <li><strong>Créez un jeton</strong>Donnez-lui un nom explicite, par exemple « MCP – Claude Code – poste perso », pour pouvoir le révoquer facilement plus tard.</li>
+          <li><strong>Copiez-le</strong>Gardez-le dans votre presse-papiers pour l'étape suivante. Il ne sera plus affiché ensuite.</li>
+        </ol>
+        <div class="callout warn"><div class="ico">!</div><div>
+          <p><strong>Ne collez jamais ce jeton dans la conversation avec l'assistant.</strong> Tout ce que vous écrivez dans le chat est transmis au fournisseur du modèle d'IA. L'étape 3 enregistre le jeton directement sur votre poste, sans passer par le chat.</p>
+        </div></div>
+      </section>
+
+      <!-- ============ ÉTAPE 3 ============ -->
+      <section id="enregistrer">
+        <div class="sec-head"><div class="num">3</div><h2>Enregistrer le jeton sur votre poste</h2></div>
+        <p class="lead">La commande <code>set-token</code> s'exécute dans <strong>votre propre terminal</strong>. Elle demande le jeton en saisie masquée, le vérifie auprès de Prisme.ai, puis l'enregistre localement (fichier <code>credentials.json</code>, lisible par vous seul).</p>
+
+        <div class="callout ok"><div class="ico">✓</div><div>
+          <p><strong>Le plus simple :</strong> demandez quelque chose à votre assistant, par exemple « Liste mes workspaces Prisme.ai sur prod ». Tant qu'aucun jeton n'est enregistré, le MCP répond avec <strong>la commande exacte à copier</strong>, chemins compris. Collez-la dans votre terminal.</p>
+        </div></div>
+
+        <h3>Choisir le nom d'environnement</h3>
+        <div class="table-wrap"><table>
+          <tr><th>Vous utilisez</th><th>Nom</th><th>URL de l'API</th></tr>
+          <tr><td>Prisme.ai SaaS (<code>studio.prisme.ai</code>)</td><td><code>prod</code></td><td><code>https://api.studio.prisme.ai/v2</code></td></tr>
+          <tr><td>Bac à sable Prisme.ai (<code>sandbox.prisme.ai</code>)</td><td><code>sandbox</code></td><td><code>https://api.sandbox.prisme.ai/v2</code></td></tr>
+          <tr><td>Prisme.ai hébergé chez OVH (<code>studio.fr.prisme.ai</code>)</td><td><code>ovh</code></td><td><code>https://api.studio.fr.prisme.ai/v2</code></td></tr>
+          <tr><td>Une instance dédiée ou auto-hébergée</td><td>Au choix, ex. <code>mon-instance</code></td><td>L'URL de votre API, terminée par <code>/v2</code></td></tr>
+        </table></div>
+
+        <h3>Lancer la commande</h3>
+        <p>La forme générale est la suivante. Gardez-la sur <strong>une seule ligne</strong> et ne coupez pas les chemins entre guillemets :</p>
+        <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copier</button></div><pre><code>node "&lt;serveur&gt;/build/index.js" set-token prod --config-dir "&lt;dossier-de-config&gt;"</code></pre></div>
+        <p><strong>Hébergement OVH :</strong> cet environnement n'est pas préconfiguré dans le MCP. Ajoutez ses deux URL à la commande :</p>
+        <div class="code"><div class="bar"><span>Terminal · OVH</span><button class="copy" type="button">Copier</button></div><pre><code>node "&lt;serveur&gt;/build/index.js" set-token ovh --api-url https://api.studio.fr.prisme.ai/v2 --studio-url https://studio.fr.prisme.ai --config-dir "&lt;dossier-de-config&gt;"</code></pre></div>
+
+        <div class="table-wrap"><table>
+          <tr><th>Outil</th><th>&lt;serveur&gt;</th><th>&lt;dossier-de-config&gt;</th></tr>
+          <tr><td>Claude Code</td><td><code>~/.claude/plugins/cache/prismeai-mcp/prisme-ai/&lt;version&gt;</code></td><td><code>~/.claude/plugins/data/prisme-ai-prismeai-mcp</code></td></tr>
+          <tr><td>Codex</td><td colspan="2">Utilisez la commande affichée par le MCP lors de votre première demande.</td></tr>
+          <tr><td>VS Code (plugin)</td><td>Affiché par le MCP lors de votre première demande</td><td><code>~/.prisme-ai-mcp</code></td></tr>
+          <tr><td>Claude Desktop, Cursor, autres</td><td><code>/chemin/absolu/vers/prismeai-mcp/plugin</code></td><td><code>~/.prisme-ai-mcp</code></td></tr>
+        </table></div>
+
+        <p>La commande vous pose ensuite quelques questions :</p>
+        <ol class="steps">
+          <li><strong>Le jeton</strong>Collez-le : rien ne s'affiche à l'écran, c'est normal.</li>
+          <li><strong>Les URL de l'API et du Studio</strong>Validez les valeurs proposées pour <code>prod</code> ou <code>sandbox</code>. Pour <code>ovh</code>, elles sont déjà fournies par la commande ci-dessus.</li>
+          <li><strong>Un certificat d'entreprise (facultatif)</strong>Laissez vide, sauf si votre réseau passe par un proxy qui inspecte le trafic HTTPS : indiquez alors le chemin du fichier <code>.pem</code> fourni par votre service informatique.</li>
+        </ol>
+        <p>Si le jeton est valide, il est enregistré et pris en compte immédiatement : <strong>aucun redémarrage n'est nécessaire</strong>. Un jeton invalide n'est jamais enregistré.</p>
+
+        <details><summary>Instance dédiée ou auto-hébergée</summary><div>
+          <p>Donnez un nom à votre environnement et précisez ses URL en une seule commande :</p>
+          <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copier</button></div><pre><code>node "&lt;serveur&gt;/build/index.js" set-token mon-instance --api-url https://api.mon-domaine.com/v2 --studio-url https://studio.mon-domaine.com --config-dir "&lt;dossier-de-config&gt;"</code></pre></div>
+          <ul>
+            <li>L'URL de l'API doit se terminer par <code>/v2</code>.</li>
+            <li>Ajoutez <code>--node-extra-ca-certs /chemin/vers/ca-entreprise.pem</code> si votre instance utilise un certificat interne.</li>
+            <li>La commande doit pouvoir joindre l'API depuis votre poste (VPN actif, par exemple).</li>
+          </ul>
+          <p>Mentionnez ensuite ce nom dans vos demandes : « … sur mon-instance ».</p>
+        </div></details>
+
+        <details><summary>Plusieurs environnements</summary><div>
+          <p>Relancez simplement <code>set-token</code> une fois par environnement (<code>prod</code>, <code>sandbox</code>, <code>mon-instance</code>…), chacun avec son propre jeton. Précisez ensuite l'environnement voulu dans chaque demande. Si vous nommez un environnement non configuré, le MCP s'arrête au lieu d'en utiliser un autre.</p>
+        </div></details>
+      </section>
+
+      <!-- ============ ÉTAPE 4 ============ -->
+      <section id="verifier">
+        <div class="sec-head"><div class="num">4</div><h2>Vérifier que tout fonctionne</h2></div>
+        <ol class="steps">
+          <li><strong>Les outils sont visibles</strong>Dans Claude Code, tapez <code>@</code> ou <code>/mcp</code> : le serveur <code>prisme-ai-builder</code> doit apparaître comme connecté. Dans les autres outils, cherchez-le dans la liste des serveurs ou des outils MCP.</li>
+          <li><strong>Une première demande</strong>Essayez par exemple :
+            <div class="prompts">
+              <div class="prompt">Liste mes workspaces Prisme.ai sur prod.</div>
+              <div class="prompt">Montre-moi les automations du workspace « nom-du-workspace » sur prod.</div>
+              <div class="prompt">Cherche dans la documentation Prisme.ai comment déclencher une automation par webhook.</div>
+            </div></li>
+          <li><strong>Pour aller plus loin</strong>Dans Claude Code ou Codex, lancez <code>/prisme-ai:guide</code> pour découvrir les skills fournis, et <code>/prisme-ai:prisme-mcp-setup</code> pour vous faire accompagner dans la configuration des environnements.</li>
+        </ol>
+        <div class="callout info"><div class="ico">i</div><div><p><strong>Astuce :</strong> indiquez toujours l'environnement (« sur prod », « sur ovh », « sur sandbox ») dans vos demandes. Par défaut, le MCP cible le bac à sable.</p></div></div>
+      </section>
+
+      <!-- ============ POSSIBILITÉS ============ -->
+      <section id="possibilites">
+        <div class="sec-head"><div class="num alt">+</div><h2>Ce que vous pouvez faire</h2></div>
+        <p class="lead">Une fois connecté, votre assistant dispose d'une quarantaine d'outils, regroupés par domaine. Il choisit lui-même les bons outils selon votre demande.</p>
+        <div class="grid">
+          <div class="card"><h4><span class="dot" style="background:#255BE0"></span>Workspaces</h4><p>Rechercher, créer, exporter et importer des workspaces et leurs versions.</p><div class="tools">search_workspaces · create_workspace · pull_workspace · push_workspace</div></div>
+          <div class="card"><h4><span class="dot" style="background:#2541A8"></span>Automations</h4><p>Lire, créer, modifier, valider et exécuter des automations DSUL.</p><div class="tools">list_automations · get_automation · create_automation · update_automation · validate_automation · execute_automation</div></div>
+          <div class="card"><h4><span class="dot" style="background:#4480ED"></span>Apps</h4><p>Parcourir le catalogue, installer et configurer des apps dans un workspace.</p><div class="tools">list_apps · get_app · install_app_instance · update_app_instance_config</div></div>
+          <div class="card"><h4><span class="dot" style="background:#98C3F8"></span>Fichiers</h4><p>Lister, lire, téléverser et supprimer les fichiers d'un workspace.</p><div class="tools">list_files · get_file · upload_file · delete_file</div></div>
+          <div class="card"><h4><span class="dot" style="background:#233B85"></span>Événements &amp; API</h4><p>Retracer une exécution dans le flux d'événements, appeler l'API.</p><div class="tools">search_events · call_api</div></div>
+          <div class="card"><h4><span class="dot" style="background:#C2DAFB"></span>AI Knowledge</h4><p>Interroger une base de connaissances, gérer ses documents et projets.</p><div class="tools">ai_knowledge_query · ai_knowledge_document · ai_knowledge_project</div></div>
+          <div class="card"><h4><span class="dot" style="background:#7AA8FF"></span>Documentation</h4><p>Consulter la documentation Prisme.ai directement depuis l'assistant.</p><div class="tools">get_prisme_documentation</div></div>
+        </div>
+        <div class="callout info"><div class="ico">i</div><div><p>L'assistant agit <strong>avec vos droits</strong>. Il ne peut pas accéder à un workspace que votre compte ne voit pas. Pour un usage en lecture seule, voir les options ci-dessous.</p></div></div>
+      </section>
+
+      <!-- ============ OPTIONS ============ -->
+      <section id="options">
+        <div class="sec-head"><div class="num alt">+</div><h2>Options utiles</h2></div>
+        <div class="table-wrap"><table>
+          <tr><th>Variable</th><th>Effet</th></tr>
+          <tr><td><code>PRISME_FORCE_READONLY=true</code></td><td>Mode lecture seule : bloque toute création, modification, suppression, exécution, import ou export. Idéal pour consulter la production sans risque.</td></tr>
+          <tr><td><code>PRISME_DISABLE_FEEDBACK_TOOLS=true</code></td><td>Masque les outils qui permettent à l'assistant d'envoyer des retours ou signalements à Prisme.ai.</td></tr>
+          <tr><td><code>NODE_EXTRA_CA_CERTS</code></td><td>Chemin d'un certificat d'entreprise <code>.pem</code>, pour tous les environnements. Préférez l'option par environnement de <code>set-token</code>.</td></tr>
+        </table></div>
+        <h3>Où les définir ?</h3>
+        <ul>
+          <li><strong>Claude Desktop, Cursor, configuration manuelle :</strong> dans le bloc <code>"env"</code> du serveur, puis redémarrez l'outil.</li>
+          <li><strong>Claude Code, Codex :</strong> exportez la variable dans votre terminal avant de lancer l'outil depuis ce même terminal.</li>
+        </ul>
+        <div class="code"><div class="bar"><span>Exemple · configuration manuelle</span><button class="copy" type="button">Copier</button></div><pre><code><span class="k">"env"</span>: {
+  <span class="k">"PRISME_CONFIG_DIR"</span>: <span class="s">"/Users/vous/.prisme-ai-mcp"</span>,
+  <span class="k">"PRISME_FORCE_READONLY"</span>: <span class="s">"true"</span>
+}</code></pre></div>
+        <div class="code"><div class="bar"><span>Exemple · Claude Code</span><button class="copy" type="button">Copier</button></div><pre><code>export PRISME_FORCE_READONLY=true
+claude</code></pre></div>
+      </section>
+
+      <!-- ============ MISE À JOUR ============ -->
+      <section id="maj">
+        <div class="sec-head"><div class="num alt">+</div><h2>Mettre à jour ou désinstaller</h2></div>
+        <p>Mettez d'abord à jour la marketplace, puis le plugin : rafraîchir la marketplace seule ne remplace pas la version installée.</p>
+        <h3>Claude Code</h3>
+        <div class="code"><div class="bar"><span>Claude Code</span><button class="copy" type="button">Copier</button></div><pre><code>/plugin marketplace update prismeai-mcp
+/plugin update prisme-ai@prismeai-mcp
+/reload-plugins</code></pre></div>
+        <h3>Codex</h3>
+        <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copier</button></div><pre><code>codex plugin marketplace upgrade prismeai-mcp
+codex plugin add prisme-ai@prismeai-mcp</code></pre></div>
+        <p>Démarrez ensuite une nouvelle session Codex.</p>
+        <h3>VS Code Copilot</h3>
+        <p>Les mises à jour sont vérifiées automatiquement toutes les 24 heures. Pour forcer la vérification : <code>Extensions: Check for Extension Updates</code>, puis confirmez la mise à jour de <strong>prisme-ai</strong> dans la vue <em>Agent Plugins – Installed</em>.</p>
+        <h3>Claude Desktop, Cursor, autres</h3>
+        <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copier</button></div><pre><code>cd /chemin/absolu/vers/prismeai-mcp
+git pull</code></pre></div>
+        <p>Redémarrez ensuite votre outil.</p>
+        <h3>Désinstaller</h3>
+        <ul>
+          <li>Claude Code : <code>/plugin uninstall prisme-ai@prismeai-mcp</code>.</li>
+          <li>Codex, VS Code : désinstallez <strong>prisme-ai</strong> depuis le gestionnaire de plugins.</li>
+          <li>Configuration manuelle : retirez le bloc <code>prisme-ai-builder</code> du fichier de configuration.</li>
+          <li>Dans tous les cas, <strong>révoquez le jeton</strong> depuis la page <code>/settings/tokens</code> du Studio.</li>
+        </ul>
+      </section>
+
+      <!-- ============ DÉPANNAGE ============ -->
+      <section id="depannage">
+        <div class="sec-head"><div class="num alt">?</div><h2>Dépannage</h2></div>
+
+        <details><summary>Aucun outil Prisme.ai n'apparaît, et aucun message d'erreur</summary><div>
+          <p>Votre outil n'a pas trouvé <code>node</code> au démarrage. Il ne réessaie pas pendant la session.</p>
+          <ol>
+            <li>Vérifiez que <code>node --version</code> fonctionne dans le terminal d'où vous lancez l'outil.</li>
+            <li><strong>Redémarrez l'outil</strong> après avoir installé Node.js. Dans ce cas précis, <code>set-token</code> seul ne suffit pas.</li>
+            <li>Enregistrez ensuite le jeton (étape 3).</li>
+          </ol>
+          <p>Sous VS Code, lancez l'éditeur avec <code>code .</code> depuis un terminal, désactivez puis réactivez le plugin, et consultez <code>MCP: Show Output</code> pour voir l'erreur de démarrage.</p>
+        </div></details>
+
+        <details><summary>« No credentials », jeton manquant ou erreur 401</summary><div>
+          <p>Aucun jeton n'est enregistré pour cet environnement, ou il a expiré ou été révoqué. Créez un nouveau jeton (étape 2), puis relancez la commande <code>set-token</code> indiquée dans le message d'erreur. Elle remplace l'ancien jeton.</p>
+        </div></details>
+
+        <details><summary>Erreur 403 sur un workspace</summary><div>
+          <p>Le jeton fonctionne, mais votre compte n'a pas les droits sur ce workspace. Demandez l'accès au propriétaire du workspace, ou vérifiez que vous ciblez le bon environnement.</p>
+        </div></details>
+
+        <details><summary>« Environnement inconnu » ou non configuré</summary><div>
+          <p>Le nom d'environnement utilisé dans la demande n'existe pas dans votre configuration. Vérifiez l'orthographe (<code>prod</code>, <code>sandbox</code>…) ou déclarez-le avec <code>set-token</code> et l'option <code>--api-url</code>.</p>
+        </div></details>
+
+        <details><summary>Erreur de certificat ou de connexion (réseau d'entreprise)</summary><div>
+          <p>Si votre entreprise inspecte le trafic HTTPS, Node.js doit connaître son certificat. Relancez <code>set-token</code> en indiquant le fichier <code>.pem</code> fourni par votre service informatique (question posée par la commande, ou option <code>--node-extra-ca-certs</code>). Vérifiez aussi que votre VPN est actif si votre instance n'est accessible qu'en interne.</p>
+        </div></details>
+
+        <details><summary>J'ai collé mon jeton dans le chat par erreur</summary><div>
+          <p>Révoquez-le immédiatement depuis <code>/settings/tokens</code> dans le Studio, créez-en un nouveau et enregistrez-le avec <code>set-token</code> dans votre terminal.</p>
+        </div></details>
+
+        <details><summary>Codex ne semble pas utiliser les outils Prisme.ai</summary><div>
+          <p>Codex peut charger les outils MCP à la demande. Formulez une demande qui mentionne explicitement Prisme.ai et l'environnement, ou démarrez une nouvelle session après l'installation.</p>
+        </div></details>
+
+        <div class="callout info"><div class="ico">?</div><div><p>Toujours bloqué ? Contactez le support Prisme.ai en précisant votre outil, sa version, la sortie de <code>node --version</code> et le message d'erreur affiché, <strong>sans jamais inclure votre jeton</strong>.</p></div></div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer>
+    <div class="row">
+      <a class="logo" href="https://prisme.ai" aria-label="Prisme.ai"><svg role="img" aria-hidden="true" width="441" height="79" viewBox="0 0 441 79" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M127.745 16.21C140.033 16.21 149.097 24.4892 149.097 38.9562C149.097 52.5516 140.033 61.7024 127.745 61.7024C120.25 61.7024 115.196 58.6522 112.494 54.3818V78.6096H105.348V16.7329H111.535L112.494 23.8792C115.457 19.7831 120.25 16.21 127.745 16.21ZM127.048 55.3404C135.85 55.3404 141.776 48.6299 141.776 38.9562C141.776 29.2825 135.85 22.5719 127.048 22.5719C118.333 22.5719 112.407 29.2825 112.407 38.7819C112.407 48.5427 118.333 55.3404 127.048 55.3404Z" fill="currentColor"/><path d="M177.831 16.7329H179.835V23.7049H176.262C166.937 23.7049 164.41 31.4613 164.41 38.5204V61.1795H157.263V16.7329H163.451L164.41 23.4434C166.501 20.0446 169.9 16.7329 177.831 16.7329Z" fill="currentColor"/><path d="M189.69 9.23793C187.075 9.23793 185.071 7.32062 185.071 4.61896C185.071 1.91731 187.075 0 189.69 0C192.305 0 194.309 1.91731 194.309 4.61896C194.309 7.32062 192.305 9.23793 189.69 9.23793ZM186.03 61.1795V16.7329H193.176V61.1795H186.03Z" fill="currentColor"/><path d="M201.136 46.5383H208.457C208.718 51.7673 213.337 55.6019 220.745 55.6019C227.02 55.6019 231.464 52.9002 231.464 48.8042C231.464 43.2265 226.584 42.7908 219.96 42.0064C210.025 40.7863 202.095 38.7819 202.095 29.544C202.095 21.439 209.502 16.1228 219.525 16.21C229.634 16.2971 236.955 21.0032 237.652 30.2412H230.331C229.808 25.7093 225.625 22.3105 219.525 22.3105C213.337 22.3105 209.154 24.925 209.154 29.021C209.154 33.9015 213.86 34.5115 220.309 35.2959C230.418 36.516 238.523 38.4333 238.523 48.2813C238.523 56.5605 230.593 61.7024 220.745 61.7024C209.241 61.7024 201.31 56.2991 201.136 46.5383Z" fill="currentColor"/><path d="M296.045 16.21C305.283 16.21 312.865 21.5261 312.865 35.5573V61.1795H305.718V35.9931C305.718 27.278 301.884 22.7462 295.173 22.7462C287.765 22.7462 283.234 28.3239 283.234 37.3875V61.1795H276.087V35.9931C276.087 27.278 272.166 22.7462 265.368 22.7462C258.047 22.7462 253.603 28.8468 253.603 37.7361V61.1795H246.456V16.7329H252.644L253.603 22.8334C255.956 19.6088 259.703 16.21 266.588 16.21C272.776 16.21 278.092 18.9988 280.619 24.6635C283.321 19.8703 288.114 16.21 296.045 16.21Z" fill="currentColor"/><path d="M342.001 61.7024C328.667 61.7024 319.952 52.5516 319.952 38.9562C319.952 25.4479 328.493 16.21 341.043 16.21C353.592 16.21 361.785 24.1406 362.133 37.3003C362.133 38.259 362.046 39.3048 361.959 40.3506H327.447V40.9606C327.709 49.4142 333.025 55.3404 341.479 55.3404C347.753 55.3404 352.634 52.0287 354.115 46.2768H361.349C359.606 55.1661 352.285 61.7024 342.001 61.7024ZM327.883 34.4244H354.464C353.767 26.7551 348.538 22.4848 341.13 22.4848C334.594 22.4848 328.58 27.1909 327.883 34.4244Z" fill="currentColor"/><path d="M366.523 56.822C366.523 53.8589 368.614 51.9416 371.49 51.9416C374.366 51.9416 376.458 53.8589 376.458 56.822C376.458 59.7851 374.366 61.7024 371.49 61.7024C368.614 61.7024 366.523 59.7851 366.523 56.822Z" fill="currentColor"/><path d="M424.657 54.6432H426.923V61.1795H423.001C417.075 61.1795 415.07 58.6522 414.983 54.2946C412.194 58.3036 407.75 61.7024 400.08 61.7024C390.32 61.7024 383.696 56.822 383.696 48.717C383.696 39.8277 389.884 34.8601 401.562 34.8601H414.634V31.8099C414.634 26.0579 410.538 22.5719 403.566 22.5719C397.292 22.5719 393.108 25.535 392.237 30.0669H385.091C386.136 21.3518 393.196 16.21 403.915 16.21C415.245 16.21 421.781 21.8747 421.781 32.2456V51.6801C421.781 54.0332 422.652 54.6432 424.657 54.6432ZM414.634 43.0522V40.8735H400.865C394.503 40.8735 390.93 43.2266 390.93 48.2813C390.93 52.6388 394.677 55.6019 400.603 55.6019C409.493 55.6019 414.634 50.46 414.634 43.0522Z" fill="currentColor"/><path d="M436.077 9.23793C433.462 9.23793 431.458 7.32062 431.458 4.61896C431.458 1.91731 433.462 0 436.077 0C438.691 0 440.696 1.91731 440.696 4.61896C440.696 7.32062 438.691 9.23793 436.077 9.23793ZM432.417 61.1795V16.7329H439.563V61.1795H432.417Z" fill="currentColor"/><path d="M35.5031 4.5C43.6723 4.5 50.2948 11.1225 50.2948 19.2917H20.7114C20.7114 11.1225 27.3339 4.5 35.5031 4.5Z" fill="#98C3F8"/><path d="M17.7488 40C17.7488 30.1969 25.6957 22.25 35.4988 22.25C45.3019 22.25 53.2488 30.1969 53.2488 40C53.2488 49.8031 45.3019 57.75 35.4988 57.75C25.6957 57.75 17.7488 49.8031 17.7488 40Z" fill="#255BE0"/><path d="M14.7917 25.2083C6.62246 25.2083 0 31.8307 0 39.9999C0 48.1692 6.62246 54.7917 14.7917 54.7917V25.2083Z" fill="#98C3F8"/><path d="M71.0001 39.9999C71.0001 48.1692 64.3776 54.7917 56.2084 54.7917V25.2083C64.3776 25.2083 71.0001 31.8307 71.0001 39.9999Z" fill="#2541A8"/><path d="M20.7114 60.7091C20.7114 68.8783 27.3339 75.5008 35.5031 75.5008C43.6723 75.5008 50.2948 68.8783 50.2948 60.7091H20.7114Z" fill="#2541A8"/><path d="M56.2084 10.4166C61.11 10.4166 65.0834 14.39 65.0834 19.2916H56.2084V10.4166Z" fill="#4480ED"/><path d="M56.2084 69.5832C61.11 69.5832 65.0834 65.6099 65.0834 60.7082H56.2084V69.5832Z" fill="#233B85"/><path d="M5.91855 19.2915C5.91855 14.39 9.89202 10.4165 14.7935 10.4165V19.2915H5.91855Z" fill="#C2DAFB"/><path d="M5.91855 60.7091C5.91855 65.6108 9.89202 69.5841 14.7935 69.5841V60.7091H5.91855Z" fill="#4480ED"/></svg></a>
+      <span>Dépôt : <a href="https://github.com/prismeai/prismeai-mcp" target="_blank" rel="noopener">github.com/prismeai/prismeai-mcp</a> · Documentation : <a href="https://docs.prisme.ai" target="_blank" rel="noopener">docs.prisme.ai</a></span>
+      <span class="eyebrow">MCP · prisme-ai-builder</span>
+    </div>
+  </footer>
+</div>
+<div class="l10n" lang="en">
+  <div class="hero">
+    <svg class="hero-mark" viewBox="0 0 116 116" aria-hidden="true">
+      <path d="M58.0049 0.5C71.1792 0.5 81.8592 11.1799 81.8592 24.3542H34.1508C34.1508 11.1799 44.8306 0.5 58.0049 0.5Z"/>
+      <path d="M29.373 57.75C29.373 41.9408 42.1888 29.125 57.998 29.125C73.8073 29.125 86.623 41.9408 86.623 57.75C86.623 73.5592 73.8073 86.375 57.998 86.375C42.1888 86.375 29.373 73.5592 29.373 57.75Z"/>
+      <path d="M24.6042 33.8958C11.4299 33.8958 0.75 44.5756 0.75 57.7499C0.75 70.9242 11.4299 81.6042 24.6042 81.6042V33.8958Z"/>
+      <path d="M115.25 57.7499C115.25 70.9242 104.57 81.6042 91.3959 81.6042V33.8958C104.57 33.8958 115.25 44.5756 115.25 57.7499Z"/>
+      <path d="M34.1508 91.1471C34.1508 104.321 44.8306 115.001 58.0049 115.001C71.1792 115.001 81.8592 104.321 81.8592 91.1471H34.1508Z"/>
+      <path d="M91.3959 10.0415C99.3007 10.0415 105.708 16.4494 105.708 24.354H91.3959V10.0415Z"/>
+      <path d="M91.3959 105.458C99.3007 105.458 105.708 99.0505 105.708 91.1458H91.3959V105.458Z"/>
+      <path d="M10.2947 24.3539C10.2947 16.4493 16.7026 10.0414 24.6072 10.0414V24.3539H10.2947Z"/>
+      <path d="M10.2947 91.1471C10.2947 99.0519 16.7026 105.46 24.6072 105.46V91.1471H10.2947Z"/>
+    </svg>
+    <span class="eyebrow">Model Context Protocol · prisme-ai-builder</span>
+    <h1>Install the Prisme.ai MCP</h1>
+    <p>Drive your Prisme.ai platform from your AI assistant: workspaces, automations, apps, files, events and AI Knowledge. Allow about ten minutes, in four steps.</p>
+    <div class="chips">
+      <span class="chip">Claude Code</span><span class="chip">Codex</span><span class="chip">VS Code Copilot</span><span class="chip">Claude Desktop</span><span class="chip">Cursor</span><span class="chip">Any MCP client</span>
+    </div>
+  </div>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Contents">
+      <span class="eyebrow">Contents</span>
+      <ol>
+        <li><a href="#prerequisites"><span>00</span>Prerequisites</a></li>
+        <li><a href="#install"><span>01</span>Install</a></li>
+        <li><a href="#token"><span>02</span>Create a token</a></li>
+        <li><a href="#register"><span>03</span>Register the token</a></li>
+        <li><a href="#verify"><span>04</span>Verify</a></li>
+        <li><a href="#capabilities"><span>+</span>What you can do</a></li>
+        <li><a href="#settings"><span>+</span>Options</a></li>
+        <li><a href="#update"><span>+</span>Update</a></li>
+        <li><a href="#troubleshooting"><span>?</span>Troubleshooting</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <!-- ============ PREREQUISITES ============ -->
+      <section id="prerequisites">
+        <div class="sec-head"><div class="num alt">00</div><h2>Before you start</h2></div>
+        <p class="lead">The Prisme.ai MCP is a small local server that your AI assistant runs in the background. It calls the Prisme.ai API with your own permissions: the assistant sees and does exactly what your account allows, nothing more.</p>
+
+        <div class="grid">
+          <div class="card">
+            <h4><span class="dot" style="background:#255BE0"></span>Node.js 18 or later</h4>
+            <p>The MCP server runs with <code>node</code>. Nothing else needs to be installed.</p>
+          </div>
+          <div class="card">
+            <h4><span class="dot" style="background:#4480ED"></span>A Prisme.ai account</h4>
+            <p>With access to the Studio of your environment, for example <code>studio.prisme.ai</code>.</p>
+          </div>
+          <div class="card">
+            <h4><span class="dot" style="background:#98C3F8"></span>An MCP client</h4>
+            <p>Claude Code, Codex, VS Code Copilot, Claude Desktop, Cursor or any other compatible client.</p>
+          </div>
+        </div>
+
+        <p>Check that Node.js is available in a terminal:</p>
+        <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copy</button></div><pre><code>node --version
+<span class="c"># Expected: v18.x.x or later</span></code></pre></div>
+        <p>If the command is not found, install Node.js from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> (or with <code>nvm</code> / <code>fnm</code>), then <strong>open a new terminal</strong>.</p>
+
+        <div class="callout info"><div class="ico">i</div><div>
+          <p><strong>Start your tool from a terminal.</strong> An application opened from the Dock or the Start menu does not always see the Node.js installed in your shell profile. If in doubt, start it from the terminal where <code>node --version</code> works.</p>
+        </div></div>
+      </section>
+
+      <!-- ============ STEP 1 ============ -->
+      <section id="install">
+        <div class="sec-head"><div class="num">1</div><h2>Install the MCP in your tool</h2></div>
+        <p class="lead">Pick your tool. Claude Code, Codex and VS Code Copilot install the MCP as a <strong>plugin</strong> in two commands. Other clients point directly at the server.</p>
+
+        <div class="tabs">
+          <div class="tablist" role="tablist" aria-label="Choose your client">
+            <button class="tab" role="tab" data-client="claude-code" id="tab-en-claude-code" aria-controls="panel-en-claude-code" aria-selected="true">Claude Code <span class="badge">plugin</span></button>
+            <button class="tab" role="tab" data-client="codex" id="tab-en-codex" aria-controls="panel-en-codex" aria-selected="false" tabindex="-1">Codex <span class="badge">plugin</span></button>
+            <button class="tab" role="tab" data-client="vscode" id="tab-en-vscode" aria-controls="panel-en-vscode" aria-selected="false" tabindex="-1">VS Code Copilot <span class="badge">plugin</span></button>
+            <button class="tab" role="tab" data-client="desktop" id="tab-en-desktop" aria-controls="panel-en-desktop" aria-selected="false" tabindex="-1">Claude Desktop</button>
+            <button class="tab" role="tab" data-client="cursor" id="tab-en-cursor" aria-controls="panel-en-cursor" aria-selected="false" tabindex="-1">Cursor</button>
+            <button class="tab" role="tab" data-client="other" id="tab-en-other" aria-controls="panel-en-other" aria-selected="false" tabindex="-1">Other client</button>
+          </div>
+
+          <!-- Claude Code -->
+          <div class="panel" role="tabpanel" id="panel-en-claude-code" aria-labelledby="tab-en-claude-code">
+            <p class="panel-title">Claude Code</p>
+            <ol class="steps">
+              <li><strong>Add the Prisme.ai marketplace</strong>In a Claude Code session, type:
+                <div class="code"><div class="bar"><span>Claude Code</span><button class="copy" type="button">Copy</button></div><pre><code>/plugin marketplace add prismeai/prismeai-mcp</code></pre></div></li>
+              <li><strong>Install the plugin</strong>
+                <div class="code"><div class="bar"><span>Claude Code</span><button class="copy" type="button">Copy</button></div><pre><code>/plugin install prisme-ai@prismeai-mcp</code></pre></div></li>
+              <li><strong>Reload</strong>If the tools do not show up right away, type <code>/reload-plugins</code> or restart the session.</li>
+            </ol>
+            <div class="callout ok"><div class="ico">✓</div><div><p>The plugin brings the <code>prisme-ai-builder</code> MCP server and ready-to-use <strong>skills</strong>, for example <code>/prisme-ai:guide</code>, which lists everything available.</p></div></div>
+          </div>
+
+          <!-- Codex -->
+          <div class="panel" role="tabpanel" id="panel-en-codex" aria-labelledby="tab-en-codex">
+            <p class="panel-title">Codex</p>
+            <ol class="steps">
+              <li><strong>Add the marketplace and the plugin</strong>From a terminal:
+                <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copy</button></div><pre><code>codex plugin marketplace add prismeai/prismeai-mcp
+codex plugin add prisme-ai@prismeai-mcp</code></pre></div></li>
+              <li><strong>Start a new Codex session</strong>Or restart the desktop app to load the plugin.</li>
+            </ol>
+            <div class="callout info"><div class="ico">i</div><div><p>Codex may load MCP tools on demand: phrase a request that is clearly about Prisme.ai (“list my Prisme.ai workspaces on prod”) so it activates them.</p></div></div>
+          </div>
+
+          <!-- VS Code -->
+          <div class="panel" role="tabpanel" id="panel-en-vscode" aria-labelledby="tab-en-vscode">
+            <p class="panel-title">VS Code Copilot</p>
+            <p>Requires a VS Code version that supports <em>agent plugins</em>.</p>
+            <ol class="steps">
+              <li><strong>Declare the marketplace</strong>Open the Command Palette, run <code>Preferences: Open User Settings (JSON)</code> and add:
+                <div class="code"><div class="bar"><span>settings.json</span><button class="copy" type="button">Copy</button></div><pre><code><span class="k">"chat.plugins.marketplaces"</span>: [<span class="s">"prismeai/prismeai-mcp"</span>]</code></pre></div></li>
+              <li><strong>Install the plugin</strong>Open the Extensions view (<code>⇧⌘X</code> / <code>Ctrl+Shift+X</code>), search for <code>@agentPlugins</code> and install <strong>prisme-ai</strong>.</li>
+              <li><strong>You're set</strong>The <code>prisme-ai-builder</code> server starts as soon as the plugin is enabled. Use Copilot Chat in <strong>Agent</strong> mode.</li>
+            </ol>
+            <h3>For a whole team</h3>
+            <p>Add this file to the project repository, at <code>.github/copilot/settings.json</code>, so VS Code suggests the plugin to everyone:</p>
+            <div class="code"><div class="bar"><span>.github/copilot/settings.json</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  <span class="k">"extraKnownMarketplaces"</span>: {
+    <span class="k">"prismeai-mcp"</span>: {
+      <span class="k">"source"</span>: { <span class="k">"source"</span>: <span class="s">"github"</span>, <span class="k">"repo"</span>: <span class="s">"prismeai/prismeai-mcp"</span> }
+    }
+  },
+  <span class="k">"enabledPlugins"</span>: {
+    <span class="k">"prisme-ai@prismeai-mcp"</span>: true
+  }
+}</code></pre></div>
+            <details><summary>Manual setup (if plugins are blocked in your organization)</summary><div>
+              <p>Clone the repository (see the <em>Claude Desktop</em> tab), then open <code>MCP: Open User Configuration</code>. Note that VS Code uses the <code>servers</code> key, not <code>mcpServers</code>:</p>
+              <div class="code"><div class="bar"><span>mcp.json</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  <span class="k">"servers"</span>: {
+    <span class="k">"prisme-ai-builder"</span>: {
+      <span class="k">"type"</span>: <span class="s">"stdio"</span>,
+      <span class="k">"command"</span>: <span class="s">"node"</span>,
+      <span class="k">"args"</span>: [<span class="s">"/absolute/path/to/prismeai-mcp/plugin/build/index.js"</span>],
+      <span class="k">"env"</span>: {
+        <span class="k">"PRISME_CONFIG_DIR"</span>: <span class="s">"${userHome}/.prisme-ai-mcp"</span>
+      }
+    }
+  }
+}</code></pre></div>
+              <p>Then start the server with <code>MCP: List Servers</code> → <strong>Start Server</strong>. This method provides the tools, but not the plugin's skills.</p>
+            </div></details>
+          </div>
+
+          <!-- Claude Desktop -->
+          <div class="panel" role="tabpanel" id="panel-en-desktop" aria-labelledby="tab-en-desktop">
+            <p class="panel-title">Claude Desktop</p>
+            <ol class="steps">
+              <li><strong>Get the MCP server</strong>Clone the public repository into a folder of your choice. No build or <code>npm install</code> is required.
+                <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copy</button></div><pre><code>git clone https://github.com/prismeai/prismeai-mcp.git
+cd prismeai-mcp &amp;&amp; pwd
+<span class="c"># Note the path printed: you will need it next</span></code></pre></div></li>
+              <li><strong>Open the configuration file</strong>In Claude Desktop: <em>Settings → Developer → Edit Config</em>, or directly:
+                <ul>
+                  <li>macOS: <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
+                  <li>Windows: <code>%APPDATA%\Claude\claude_desktop_config.json</code></li>
+                </ul></li>
+              <li><strong>Declare the server</strong>Replace the path with the one noted in step 1 and <code>you</code> with your user name:
+                <div class="code"><div class="bar"><span>claude_desktop_config.json</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  <span class="k">"mcpServers"</span>: {
+    <span class="k">"prisme-ai-builder"</span>: {
+      <span class="k">"command"</span>: <span class="s">"node"</span>,
+      <span class="k">"args"</span>: [<span class="s">"/absolute/path/to/prismeai-mcp/plugin/build/index.js"</span>],
+      <span class="k">"env"</span>: {
+        <span class="k">"PRISME_CONFIG_DIR"</span>: <span class="s">"/Users/you/.prisme-ai-mcp"</span>
+      }
+    }
+  }
+}</code></pre></div>
+                If the file already lists other servers, only add the <code>"prisme-ai-builder"</code> block inside <code>"mcpServers"</code>.</li>
+              <li><strong>Restart Claude Desktop</strong>Quit the application completely, then launch it again.</li>
+            </ol>
+            <div class="callout info"><div class="ico">i</div><div><p>Do <strong>not</strong> put your token in this file: step 3 stores it securely in the <code>.prisme-ai-mcp</code> folder.</p></div></div>
+          </div>
+
+          <!-- Cursor -->
+          <div class="panel" role="tabpanel" id="panel-en-cursor" aria-labelledby="tab-en-cursor">
+            <p class="panel-title">Cursor</p>
+            <ol class="steps">
+              <li><strong>Get the MCP server</strong>
+                <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copy</button></div><pre><code>git clone https://github.com/prismeai/prismeai-mcp.git
+cd prismeai-mcp &amp;&amp; pwd</code></pre></div></li>
+              <li><strong>Open Cursor's MCP configuration</strong>
+                <ul>
+                  <li>macOS / Linux: <code>~/.cursor/mcp.json</code></li>
+                  <li>Windows: <code>%APPDATA%\Cursor\mcp.json</code></li>
+                </ul></li>
+              <li><strong>Add the server</strong>
+                <div class="code"><div class="bar"><span>mcp.json</span><button class="copy" type="button">Copy</button></div><pre><code>{
+  <span class="k">"mcpServers"</span>: {
+    <span class="k">"prisme-ai-builder"</span>: {
+      <span class="k">"command"</span>: <span class="s">"node"</span>,
+      <span class="k">"args"</span>: [<span class="s">"/absolute/path/to/prismeai-mcp/plugin/build/index.js"</span>],
+      <span class="k">"env"</span>: {
+        <span class="k">"PRISME_CONFIG_DIR"</span>: <span class="s">"/Users/you/.prisme-ai-mcp"</span>
+      }
+    }
+  }
+}</code></pre></div></li>
+              <li><strong>Restart Cursor</strong>The server then shows up under <em>Settings → MCP</em>.</li>
+            </ol>
+          </div>
+
+          <!-- Other -->
+          <div class="panel" role="tabpanel" id="panel-en-other" aria-labelledby="tab-en-other">
+            <p class="panel-title">Other MCP client</p>
+            <p>Any client that can launch an MCP server over <strong>stdio</strong> (Windsurf, Zed, Cline, etc.) can use the Prisme.ai MCP. Clone the repository as for Claude Desktop, then fill in these values in your tool's MCP configuration:</p>
+            <div class="table-wrap"><table>
+              <tr><th>Field</th><th>Value</th></tr>
+              <tr><td>Name</td><td><code>prisme-ai-builder</code></td></tr>
+              <tr><td>Command</td><td><code>node</code></td></tr>
+              <tr><td>Arguments</td><td><code>/absolute/path/to/prismeai-mcp/plugin/build/index.js</code></td></tr>
+              <tr><td>Environment variable</td><td><code>PRISME_CONFIG_DIR</code> = your home folder followed by <code>/.prisme-ai-mcp</code></td></tr>
+            </table></div>
+            <p>Most tools accept the <code>mcpServers</code> JSON format shown in the <em>Claude Desktop</em> tab.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ STEP 2 ============ -->
+      <section id="token">
+        <div class="sec-head"><div class="num">2</div><h2>Create an access token</h2></div>
+        <p class="lead">The MCP authenticates with a personal API token, created from the Studio of your environment.</p>
+        <ol class="steps">
+          <li><strong>Open the tokens page</strong>Sign in to the Studio and go to <code>/settings/tokens</code>. In production: <a href="https://studio.prisme.ai/settings/tokens" target="_blank" rel="noopener">studio.prisme.ai/settings/tokens</a>. On the OVH hosting: <a href="https://studio.fr.prisme.ai/settings/tokens" target="_blank" rel="noopener">studio.fr.prisme.ai/settings/tokens</a>.</li>
+          <li><strong>Create a token</strong>Give it a clear name, for example “MCP – Claude Code – laptop”, so you can easily revoke it later.</li>
+          <li><strong>Copy it</strong>Keep it in your clipboard for the next step. It will not be shown again.</li>
+        </ol>
+        <div class="callout warn"><div class="ico">!</div><div>
+          <p><strong>Never paste this token into the conversation with the assistant.</strong> Everything you type in the chat is sent to the AI model provider. Step 3 stores the token directly on your machine, without going through the chat.</p>
+        </div></div>
+      </section>
+
+      <!-- ============ STEP 3 ============ -->
+      <section id="register">
+        <div class="sec-head"><div class="num">3</div><h2>Register the token on your machine</h2></div>
+        <p class="lead">The <code>set-token</code> command runs in <strong>your own terminal</strong>. It asks for the token with hidden input, checks it against Prisme.ai, then stores it locally (in a <code>credentials.json</code> file readable only by you).</p>
+
+        <div class="callout ok"><div class="ico">✓</div><div>
+          <p><strong>The easiest way:</strong> ask your assistant something, for example “List my Prisme.ai workspaces on prod”. As long as no token is registered, the MCP replies with <strong>the exact command to copy</strong>, paths included. Paste it into your terminal.</p>
+        </div></div>
+
+        <h3>Pick the environment name</h3>
+        <div class="table-wrap"><table>
+          <tr><th>You use</th><th>Name</th><th>API URL</th></tr>
+          <tr><td>Prisme.ai SaaS (<code>studio.prisme.ai</code>)</td><td><code>prod</code></td><td><code>https://api.studio.prisme.ai/v2</code></td></tr>
+          <tr><td>Prisme.ai sandbox (<code>sandbox.prisme.ai</code>)</td><td><code>sandbox</code></td><td><code>https://api.sandbox.prisme.ai/v2</code></td></tr>
+          <tr><td>Prisme.ai hosted on OVH (<code>studio.fr.prisme.ai</code>)</td><td><code>ovh</code></td><td><code>https://api.studio.fr.prisme.ai/v2</code></td></tr>
+          <tr><td>A dedicated or self-hosted instance</td><td>Your choice, e.g. <code>my-instance</code></td><td>Your API URL, ending with <code>/v2</code></td></tr>
+        </table></div>
+
+        <h3>Run the command</h3>
+        <p>The general form is below. Keep it on <strong>a single line</strong> and do not split the quoted paths:</p>
+        <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copy</button></div><pre><code>node "&lt;server&gt;/build/index.js" set-token prod --config-dir "&lt;config-dir&gt;"</code></pre></div>
+        <p><strong>OVH hosting:</strong> this environment is not preconfigured in the MCP. Add its two URLs to the command:</p>
+        <div class="code"><div class="bar"><span>Terminal · OVH</span><button class="copy" type="button">Copy</button></div><pre><code>node "&lt;server&gt;/build/index.js" set-token ovh --api-url https://api.studio.fr.prisme.ai/v2 --studio-url https://studio.fr.prisme.ai --config-dir "&lt;config-dir&gt;"</code></pre></div>
+
+        <div class="table-wrap"><table>
+          <tr><th>Tool</th><th>&lt;server&gt;</th><th>&lt;config-dir&gt;</th></tr>
+          <tr><td>Claude Code</td><td><code>~/.claude/plugins/cache/prismeai-mcp/prisme-ai/&lt;version&gt;</code></td><td><code>~/.claude/plugins/data/prisme-ai-prismeai-mcp</code></td></tr>
+          <tr><td>Codex</td><td colspan="2">Use the command printed by the MCP on your first request.</td></tr>
+          <tr><td>VS Code (plugin)</td><td>Printed by the MCP on your first request</td><td><code>~/.prisme-ai-mcp</code></td></tr>
+          <tr><td>Claude Desktop, Cursor, others</td><td><code>/absolute/path/to/prismeai-mcp/plugin</code></td><td><code>~/.prisme-ai-mcp</code></td></tr>
+        </table></div>
+
+        <p>The command then asks a few questions:</p>
+        <ol class="steps">
+          <li><strong>The token</strong>Paste it: nothing appears on screen, that's expected.</li>
+          <li><strong>The API and Studio URLs</strong>Accept the suggested values for <code>prod</code> or <code>sandbox</code>. For <code>ovh</code>, they are already provided by the command above.</li>
+          <li><strong>A corporate certificate (optional)</strong>Leave empty, unless your network goes through a proxy that inspects HTTPS traffic: then enter the path of the <code>.pem</code> file provided by your IT team.</li>
+        </ol>
+        <p>If the token is valid, it is saved and used immediately: <strong>no restart is needed</strong>. An invalid token is never saved.</p>
+
+        <details><summary>Dedicated or self-hosted instance</summary><div>
+          <p>Name your environment and give its URLs in a single command:</p>
+          <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copy</button></div><pre><code>node "&lt;server&gt;/build/index.js" set-token my-instance --api-url https://api.my-domain.com/v2 --studio-url https://studio.my-domain.com --config-dir "&lt;config-dir&gt;"</code></pre></div>
+          <ul>
+            <li>The API URL must end with <code>/v2</code>.</li>
+            <li>Add <code>--node-extra-ca-certs /path/to/company-ca.pem</code> if your instance uses an internal certificate.</li>
+            <li>The command must be able to reach the API from your machine (VPN on, for example).</li>
+          </ul>
+          <p>Then mention that name in your requests: “… on my-instance”.</p>
+        </div></details>
+
+        <details><summary>Several environments</summary><div>
+          <p>Simply run <code>set-token</code> once per environment (<code>prod</code>, <code>sandbox</code>, <code>my-instance</code>…), each with its own token. Then name the environment you want in each request. If you name an environment that is not configured, the MCP stops instead of using another one.</p>
+        </div></details>
+      </section>
+
+      <!-- ============ STEP 4 ============ -->
+      <section id="verify">
+        <div class="sec-head"><div class="num">4</div><h2>Check that everything works</h2></div>
+        <ol class="steps">
+          <li><strong>The tools are visible</strong>In Claude Code, type <code>@</code> or <code>/mcp</code>: the <code>prisme-ai-builder</code> server should show as connected. In other tools, look for it in the list of MCP servers or tools.</li>
+          <li><strong>A first request</strong>Try for example:
+            <div class="prompts">
+              <div class="prompt">List my Prisme.ai workspaces on prod.</div>
+              <div class="prompt">Show me the automations of the “workspace-name” workspace on prod.</div>
+              <div class="prompt">Search the Prisme.ai documentation for how to trigger an automation with a webhook.</div>
+            </div></li>
+          <li><strong>Going further</strong>In Claude Code or Codex, run <code>/prisme-ai:guide</code> to discover the bundled skills, and <code>/prisme-ai:prisme-mcp-setup</code> to get guided through environment setup.</li>
+        </ol>
+        <div class="callout info"><div class="ico">i</div><div><p><strong>Tip:</strong> always state the environment (“on prod”, “on ovh”, “on sandbox”) in your requests. By default, the MCP targets the sandbox.</p></div></div>
+      </section>
+
+      <!-- ============ CAPABILITIES ============ -->
+      <section id="capabilities">
+        <div class="sec-head"><div class="num alt">+</div><h2>What you can do</h2></div>
+        <p class="lead">Once connected, your assistant has about forty tools, grouped by area. It picks the right tools on its own based on your request.</p>
+        <div class="grid">
+          <div class="card"><h4><span class="dot" style="background:#255BE0"></span>Workspaces</h4><p>Search, create, export and import workspaces and their versions.</p><div class="tools">search_workspaces · create_workspace · pull_workspace · push_workspace</div></div>
+          <div class="card"><h4><span class="dot" style="background:#2541A8"></span>Automations</h4><p>Read, create, edit, validate and run DSUL automations.</p><div class="tools">list_automations · get_automation · create_automation · update_automation · validate_automation · execute_automation</div></div>
+          <div class="card"><h4><span class="dot" style="background:#4480ED"></span>Apps</h4><p>Browse the catalog, install and configure apps in a workspace.</p><div class="tools">list_apps · get_app · install_app_instance · update_app_instance_config</div></div>
+          <div class="card"><h4><span class="dot" style="background:#98C3F8"></span>Files</h4><p>List, read, upload and delete a workspace's files.</p><div class="tools">list_files · get_file · upload_file · delete_file</div></div>
+          <div class="card"><h4><span class="dot" style="background:#233B85"></span>Events &amp; API</h4><p>Trace an execution in the event feed, call the API.</p><div class="tools">search_events · call_api</div></div>
+          <div class="card"><h4><span class="dot" style="background:#C2DAFB"></span>AI Knowledge</h4><p>Query a knowledge base, manage its documents and projects.</p><div class="tools">ai_knowledge_query · ai_knowledge_document · ai_knowledge_project</div></div>
+          <div class="card"><h4><span class="dot" style="background:#7AA8FF"></span>Documentation</h4><p>Read the Prisme.ai documentation straight from the assistant.</p><div class="tools">get_prisme_documentation</div></div>
+        </div>
+        <div class="callout info"><div class="ico">i</div><div><p>The assistant acts <strong>with your permissions</strong>. It cannot access a workspace your account cannot see. For read-only use, see the options below.</p></div></div>
+      </section>
+
+      <!-- ============ OPTIONS ============ -->
+      <section id="settings">
+        <div class="sec-head"><div class="num alt">+</div><h2>Useful options</h2></div>
+        <div class="table-wrap"><table>
+          <tr><th>Variable</th><th>Effect</th></tr>
+          <tr><td><code>PRISME_FORCE_READONLY=true</code></td><td>Read-only mode: blocks any creation, update, deletion, execution, import or export. Ideal for browsing production safely.</td></tr>
+          <tr><td><code>PRISME_DISABLE_FEEDBACK_TOOLS=true</code></td><td>Hides the tools that let the assistant send feedback or reports to Prisme.ai.</td></tr>
+          <tr><td><code>NODE_EXTRA_CA_CERTS</code></td><td>Path to a corporate <code>.pem</code> certificate, for all environments. Prefer the per-environment option of <code>set-token</code>.</td></tr>
+        </table></div>
+        <h3>Where to set them?</h3>
+        <ul>
+          <li><strong>Claude Desktop, Cursor, manual setup:</strong> in the server's <code>"env"</code> block, then restart the tool.</li>
+          <li><strong>Claude Code, Codex:</strong> export the variable in your terminal before launching the tool from that same terminal.</li>
+        </ul>
+        <div class="code"><div class="bar"><span>Example · manual setup</span><button class="copy" type="button">Copy</button></div><pre><code><span class="k">"env"</span>: {
+  <span class="k">"PRISME_CONFIG_DIR"</span>: <span class="s">"/Users/you/.prisme-ai-mcp"</span>,
+  <span class="k">"PRISME_FORCE_READONLY"</span>: <span class="s">"true"</span>
+}</code></pre></div>
+        <div class="code"><div class="bar"><span>Example · Claude Code</span><button class="copy" type="button">Copy</button></div><pre><code>export PRISME_FORCE_READONLY=true
+claude</code></pre></div>
+      </section>
+
+      <!-- ============ UPDATE ============ -->
+      <section id="update">
+        <div class="sec-head"><div class="num alt">+</div><h2>Update or uninstall</h2></div>
+        <p>Update the marketplace first, then the plugin: refreshing the marketplace alone does not replace the installed version.</p>
+        <h3>Claude Code</h3>
+        <div class="code"><div class="bar"><span>Claude Code</span><button class="copy" type="button">Copy</button></div><pre><code>/plugin marketplace update prismeai-mcp
+/plugin update prisme-ai@prismeai-mcp
+/reload-plugins</code></pre></div>
+        <h3>Codex</h3>
+        <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copy</button></div><pre><code>codex plugin marketplace upgrade prismeai-mcp
+codex plugin add prisme-ai@prismeai-mcp</code></pre></div>
+        <p>Then start a new Codex session.</p>
+        <h3>VS Code Copilot</h3>
+        <p>Updates are checked automatically every 24 hours. To force a check: <code>Extensions: Check for Extension Updates</code>, then confirm the <strong>prisme-ai</strong> update in the <em>Agent Plugins – Installed</em> view.</p>
+        <h3>Claude Desktop, Cursor, others</h3>
+        <div class="code"><div class="bar"><span>Terminal</span><button class="copy" type="button">Copy</button></div><pre><code>cd /absolute/path/to/prismeai-mcp
+git pull</code></pre></div>
+        <p>Then restart your tool.</p>
+        <h3>Uninstall</h3>
+        <ul>
+          <li>Claude Code: <code>/plugin uninstall prisme-ai@prismeai-mcp</code>.</li>
+          <li>Codex, VS Code: uninstall <strong>prisme-ai</strong> from the plugin manager.</li>
+          <li>Manual setup: remove the <code>prisme-ai-builder</code> block from the configuration file.</li>
+          <li>In every case, <strong>revoke the token</strong> from the Studio's <code>/settings/tokens</code> page.</li>
+        </ul>
+      </section>
+
+      <!-- ============ TROUBLESHOOTING ============ -->
+      <section id="troubleshooting">
+        <div class="sec-head"><div class="num alt">?</div><h2>Troubleshooting</h2></div>
+
+        <details><summary>No Prisme.ai tools show up, and there is no error message</summary><div>
+          <p>Your tool could not find <code>node</code> when it started. It does not retry during the session.</p>
+          <ol>
+            <li>Check that <code>node --version</code> works in the terminal you launch the tool from.</li>
+            <li><strong>Restart the tool</strong> after installing Node.js. In this specific case, <code>set-token</code> alone is not enough.</li>
+            <li>Then register the token (step 3).</li>
+          </ol>
+          <p>In VS Code, launch the editor with <code>code .</code> from a terminal, disable then re-enable the plugin, and check <code>MCP: Show Output</code> for the startup error.</p>
+        </div></details>
+
+        <details><summary>“No credentials”, missing token or 401 error</summary><div>
+          <p>No token is registered for this environment, or it has expired or been revoked. Create a new token (step 2), then run the <code>set-token</code> command shown in the error message again. It replaces the old token.</p>
+        </div></details>
+
+        <details><summary>403 error on a workspace</summary><div>
+          <p>The token works, but your account has no rights on this workspace. Ask the workspace owner for access, or check that you are targeting the right environment.</p>
+        </div></details>
+
+        <details><summary>“Unknown” or unconfigured environment</summary><div>
+          <p>The environment name used in the request does not exist in your configuration. Check the spelling (<code>prod</code>, <code>sandbox</code>…) or declare it with <code>set-token</code> and the <code>--api-url</code> option.</p>
+        </div></details>
+
+        <details><summary>Certificate or connection error (corporate network)</summary><div>
+          <p>If your company inspects HTTPS traffic, Node.js needs to know its certificate. Run <code>set-token</code> again and give the <code>.pem</code> file provided by your IT team (asked by the command, or with the <code>--node-extra-ca-certs</code> option). Also check that your VPN is on if your instance is only reachable internally.</p>
+        </div></details>
+
+        <details><summary>I pasted my token into the chat by mistake</summary><div>
+          <p>Revoke it right away from <code>/settings/tokens</code> in the Studio, create a new one and register it with <code>set-token</code> in your terminal.</p>
+        </div></details>
+
+        <details><summary>Codex does not seem to use the Prisme.ai tools</summary><div>
+          <p>Codex may load MCP tools on demand. Phrase a request that explicitly mentions Prisme.ai and the environment, or start a new session after installing.</p>
+        </div></details>
+
+        <div class="callout info"><div class="ico">?</div><div><p>Still stuck? Contact Prisme.ai support with your tool, its version, the output of <code>node --version</code> and the error message shown, <strong>never including your token</strong>.</p></div></div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer>
+    <div class="row">
+      <a class="logo" href="https://prisme.ai" aria-label="Prisme.ai"><svg role="img" aria-hidden="true" width="441" height="79" viewBox="0 0 441 79" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M127.745 16.21C140.033 16.21 149.097 24.4892 149.097 38.9562C149.097 52.5516 140.033 61.7024 127.745 61.7024C120.25 61.7024 115.196 58.6522 112.494 54.3818V78.6096H105.348V16.7329H111.535L112.494 23.8792C115.457 19.7831 120.25 16.21 127.745 16.21ZM127.048 55.3404C135.85 55.3404 141.776 48.6299 141.776 38.9562C141.776 29.2825 135.85 22.5719 127.048 22.5719C118.333 22.5719 112.407 29.2825 112.407 38.7819C112.407 48.5427 118.333 55.3404 127.048 55.3404Z" fill="currentColor"/><path d="M177.831 16.7329H179.835V23.7049H176.262C166.937 23.7049 164.41 31.4613 164.41 38.5204V61.1795H157.263V16.7329H163.451L164.41 23.4434C166.501 20.0446 169.9 16.7329 177.831 16.7329Z" fill="currentColor"/><path d="M189.69 9.23793C187.075 9.23793 185.071 7.32062 185.071 4.61896C185.071 1.91731 187.075 0 189.69 0C192.305 0 194.309 1.91731 194.309 4.61896C194.309 7.32062 192.305 9.23793 189.69 9.23793ZM186.03 61.1795V16.7329H193.176V61.1795H186.03Z" fill="currentColor"/><path d="M201.136 46.5383H208.457C208.718 51.7673 213.337 55.6019 220.745 55.6019C227.02 55.6019 231.464 52.9002 231.464 48.8042C231.464 43.2265 226.584 42.7908 219.96 42.0064C210.025 40.7863 202.095 38.7819 202.095 29.544C202.095 21.439 209.502 16.1228 219.525 16.21C229.634 16.2971 236.955 21.0032 237.652 30.2412H230.331C229.808 25.7093 225.625 22.3105 219.525 22.3105C213.337 22.3105 209.154 24.925 209.154 29.021C209.154 33.9015 213.86 34.5115 220.309 35.2959C230.418 36.516 238.523 38.4333 238.523 48.2813C238.523 56.5605 230.593 61.7024 220.745 61.7024C209.241 61.7024 201.31 56.2991 201.136 46.5383Z" fill="currentColor"/><path d="M296.045 16.21C305.283 16.21 312.865 21.5261 312.865 35.5573V61.1795H305.718V35.9931C305.718 27.278 301.884 22.7462 295.173 22.7462C287.765 22.7462 283.234 28.3239 283.234 37.3875V61.1795H276.087V35.9931C276.087 27.278 272.166 22.7462 265.368 22.7462C258.047 22.7462 253.603 28.8468 253.603 37.7361V61.1795H246.456V16.7329H252.644L253.603 22.8334C255.956 19.6088 259.703 16.21 266.588 16.21C272.776 16.21 278.092 18.9988 280.619 24.6635C283.321 19.8703 288.114 16.21 296.045 16.21Z" fill="currentColor"/><path d="M342.001 61.7024C328.667 61.7024 319.952 52.5516 319.952 38.9562C319.952 25.4479 328.493 16.21 341.043 16.21C353.592 16.21 361.785 24.1406 362.133 37.3003C362.133 38.259 362.046 39.3048 361.959 40.3506H327.447V40.9606C327.709 49.4142 333.025 55.3404 341.479 55.3404C347.753 55.3404 352.634 52.0287 354.115 46.2768H361.349C359.606 55.1661 352.285 61.7024 342.001 61.7024ZM327.883 34.4244H354.464C353.767 26.7551 348.538 22.4848 341.13 22.4848C334.594 22.4848 328.58 27.1909 327.883 34.4244Z" fill="currentColor"/><path d="M366.523 56.822C366.523 53.8589 368.614 51.9416 371.49 51.9416C374.366 51.9416 376.458 53.8589 376.458 56.822C376.458 59.7851 374.366 61.7024 371.49 61.7024C368.614 61.7024 366.523 59.7851 366.523 56.822Z" fill="currentColor"/><path d="M424.657 54.6432H426.923V61.1795H423.001C417.075 61.1795 415.07 58.6522 414.983 54.2946C412.194 58.3036 407.75 61.7024 400.08 61.7024C390.32 61.7024 383.696 56.822 383.696 48.717C383.696 39.8277 389.884 34.8601 401.562 34.8601H414.634V31.8099C414.634 26.0579 410.538 22.5719 403.566 22.5719C397.292 22.5719 393.108 25.535 392.237 30.0669H385.091C386.136 21.3518 393.196 16.21 403.915 16.21C415.245 16.21 421.781 21.8747 421.781 32.2456V51.6801C421.781 54.0332 422.652 54.6432 424.657 54.6432ZM414.634 43.0522V40.8735H400.865C394.503 40.8735 390.93 43.2266 390.93 48.2813C390.93 52.6388 394.677 55.6019 400.603 55.6019C409.493 55.6019 414.634 50.46 414.634 43.0522Z" fill="currentColor"/><path d="M436.077 9.23793C433.462 9.23793 431.458 7.32062 431.458 4.61896C431.458 1.91731 433.462 0 436.077 0C438.691 0 440.696 1.91731 440.696 4.61896C440.696 7.32062 438.691 9.23793 436.077 9.23793ZM432.417 61.1795V16.7329H439.563V61.1795H432.417Z" fill="currentColor"/><path d="M35.5031 4.5C43.6723 4.5 50.2948 11.1225 50.2948 19.2917H20.7114C20.7114 11.1225 27.3339 4.5 35.5031 4.5Z" fill="#98C3F8"/><path d="M17.7488 40C17.7488 30.1969 25.6957 22.25 35.4988 22.25C45.3019 22.25 53.2488 30.1969 53.2488 40C53.2488 49.8031 45.3019 57.75 35.4988 57.75C25.6957 57.75 17.7488 49.8031 17.7488 40Z" fill="#255BE0"/><path d="M14.7917 25.2083C6.62246 25.2083 0 31.8307 0 39.9999C0 48.1692 6.62246 54.7917 14.7917 54.7917V25.2083Z" fill="#98C3F8"/><path d="M71.0001 39.9999C71.0001 48.1692 64.3776 54.7917 56.2084 54.7917V25.2083C64.3776 25.2083 71.0001 31.8307 71.0001 39.9999Z" fill="#2541A8"/><path d="M20.7114 60.7091C20.7114 68.8783 27.3339 75.5008 35.5031 75.5008C43.6723 75.5008 50.2948 68.8783 50.2948 60.7091H20.7114Z" fill="#2541A8"/><path d="M56.2084 10.4166C61.11 10.4166 65.0834 14.39 65.0834 19.2916H56.2084V10.4166Z" fill="#4480ED"/><path d="M56.2084 69.5832C61.11 69.5832 65.0834 65.6099 65.0834 60.7082H56.2084V69.5832Z" fill="#233B85"/><path d="M5.91855 19.2915C5.91855 14.39 9.89202 10.4165 14.7935 10.4165V19.2915H5.91855Z" fill="#C2DAFB"/><path d="M5.91855 60.7091C5.91855 65.6108 9.89202 69.5841 14.7935 69.5841V60.7091H5.91855Z" fill="#4480ED"/></svg></a>
+      <span>Repository: <a href="https://github.com/prismeai/prismeai-mcp" target="_blank" rel="noopener">github.com/prismeai/prismeai-mcp</a> · Documentation: <a href="https://docs.prisme.ai" target="_blank" rel="noopener">docs.prisme.ai</a></span>
+      <span class="eyebrow">MCP · prisme-ai-builder</span>
+    </div>
+  </footer>
+</div>
+</div>
+
+<script>
+(function(){
+  var root=document.documentElement;
+  root.classList.add('js');
+  function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
+
+  var T={
+    fr:{title:'Installer le MCP Prisme.ai',themeAria:'Changer de thème',copied:'Copié ✓',theme:{auto:'Thème : auto',light:'Thème : clair',dark:'Thème : sombre'}},
+    en:{title:'Install the Prisme.ai MCP',themeAria:'Change theme',copied:'Copied ✓',theme:{auto:'Theme: auto',light:'Theme: light',dark:'Theme: dark'}}
+  };
+
+  // Language: ?lang= in the URL, then saved choice, then browser language
+  function pickLang(){
+    var m=/[?&]lang=(fr|en)(?:&|$)/.exec(location.search); if(m)return m[1];
+    var s=store('prisme-mcp-lang'); if(s==='fr'||s==='en')return s;
+    return (navigator.language||'fr').toLowerCase().indexOf('fr')===0?'fr':'en';
+  }
+  var lang=pickLang();
+  var langBtns=[].slice.call(document.querySelectorAll('[data-set-lang]'));
+
+  // Theme
+  var btn=document.getElementById('themeBtn'), modes=['auto','light','dark'];
+  var theme=store('prisme-mcp-theme')||'auto'; if(modes.indexOf(theme)<0)theme='auto';
+  function applyTheme(){
+    if(theme==='auto')root.removeAttribute('data-theme'); else root.setAttribute('data-theme',theme);
+    btn.textContent=T[lang].theme[theme]; btn.setAttribute('aria-label',T[lang].themeAria);
+  }
+  btn.addEventListener('click',function(){ theme=modes[(modes.indexOf(theme)+1)%3]; applyTheme(); store('prisme-mcp-theme',theme); });
+
+  function applyLang(l,save){
+    lang=l; root.setAttribute('data-lang',l); root.lang=l; document.title=T[l].title;
+    langBtns.forEach(function(b){b.setAttribute('aria-pressed',b.getAttribute('data-set-lang')===l);});
+    applyTheme();
+    if(save){
+      store('prisme-mcp-lang',l);
+      try{var u=new URL(location.href);u.searchParams.set('lang',l);u.hash='';history.replaceState(null,'',u.toString());}catch(e){}
+      window.scrollTo(0,0);
+    }
+  }
+  langBtns.forEach(function(b){ b.addEventListener('click',function(){applyLang(b.getAttribute('data-set-lang'),true);}); });
+  applyLang(lang,false);
+
+  // Client tabs, kept in sync across both languages
+  var tabs=[].slice.call(document.querySelectorAll('.tabs [role=tab]'));
+  function select(client,focusTab){
+    tabs.forEach(function(t){
+      var on=t.getAttribute('data-client')===client; t.setAttribute('aria-selected',on); t.tabIndex=on?0:-1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden=!on;
+    });
+    if(focusTab)focusTab.focus();
+    store('prisme-mcp-client',client);
+  }
+  [].slice.call(document.querySelectorAll('.tabs')).forEach(function(g){
+    var gt=[].slice.call(g.querySelectorAll('[role=tab]'));
+    gt.forEach(function(t,i){
+      t.addEventListener('click',function(){select(t.getAttribute('data-client'));});
+      t.addEventListener('keydown',function(e){
+        var j=null;
+        if(e.key==='ArrowRight')j=(i+1)%gt.length; else if(e.key==='ArrowLeft')j=(i-1+gt.length)%gt.length;
+        else if(e.key==='Home')j=0; else if(e.key==='End')j=gt.length-1;
+        if(j!==null){e.preventDefault();select(gt[j].getAttribute('data-client'),gt[j]);}
+      });
+    });
+  });
+  var saved=store('prisme-mcp-client');
+  select(tabs.some(function(t){return t.getAttribute('data-client')===saved;})?saved:'claude-code');
+
+  // Copy buttons
+  [].slice.call(document.querySelectorAll('.copy')).forEach(function(b){
+    var label=b.textContent;
+    b.addEventListener('click',function(){
+      var text=b.closest('.code').querySelector('pre').innerText.replace(/\n?\s*# .*$/gm,'').trim();
+      function ok(){b.textContent=T[lang].copied;b.classList.add('done');setTimeout(function(){b.textContent=label;b.classList.remove('done');},1600);}
+      function fallback(){var ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();try{document.execCommand('copy');ok();}catch(e){}document.body.removeChild(ta);}
+      if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(ok,fallback);}else fallback();
+    });
+  });
+
+  // Table of contents highlight
+  var links=[].slice.call(document.querySelectorAll('.toc a'));
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(en.isIntersecting){links.forEach(function(a){a.classList.toggle('active',a.getAttribute('href')==='#'+en.target.id);});}
+      });
+    },{rootMargin:'-20% 0px -70% 0px'});
+    [].slice.call(document.querySelectorAll('main section')).forEach(function(s){io.observe(s);});
+  }
+})();
+</script>
+</body>
+</html>
