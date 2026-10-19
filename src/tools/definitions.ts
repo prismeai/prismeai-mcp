@@ -3,13 +3,19 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 export const tools: Tool[] = [
   {
     name: "create_automation",
-    description: "Create a new automation in the Prisme.ai workspace",
+    description:
+      "Create a new automation in the Prisme.ai workspace, from an inline 'automation' object or a local YAML/JSON file ('path')",
     inputSchema: {
       type: "object",
       properties: {
+        path: {
+          type: "string",
+          description:
+            "Alternative to 'automation': path to a local YAML/JSON automation file (e.g. automations/my-automation.yml), read and sent as-is. Preferred for large automations or when the file already exists on disk.",
+        },
         automation: {
           type: "object",
-          description: "Automation object with name, do, when, arguments, etc.",
+          description: "Automation object with name, do, when, arguments, etc. Omit when 'path' is given.",
           properties: {
             slug: {
               type: "string",
@@ -73,7 +79,7 @@ export const tools: Tool[] = [
             "Alternative: direct workspace ID (use workspaceName instead when possible)",
         },
       },
-      required: ["automation", "workspaceName"],
+      required: ["workspaceName"],
     },
   },
   {
@@ -111,18 +117,25 @@ export const tools: Tool[] = [
   },
   {
     name: "update_automation",
-    description: "Update an existing automation on the prisme.ai workspace",
+    description:
+      "Update an existing automation on the prisme.ai workspace, from an inline 'automation' object or a local YAML/JSON file ('path')",
     inputSchema: {
       type: "object",
       properties: {
         automationSlug: {
           type: "string",
-          description: "The slug of the automation to update",
+          description:
+            "The slug of the automation to update. Required with 'automation'; with 'path' it defaults to the file's 'slug' field, then to the file name without extension.",
+        },
+        path: {
+          type: "string",
+          description:
+            "Alternative to 'automation': path to a local YAML/JSON automation file (e.g. automations/my-automation.yml), read and sent as-is. Preferred for large automations or when the file already exists on disk.",
         },
         automation: {
           type: "object",
           description:
-            "Automation object with fields to update. IMPORTANT: 'name' and 'do' are always required even for partial updates.",
+            "Automation object with fields to update. IMPORTANT: 'name' and 'do' are always required even for partial updates. Omit when 'path' is given.",
           properties: {
             name: {
               description: "Automation name (REQUIRED even for updates)",
@@ -175,7 +188,7 @@ export const tools: Tool[] = [
             "Alternative: direct workspace ID (use workspaceName instead when possible)",
         },
       },
-      required: ["automationSlug", "automation", "workspaceName"],
+      required: ["workspaceName"],
     },
     annotations: {
       destructiveHint: true,

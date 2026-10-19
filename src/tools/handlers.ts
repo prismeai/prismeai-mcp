@@ -46,6 +46,44 @@ function formatLintErrors(result: AutomationLintResult): string {
   return lines.join("\n");
 }
 
+/**
+ * Parse an automation from a local YAML/JSON file, so large automations can be
+ * sent without inlining their content in the tool call.
+ */
+function loadAutomationFile(filePath: string): any {
+  const content = readFileSync(filePath, "utf-8");
+  return filePath.toLowerCase().endsWith(".json") ? JSON.parse(content) : yaml.load(content);
+}
+
+/**
+ * Resolve the automation of a create/update call from either the inline
+ * `automation` object or a local `path`. Exactly one of them must be given.
+ */
+function resolveAutomationInput(
+  automation: any,
+  inputPath: string | undefined
+): { automation: any; path?: string } | { error: string } {
+  const hasInline = automation !== undefined && automation !== null;
+  if (hasInline === Boolean(inputPath)) {
+    return { error: "exactly one of `automation` or `path` must be provided." };
+  }
+  if (!inputPath) return { automation };
+
+  const absPath = resolve(inputPath);
+  if (!existsSync(absPath) || !statSync(absPath).isFile()) {
+    return { error: `File not found: ${absPath}` };
+  }
+  try {
+    const parsed = loadAutomationFile(absPath);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { error: `${absPath} does not contain an automation object.` };
+    }
+    return { automation: parsed, path: absPath };
+  } catch (err) {
+    return { error: `Could not parse ${absPath}: ${err instanceof Error ? err.message : "Parse error"}` };
+  }
+}
+
 function formatAutomationWriteResult(result: unknown, lintResult: AutomationLintResult, action: "created" | "updated"): string {
   if (!lintResult.warnings || lintResult.warnings.length === 0) {
     return JSON.stringify(result, null, 2);
@@ -197,12 +235,22 @@ export async function handleToolCall(
 
     case "create_automation": {
       enforceReadonlyMode("create_automation");
-      const { automation, workspaceId, workspaceName, environment } = args as {
-        automation: any;
+      const { automation: inlineAutomation, path: inputPath, workspaceId, workspaceName, environment } = args as {
+        automation?: any;
+        path?: string;
         workspaceId?: string;
         workspaceName?: string;
         environment?: string;
       };
+
+      const input = resolveAutomationInput(inlineAutomation, inputPath);
+      if ("error" in input) {
+        return {
+          content: [{ type: "text", text: `Error: ${input.error}` }],
+          isError: true,
+        };
+      }
+      const automation = input.automation;
 
       // Validate automation before creating
       const lintResult = lintAutomation(automation);
@@ -271,18 +319,43 @@ export async function handleToolCall(
     case "update_automation": {
       enforceReadonlyMode("update_automation");
       const {
-        automationSlug,
-        automation,
+        automationSlug: inputSlug,
+        automation: inlineAutomation,
+        path: inputPath,
         workspaceId,
         workspaceName,
         environment,
       } = args as {
-        automationSlug: string;
-        automation: any;
+        automationSlug?: string;
+        automation?: any;
+        path?: string;
         workspaceId?: string;
         workspaceName?: string;
         environment?: string;
       };
+
+      const input = resolveAutomationInput(inlineAutomation, inputPath);
+      if ("error" in input) {
+        return {
+          content: [{ type: "text", text: `Error: ${input.error}` }],
+          isError: true,
+        };
+      }
+      const automation = input.automation;
+
+      // From a file, the slug defaults to the file's `slug` field, then its basename
+      const automationSlug =
+        inputSlug ||
+        (input.path &&
+          (typeof automation.slug === "string" && automation.slug
+            ? automation.slug
+            : basename(input.path, extname(input.path))));
+      if (!automationSlug) {
+        return {
+          content: [{ type: "text", text: "Error: `automationSlug` is required when `automation` is passed inline." }],
+          isError: true,
+        };
+      }
 
       // Validate automation before updating
       const lintResult = lintAutomation(automation);
@@ -928,9 +1001,7 @@ export async function handleToolCall(
       // Helper to validate a single file
       const validateFile = (filePath: string): { path: string; valid: boolean; errors?: any[]; warnings?: any[]; error?: string } => {
         try {
-          const fileContent = readFileSync(filePath, "utf-8");
-          const ext = filePath.toLowerCase();
-          const parsed = ext.endsWith(".json") ? JSON.parse(fileContent) : yaml.load(fileContent);
+          const parsed = loadAutomationFile(filePath);
           const result = lintAutomation(parsed, lintOptions);
           const mappedWarnings = result.warnings?.length > 0
             ? result.warnings.map((w) => ({

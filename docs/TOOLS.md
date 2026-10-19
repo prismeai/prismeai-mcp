@@ -6,9 +6,9 @@ All tools are prefixed with `mcp__prisme-ai-builder__` when used in Claude.
 
 | Tool | Description |
 |------|-------------|
-| `create_automation` | Create a new automation |
+| `create_automation` | Create a new automation (inline object or local YAML/JSON file via `path`) |
 | `get_automation` | Get a specific automation by slug |
-| `update_automation` | Update an existing automation |
+| `update_automation` | Update an existing automation (inline object or local YAML/JSON file via `path`; slug defaults to the file's) |
 | `delete_automation` | Delete an automation |
 | `list_automations` | List all automations in a workspace |
 | `execute_automation` | Execute/test an automation with payload |
