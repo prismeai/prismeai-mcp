@@ -30182,13 +30182,17 @@ var init_definitions = __esm({
     tools = [
       {
         name: "create_automation",
-        description: "Create a new automation in the Prisme.ai workspace",
+        description: "Create a new automation in the Prisme.ai workspace, from an inline 'automation' object or a local YAML/JSON file ('path')",
         inputSchema: {
           type: "object",
           properties: {
+            path: {
+              type: "string",
+              description: "Alternative to 'automation': path to a local YAML/JSON automation file (e.g. automations/my-automation.yml), read and sent as-is. Preferred for large automations or when the file already exists on disk."
+            },
             automation: {
               type: "object",
-              description: "Automation object with name, do, when, arguments, etc.",
+              description: "Automation object with name, do, when, arguments, etc. Omit when 'path' is given.",
               properties: {
                 slug: {
                   type: "string",
@@ -30247,7 +30251,7 @@ var init_definitions = __esm({
               description: "Alternative: direct workspace ID (use workspaceName instead when possible)"
             }
           },
-          required: ["automation", "workspaceName"]
+          required: ["workspaceName"]
         }
       },
       {
@@ -30281,17 +30285,21 @@ var init_definitions = __esm({
       },
       {
         name: "update_automation",
-        description: "Update an existing automation on the prisme.ai workspace",
+        description: "Update an existing automation on the prisme.ai workspace, from an inline 'automation' object or a local YAML/JSON file ('path')",
         inputSchema: {
           type: "object",
           properties: {
             automationSlug: {
               type: "string",
-              description: "The slug of the automation to update"
+              description: "The slug of the automation to update. Required with 'automation'; with 'path' it defaults to the file's 'slug' field, then to the file name without extension."
+            },
+            path: {
+              type: "string",
+              description: "Alternative to 'automation': path to a local YAML/JSON automation file (e.g. automations/my-automation.yml), read and sent as-is. Preferred for large automations or when the file already exists on disk."
             },
             automation: {
               type: "object",
-              description: "Automation object with fields to update. IMPORTANT: 'name' and 'do' are always required even for partial updates.",
+              description: "Automation object with fields to update. IMPORTANT: 'name' and 'do' are always required even for partial updates. Omit when 'path' is given.",
               properties: {
                 name: {
                   description: "Automation name (REQUIRED even for updates)",
@@ -30341,7 +30349,7 @@ var init_definitions = __esm({
               description: "Alternative: direct workspace ID (use workspaceName instead when possible)"
             }
           },
-          required: ["automationSlug", "automation", "workspaceName"]
+          required: ["workspaceName"]
         },
         annotations: {
           destructiveHint: true
@@ -51220,6 +51228,30 @@ ${warningLines.join("\n")}`);
   }
   return lines.join("\n");
 }
+function loadAutomationFile(filePath) {
+  const content = readFileSync5(filePath, "utf-8");
+  return filePath.toLowerCase().endsWith(".json") ? JSON.parse(content) : jsYaml.load(content);
+}
+function resolveAutomationInput(automation, inputPath) {
+  const hasInline = automation !== void 0 && automation !== null;
+  if (hasInline === Boolean(inputPath)) {
+    return { error: "exactly one of `automation` or `path` must be provided." };
+  }
+  if (!inputPath) return { automation };
+  const absPath = resolve2(inputPath);
+  if (!existsSync3(absPath) || !statSync(absPath).isFile()) {
+    return { error: `File not found: ${absPath}` };
+  }
+  try {
+    const parsed = loadAutomationFile(absPath);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { error: `${absPath} does not contain an automation object.` };
+    }
+    return { automation: parsed, path: absPath };
+  } catch (err) {
+    return { error: `Could not parse ${absPath}: ${err instanceof Error ? err.message : "Parse error"}` };
+  }
+}
 function formatAutomationWriteResult(result, lintResult, action) {
   if (!lintResult.warnings || lintResult.warnings.length === 0) {
     return JSON.stringify(result, null, 2);
@@ -51301,7 +51333,15 @@ async function handleToolCall(name, args, apiClient) {
     }
     case "create_automation": {
       enforceReadonlyMode("create_automation");
-      const { automation, workspaceId, workspaceName, environment } = args;
+      const { automation: inlineAutomation, path: inputPath, workspaceId, workspaceName, environment } = args;
+      const input = resolveAutomationInput(inlineAutomation, inputPath);
+      if ("error" in input) {
+        return {
+          content: [{ type: "text", text: `Error: ${input.error}` }],
+          isError: true
+        };
+      }
+      const automation = input.automation;
       const lintResult = lintAutomation(automation);
       if (!lintResult.valid) {
         return {
@@ -51361,12 +51401,28 @@ ${formatLintErrors(lintResult)}`
     case "update_automation": {
       enforceReadonlyMode("update_automation");
       const {
-        automationSlug,
-        automation,
+        automationSlug: inputSlug,
+        automation: inlineAutomation,
+        path: inputPath,
         workspaceId,
         workspaceName,
         environment
       } = args;
+      const input = resolveAutomationInput(inlineAutomation, inputPath);
+      if ("error" in input) {
+        return {
+          content: [{ type: "text", text: `Error: ${input.error}` }],
+          isError: true
+        };
+      }
+      const automation = input.automation;
+      const automationSlug = inputSlug || input.path && (typeof automation.slug === "string" && automation.slug ? automation.slug : basename(input.path, extname(input.path)));
+      if (!automationSlug) {
+        return {
+          content: [{ type: "text", text: "Error: `automationSlug` is required when `automation` is passed inline." }],
+          isError: true
+        };
+      }
       const lintResult = lintAutomation(automation);
       if (!lintResult.valid) {
         return {
@@ -51867,9 +51923,7 @@ ${formatLintErrors(lintResult)}`
       const lintOptions = { strict, validateExpressions: validateExprs };
       const validateFile = (filePath) => {
         try {
-          const fileContent = readFileSync5(filePath, "utf-8");
-          const ext = filePath.toLowerCase();
-          const parsed = ext.endsWith(".json") ? JSON.parse(fileContent) : jsYaml.load(fileContent);
+          const parsed = loadAutomationFile(filePath);
           const result = lintAutomation(parsed, lintOptions);
           const mappedWarnings = result.warnings?.length > 0 ? result.warnings.map((w) => ({
             path: w.instancePath || "(root)",
