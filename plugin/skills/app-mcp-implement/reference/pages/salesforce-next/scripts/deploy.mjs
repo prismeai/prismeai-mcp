@@ -607,6 +607,11 @@ async function patchWorkspaceConfig({ bundleUrl, embedUrl, ws, slug }) {
   const bundleRef = toRelativeFilePath(bundleUrl) || bundleUrl
   const embedRef = embedUrl ? (toRelativeFilePath(embedUrl) || embedUrl) : null
 
+  // Merge into the existing entry instead of replacing it: keys set from the
+  // Studio or the API (`public`, `displayMode`, `metadata` for link previews…)
+  // must survive a redeploy. Only the build outputs are overwritten.
+  const { embed: _previousEmbed, ...previousEntry } = existingBundles[slug] || {}
+
   // A PATCH on /workspaces/<id> REPLACES the `config` object with what we send,
   // so we must echo back the WHOLE existing config (notably `config.schema`,
   // which defines the configAppUrl link field shown in Studio) and only override
@@ -623,6 +628,7 @@ async function patchWorkspaceConfig({ bundleUrl, embedUrl, ws, slug }) {
           bundles: {
             ...existingBundles,
             [slug]: {
+              ...previousEntry,
               bundle: bundleRef,
               ...(embedRef ? { embed: embedRef } : {}),
               version: PRISMEAI_APP_VERSION,
