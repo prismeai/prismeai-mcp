@@ -27,7 +27,7 @@ The connector workflow: scaffold a new SaaS connector, verify it through a durab
 | Skill | When to use |
 |---|---|
 | `/prisme-ai:agent-builder` | Scaffold or update an Agent Factory-backed Prisme.ai agent workspace with DSUL templates, deployment automations, tests, and agent instructions. |
-| `/prisme-ai:agent-workspace` | Create a bootstrap workspace that provisions an Agent Factory agent, attaches Storage-backed sources, seeds Agent Evaluations cases, runs evaluation, and validates the setup through the Agents, Storage, and Evaluation product apps. |
+| `/prisme-ai:agent-workspace` | Create or maintain an agent workspace from the standard template: agent, knowledge bases, sources and evaluation bench declared in the workspace and applied by `syncAll` (dry run, drift guard), plus its operator console page and agent-specific maintenance screens. |
 | `/prisme-ai:agent-implement-a2ui` | Add A2UI (Agent-to-UI) surfaces to a Prisme.ai MCP workspace so that LLM agents can render interactive UI (cards, forms, tables, action-cards, confirmations…) through MCP tool calls. The host UI reads the tool's `__surface` payload and renders it from the `prisme://blocks/v1` catalog. |
 
 ---
@@ -59,7 +59,7 @@ The connector workflow: scaffold a new SaaS connector, verify it through a durab
 | Build and run a connector's durable `*-consumer` E2E suite | `/prisme-ai:prisme-app-mcp-test` |
 | Write or update the public docs of a connector | `/prisme-ai:app-mcp-document` |
 | Scaffold an Agent Factory DSUL workspace | `/prisme-ai:agent-builder` |
-| Provision + evaluate an Agent Factory agent | `/prisme-ai:agent-workspace` |
+| Provision, sync, evaluate and operate an Agent Factory agent (incl. operator console) | `/prisme-ai:agent-workspace` |
 | Render interactive UI from agent tool calls | `/prisme-ai:agent-implement-a2ui` |
 | Edit the React frontend of a workspace | `/prisme-ai:workspace-page-implement` |
 | Debug events / trace an execution | `/prisme-ai:prisme-assistant` |
