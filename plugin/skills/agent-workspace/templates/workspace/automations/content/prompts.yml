@@ -1,0 +1,22 @@
+slug: _content-prompts
+name: content/Prompts
+description: 'AGENT CONTENT — owned by the agent, never overwritten by a template upgrade (DESIGN 1). The instructions of every manifest agent, by prompt key: the agent key by default, agents[].prompt when two agents share one text; a variant without its own uses the prompt of its base. The texts name tools by their manifest tool names (agents[].tools[].name). PLACEHOLDER text for the example agent main. Called by _agent-expected; no argument. Returns {prompts: {<prompt-key>: text}}.'
+private: true
+arguments: {}
+do:
+  - comment: One set per prompt; add a key to output.prompts for each new agent.
+  - set:
+      name: _main
+      value: |-
+        # Role
+        You are the assistant of this workspace. Replace this placeholder prompt with the real instructions of the agent.
+
+        # Sources
+        Answer from the documentation knowledge base: search it with the tool `kb_docs` before answering, and cite the documents you used.
+
+        # Rules
+        - If the knowledge base does not contain the answer, say so plainly; never invent facts.
+        - Answer in the language of the question.
+output:
+  prompts:
+    main: '{{_main}}'

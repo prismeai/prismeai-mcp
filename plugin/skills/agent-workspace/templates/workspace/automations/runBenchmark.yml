@@ -1,0 +1,650 @@
+slug: runBenchmark
+name: evaluation/Run benchmark
+description: 'Control endpoint (guarded, 403 Forbidden). Starts, merges or replays a bench and runs its first tick. Body {agents?: [<agent-key>], limit?, tags?: [tag], ids?: [caseId], onlyErrored?, benchId?, force?}. One bench at a time: another running bench → 409 BenchmarkRunning, unless force (admin only, 403 AdminRequired), which cancels its batch runs and marks it abandoned. Agents default to config.evaluation.agents (unknown key → 400 UnknownManifestKey; not deployed → 409 MissingDependency with the syncAll body to create it). Under the bench lock (busy → 409 BenchmarkBusy): the control key setting:benchControl is reset to run; cases come from _cases-load (400 NoCaseLoaded); Custom Code benchEngine op units plans one row benchcase:<benchId>:<agent-key>:<caseId> (status pending) per agent and selected case (ids, tags, limit filter the case set; onlyErrored requeues only the errored rows of an existing bench, the replay); nothing queued → 409 NothingQueued. The bench row bench:<benchId> is written running {benchId, agentKeys, agents {<key>: {id}}, runner, startedAt, casesHash, caseFilter, onlyErrored, batches, starts, batchLog, …} (an existing bench is merged; an interrupted one is resumed, and without any filter nothing is requeued), then one _bench-advance tick runs (it may start the first batch). The pollBenchmark schedule does the rest. Output {benchId, queued, status, byAgent, started, totals, abandoned, resumed, warnings}.'
+when:
+  endpoint: true
+arguments:
+  body:
+    type: object
+    properties:
+      agents:
+        type: array
+        description: Agent keys to bench (config.agents keys, variants included). Default config.evaluation.agents.
+      limit:
+        type: number
+        description: Only the first N cases of the set.
+      tags:
+        type: array
+        description: Only the cases carrying at least one of these tags.
+      ids:
+        type: array
+        description: Only these case ids.
+      onlyErrored:
+        type: boolean
+        description: Requeue only the errored cases of an existing bench (replay).
+      benchId:
+        type: string
+        description: Bench id (letters, digits, - and _). Default bench-<timestamp>; an existing bench is merged.
+      force:
+        type: boolean
+        description: Admin only. Abandon the bench that is running and start this one.
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: Forbidden
+              message: This endpoint requires a control role
+        - break:
+            scope: automation
+  - set:
+      name: _force
+      value: false
+  - conditions:
+      '{{body.force}} == true':
+        - set:
+            name: _force
+            value: true
+  - set:
+      name: _isAdmin
+      value: false
+  - conditions:
+      '{{_guard.admin}} == true':
+        - set:
+            name: _isAdmin
+            value: true
+  - conditions:
+      '{{_force}} and !{{_isAdmin}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: AdminRequired
+              message: force is reserved to the workspace owners and admins
+        - break:
+            scope: automation
+  - set:
+      name: _by
+      value: '{{_guard.role}}'
+  - conditions:
+      '{{user.email}}':
+        - set:
+            name: _by
+            value: '{{user.email}}'
+      '{{user.id}}':
+        - set:
+            name: _by
+            value: '{{user.id}}'
+  - comment: Target agents — body.agents (array, or one key as a string) validated against config.agents.
+  - set:
+      name: _declared
+      value: []
+  - repeat:
+      'on': '{{config.agents}}'
+      do:
+        - set:
+            name: _declared
+            type: push
+            value: '{{item.key}}'
+  - set:
+      name: _targetKeys
+      value: '{{config.evaluation.agents}}'
+  - conditions:
+      '{{body.agents}} in {{_declared}}':
+        - set:
+            name: _targetKeys
+            value:
+              - '{{body.agents}}'
+      '{{body.agents.length}} > 0':
+        - set:
+            name: _targetKeys
+            value: '{{body.agents}}'
+  - set:
+      name: _unknown
+      value: []
+  - repeat:
+      'on': '{{_targetKeys}}'
+      do:
+        - set:
+            name: _known
+            value: false
+        - conditions:
+            '{{item}} in {{_declared}}':
+              - set:
+                  name: _known
+                  value: true
+        - conditions:
+            '!{{_known}}':
+              - set:
+                  name: _unknown
+                  type: push
+                  value: '{{item}}'
+  - conditions:
+      '!{{_targetKeys.length}}':
+        - set:
+            name: _unknown
+            type: push
+            value: config.evaluation.agents is empty
+  - conditions:
+      '{{_unknown.length}} > 0':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _result
+            value:
+              error: UnknownManifestKey
+              message: body.agents (or config.evaluation.agents) must name agents declared in config.agents
+              keys: '{{_unknown}}'
+        - break:
+            scope: automation
+  - comment: Bench id.
+  - set:
+      name: _stamp
+      value: '{% date({{run.date}}).ts %}'
+  - set:
+      name: _benchId
+      value: bench-{{_stamp}}
+  - conditions:
+      '{{body.benchId}}':
+        - set:
+            name: _benchId
+            value: '{{body.benchId}}'
+  - set:
+      name: _idOk
+      value: false
+  - conditions:
+      '{{_benchId}} matches regex("^[A-Za-z0-9_-]+$")':
+        - set:
+            name: _idOk
+            value: true
+  - conditions:
+      '!{{_idOk}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _result
+            value:
+              error: InvalidAction
+              message: benchId may only hold letters, digits, - and _
+        - break:
+            scope: automation
+  - comment: One bench at a time — another running bench blocks the start unless force.
+  - _state-find:
+      query:
+        kind: bench
+        status: running
+      output: _running
+  - set:
+      name: _conflicts
+      value: []
+  - repeat:
+      'on': '{{_running.rows}}'
+      do:
+        - conditions:
+            '{{item.data.benchId}} != {{_benchId}}':
+              - set:
+                  name: _conflicts
+                  type: push
+                  value: '{{item}}'
+  - conditions:
+      '{{_conflicts.length}} > 0 and !{{_force}}':
+        - set:
+            name: $http
+            value:
+              status: 409
+        - set:
+            name: _result
+            value:
+              error: BenchmarkRunning
+              message: Another bench is running; wait for it, stop it with controlBenchmark, or pass force (admin)
+              benchId: '{{_conflicts[0].data.benchId}}'
+        - break:
+            scope: automation
+  - _lock:
+      name: bench
+      op: take
+      output: _lk
+  - conditions:
+      '!{{_lk.taken}}':
+        - set:
+            name: $http
+            value:
+              status: 409
+        - set:
+            name: _result
+            value:
+              error: BenchmarkBusy
+              message: A bench tick is running right now, retry in a few seconds
+              holder: '{{_lk.holder}}'
+        - break:
+            scope: automation
+  - comment: From here every path goes through the lock release at the end (flag _stop instead of break).
+  - set:
+      name: _stop
+      value: false
+  - set:
+      name: _warnings
+      value: []
+  - set:
+      name: _abandoned
+      value: []
+  - repeat:
+      'on': '{{_conflicts}}'
+      do:
+        - set:
+            name: _old
+            value: '{{item}}'
+        - repeat:
+            'on': '{{_old.data.batches}}'
+            do:
+              - conditions:
+                  '{{item.value.runId}}':
+                    - Evaluation.cancelRun:
+                        run_id: '{{item.value.runId}}'
+                        output: _cancel
+        - set:
+            name: _oldData
+            value: '{{_old.data}}'
+        - set:
+            name: _oldData
+            type: merge
+            value:
+              abandonedAt: '{{run.date}}'
+              abandonedBy: '{{_by}}'
+              abandonedFor: '{{_benchId}}'
+        - _state-set:
+            key: '{{_old.key}}'
+            kind: bench
+            status: abandoned
+            data: '{{_oldData}}'
+        - set:
+            name: _abandoned
+            type: push
+            value: '{{_old.data.benchId}}'
+  - _state-set:
+      key: setting:benchControl
+      kind: setting
+      status: run
+      data:
+        action: run
+        benchId: '{{_benchId}}'
+        reason: runBenchmark
+        by: '{{_by}}'
+        at: '{{run.date}}'
+  - _state-get:
+      key: bench:{{_benchId}}
+      output: _existing
+  - set:
+      name: _data
+      value:
+        agents: {}
+        batches: {}
+        starts: []
+        batchLog: []
+        batchCount: {}
+        errors: {}
+        controlLog: []
+  - conditions:
+      '{{_existing.found}}':
+        - set:
+            name: _data
+            type: merge
+            value: '{{_existing.row.data}}'
+  - set:
+      name: _resumed
+      value: false
+  - conditions:
+      '{{_existing.row.status}} == "interrupted"':
+        - set:
+            name: _resumed
+            value: true
+        - set:
+            name: _data.lastInterruption
+            value: '{{_existing.row.data.interruption}}'
+        - set:
+            name: _data.interruption
+            value: null
+        - set:
+            name: _data.resumedAt
+            value: '{{run.date}}'
+        - set:
+            name: _data.controlLog
+            type: push
+            value:
+              at: '{{run.date}}'
+              action: resumed
+              by: '{{_by}}'
+              source: runBenchmark
+  - set:
+      name: _filtered
+      value: false
+  - conditions:
+      '{{body.agents}}':
+        - set:
+            name: _filtered
+            value: true
+  - conditions:
+      '{{body.onlyErrored}} == true':
+        - set:
+            name: _filtered
+            value: true
+  - conditions:
+      '{{body.limit}} > 0':
+        - set:
+            name: _filtered
+            value: true
+  - conditions:
+      '{{body.tags.length}} > 0':
+        - set:
+            name: _filtered
+            value: true
+  - conditions:
+      '{{body.ids.length}} > 0':
+        - set:
+            name: _filtered
+            value: true
+  - set:
+      name: _requeue
+      value: true
+  - conditions:
+      '{{_existing.found}} and !{{_filtered}}':
+        - conditions:
+            '{{_existing.row.status}} == "interrupted" or {{_existing.row.status}} == "running"':
+              - set:
+                  name: _requeue
+                  value: false
+  - set:
+      name: _queued
+      value: 0
+  - set:
+      name: _byAgent
+      value: {}
+  - conditions:
+      '{{_requeue}}':
+        - _cases-load:
+            output: _load
+        - conditions:
+            '!{{_load.ok}}':
+              - set:
+                  name: $http
+                  value:
+                    status: '{{_load.httpStatus}}'
+              - set:
+                  name: _result
+                  value: '{{_load.response}}'
+              - set:
+                  name: _stop
+                  value: true
+  - conditions:
+      '{{_requeue}} and !{{_stop}}':
+        - repeat:
+            'on': '{{_load.warnings}}'
+            do:
+              - set:
+                  name: _warnings
+                  type: push
+                  value: '{{item}}'
+        - comment: Every targeted agent must exist on the instance.
+        - set:
+            name: _agentList
+            value: []
+        - set:
+            name: _missing
+            value: []
+        - repeat:
+            'on': '{{_targetKeys}}'
+            do:
+              - set:
+                  name: _key
+                  value: '{{item}}'
+              - _resolve-agent:
+                  key: '{{_key}}'
+                  output: _agent
+              - conditions:
+                  '{{_agent.id}}':
+                    - set:
+                        name: _agentList
+                        type: push
+                        value:
+                          key: '{{_key}}'
+                          id: '{{_agent.id}}'
+                    - set:
+                        name: _data.agents[{{_key}}]
+                        value:
+                          id: '{{_agent.id}}'
+                  default:
+                    - set:
+                        name: _missing
+                        type: push
+                        value: '{{_key}}'
+        - conditions:
+            '{{_missing.length}} > 0':
+              - set:
+                  name: $http
+                  value:
+                    status: 409
+              - set:
+                  name: _result
+                  value:
+                    error: MissingDependency
+                    message: These agents are not deployed, create them first with syncAll
+                    agents: '{{_missing}}'
+                    syncAll:
+                      agents: '{{_missing}}'
+              - set:
+                  name: _stop
+                  value: true
+  - conditions:
+      '{{_requeue}} and !{{_stop}}':
+        - _state-find:
+            query:
+              kind: benchcase
+              key:
+                $regex: '^benchcase:{{_benchId}}:'
+            limit: 5000
+            output: _rows
+        - set:
+            name: _onlyErrored
+            value: false
+        - conditions:
+            '{{body.onlyErrored}} == true':
+              - set:
+                  name: _onlyErrored
+                  value: true
+        - Custom Code.run:
+            function: benchEngine
+            parameters:
+              op: units
+              bench:
+                benchId: '{{_benchId}}'
+              cases: '{{_load.cases}}'
+              agents: '{{_agentList}}'
+              units: '{{_rows.rows}}'
+              runner: '{{config.evaluation.runner}}'
+              options:
+                onlyErrored: '{{_onlyErrored}}'
+                ids: '{{body.ids}}'
+                tags: '{{body.tags}}'
+                limit: '{{body.limit}}'
+            output: _plan
+        - conditions:
+            '{{_plan.error}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 500
+              - set:
+                  name: _result
+                  value:
+                    error: CustomCodeUnavailable
+                    message: 'benchEngine failed: {{_plan.message}}'
+              - set:
+                  name: _stop
+                  value: true
+            '{{_plan.count}} == 0':
+              - set:
+                  name: $http
+                  value:
+                    status: 409
+              - set:
+                  name: _result
+                  value:
+                    error: NothingQueued
+                    message: No case could be queued (empty selection, or onlyErrored without errored case); an existing bench is left untouched
+                    benchId: '{{_benchId}}'
+                    byAgent: '{{_plan.byAgent}}'
+                    unknownIds: '{{_plan.unknownIds}}'
+              - set:
+                  name: _stop
+                  value: true
+            default:
+              - repeat:
+                  'on': '{{_plan.units}}'
+                  do:
+                    - _state-set:
+                        key: '{{item.key}}'
+                        kind: benchcase
+                        status: '{{item.status}}'
+                        data: '{{item.data}}'
+              - set:
+                  name: _queued
+                  value: '{{_plan.count}}'
+              - set:
+                  name: _byAgent
+                  value: '{{_plan.byAgent}}'
+              - conditions:
+                  '{{_plan.unknownIds.length}} > 0':
+                    - set:
+                        name: _warnings
+                        type: push
+                        value: 'Unknown case ids ignored: {% join({{_plan.unknownIds}}, ", ") %}'
+              - set:
+                  name: _data
+                  type: merge
+                  value:
+                    runner: '{{_plan.runner}}'
+                    casesHash: '{{_load.hash}}'
+                    casesSource: '{{_load.source}}'
+                    onlyErrored: '{{_onlyErrored}}'
+                    caseFilter:
+                      ids: '{{body.ids}}'
+                      tags: '{{body.tags}}'
+                      limit: '{{body.limit}}'
+                      partial: '{{_plan.partial}}'
+                    lastQueuedAt: '{{run.date}}'
+  - conditions:
+      '!{{_stop}}':
+        - comment: agentKeys keep the config.agents order; a merged bench keeps the agents it already had.
+        - set:
+            name: _oldKeys
+            value: []
+        - conditions:
+            '{{_data.agentKeys.length}} > 0':
+              - set:
+                  name: _oldKeys
+                  value: '{{_data.agentKeys}}'
+        - set:
+            name: _agentKeys
+            value: []
+        - repeat:
+            'on': '{{_declared}}'
+            do:
+              - set:
+                  name: _k
+                  value: '{{item}}'
+              - set:
+                  name: _keep
+                  value: false
+              - conditions:
+                  '{{_k}} in {{_oldKeys}}':
+                    - set:
+                        name: _keep
+                        value: true
+              - conditions:
+                  '{{_requeue}} and {{_k}} in {{_targetKeys}}':
+                    - set:
+                        name: _keep
+                        value: true
+              - conditions:
+                  '{{_keep}}':
+                    - set:
+                        name: _agentKeys
+                        type: push
+                        value: '{{_k}}'
+        - set:
+            name: _startedAt
+            value: '{{run.date}}'
+        - conditions:
+            '{{_data.startedAt}}':
+              - set:
+                  name: _startedAt
+                  value: '{{_data.startedAt}}'
+        - conditions:
+            '!{{_data.runner}}':
+              - Custom Code.run:
+                  function: benchEngine
+                  parameters:
+                    op: plan
+                    bench: {}
+                    units: []
+                    runner: '{{config.evaluation.runner}}'
+                  output: _defaults
+              - set:
+                  name: _data.runner
+                  value: '{{_defaults.runner}}'
+        - set:
+            name: _data
+            type: merge
+            value:
+              benchId: '{{_benchId}}'
+              agentKeys: '{{_agentKeys}}'
+              startedAt: '{{_startedAt}}'
+              startedBy: '{{_by}}'
+              report: null
+              finishedAt: null
+              lastError: null
+              interrupting: null
+        - _state-set:
+            key: bench:{{_benchId}}
+            kind: bench
+            status: running
+            data: '{{_data}}'
+        - comment: First tick under the lock held here; it may start the first batch.
+        - _bench-advance:
+            benchId: '{{_benchId}}'
+            lockHeld: true
+            output: _adv
+        - set:
+            name: _result
+            value:
+              benchId: '{{_benchId}}'
+              queued: '{{_queued}}'
+              status: '{{_adv.status}}'
+              byAgent: '{{_byAgent}}'
+              started: '{{_adv.started}}'
+              totals: '{{_adv.totals}}'
+              nextAt: '{{_adv.nextAt}}'
+              errors: '{{_adv.errors}}'
+              merged: '{{_existing.found}}'
+              resumed: '{{_resumed}}'
+              abandoned: '{{_abandoned}}'
+              warnings: '{{_warnings}}'
+  - _lock:
+      name: bench
+      op: release
+      output: _rel
+output: '{{_result}}'

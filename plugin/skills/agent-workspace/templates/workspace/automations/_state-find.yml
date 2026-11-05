@@ -1,0 +1,40 @@
+slug: _state-find
+name: helpers/State find
+description: 'Finds state rows matching a Collection query (DESIGN 3). Arguments {query, sort?, limit?}: default sort {updatedAt: -1}, default limit 1000 (the Collection app returns 50 rows without a limit). Returns {rows}.'
+private: true
+arguments:
+  query:
+    type: object
+    description: 'Collection query, e.g. {kind: item, status: queued}.'
+  sort:
+    type: object
+    description: 'Optional sort object. Default {updatedAt: -1}.'
+  limit:
+    type: number
+    description: Optional max rows. Default 1000.
+do:
+  - set:
+      name: _sort
+      value:
+        updatedAt: -1
+  - conditions:
+      '{{sort}}':
+        - set:
+            name: _sort
+            value: '{{sort}}'
+  - set:
+      name: _limit
+      value: '{{limit}}'
+  - conditions:
+      '!{{_limit}}':
+        - set:
+            name: _limit
+            value: 1000
+  - state.find:
+      query: '{{query}}'
+      sort: '{{_sort}}'
+      options:
+        limit: '{{_limit}}'
+      output: _rows
+output:
+  rows: '{{_rows}}'

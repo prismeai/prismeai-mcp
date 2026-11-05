@@ -1,0 +1,9 @@
+slug: _content-agent-tests
+name: content/Agent tests
+description: 'AGENT CONTENT — owned by the agent, never overwritten by a template upgrade (DESIGN 1). The test questions of the bench (Agent Evaluations calls them cases): {id, question, expected, criteria, tags}. Example: {id: "case-001", question: "How do I reset my password?", expected: "Open Settings, choose Security, then Reset password; a link is sent by email.", criteria: ["Gives the documented steps in order", "Does not invent a setting"], tags: ["topic:account", "type:how-to"]}. id is stable and unique (letters, digits, dot, dash, underscore); expected may be empty (the judge then rates against the criteria only); criteria default to config.evaluation.criteria; optional expected_tools / forbidden_tools are passed to Agent Evaluations as is. Keep real client questions out of git: leave this list empty in the repository and load them on the environment with importCases {cases}. Called by _cases-load; no argument. Returns {tests: [...]}.'
+private: true
+arguments: {}
+do:
+  - comment: Static test set. Put the tests in output.tests; nothing to compute.
+output:
+  tests: []

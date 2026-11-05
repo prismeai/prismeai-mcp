@@ -1,0 +1,13 @@
+slug: _content-documents
+name: content/Documents
+description: 'AGENT CONTENT — owned by the agent, never overwritten by a template upgrade (DESIGN 1). The text of every reference document of the manifest (documents[]), by document key, published by syncAll into its knowledge base (one entry per line, so an anchored exact search returns only that entry). An empty or absent text is a skip with a warning (EmptyText), never a failure. PLACEHOLDER: the example document reference is empty. Called by _ensure-kb-document; no argument. Returns {documents: {<doc-key>: text}}.'
+private: true
+arguments: {}
+do:
+  - comment: One set per document; add a key to output.documents for each manifest document.
+  - set:
+      name: _reference
+      value: ''
+output:
+  documents:
+    reference: '{{_reference}}'

@@ -1,0 +1,123 @@
+slug: _ingest-attach
+name: ingestion/helpers/Ingest attach
+description: 'Attaches one item to its target knowledge base through the Storage app (never a direct call). A workspace file (data.fileId) is attached with native_file_id; any other item with source_url = data.url, the stable dedup key (Storage upserts on it, so a retry or a refresh never duplicates), and fetch_url = data.fetchUrl when the item has one. filename = data.name, mime_type = data.mime, metadata = data.metadata, tags {ingestSource, ingestItem} (used by _ingest-housekeeping to map failed documents back to their row). Body {row (item state row)}. Returns {ok, documentId, documentStatus, stage: kb | attach, message}.'
+private: true
+arguments:
+  row:
+    type: object
+    description: The item state row (key, data {id, source, target, url, name, mime, fileId, fetchUrl, metadata}).
+do:
+  - set:
+      name: _at
+      value:
+        ok: false
+        documentId: null
+        documentStatus: null
+        stage: null
+        message: null
+  - _resolve-kb:
+      key: '{{row.data.target}}'
+      output: _atKb
+  - conditions:
+      '!{{_atKb.id}}':
+        - set:
+            name: _at.stage
+            value: kb
+        - set:
+            name: _at.message
+            value: 'Knowledge base {{row.data.target}} not found: run syncAll first'
+        - break:
+            scope: automation
+  - set:
+      name: _atTags
+      value:
+        ingestSource: '{{row.data.source}}'
+        ingestItem: '{{row.data.id}}'
+  - set:
+      name: _atDoc
+      value: null
+  - set:
+      name: _atErr
+      value: null
+  - try:
+      do:
+        - conditions:
+            '{{row.data.fileId}}':
+              - Storage.addFileToVectorStore:
+                  vector_store_id: '{{_atKb.id}}'
+                  native_file_id: '{{row.data.fileId}}'
+                  filename: '{{row.data.name}}'
+                  mime_type: '{{row.data.mime}}'
+                  metadata: '{{row.data.metadata}}'
+                  tags: '{{_atTags}}'
+                  output: _atDoc
+            '{{row.data.fetchUrl}}':
+              - Storage.addFileToVectorStore:
+                  vector_store_id: '{{_atKb.id}}'
+                  source_url: '{{row.data.url}}'
+                  fetch_url: '{{row.data.fetchUrl}}'
+                  filename: '{{row.data.name}}'
+                  mime_type: '{{row.data.mime}}'
+                  metadata: '{{row.data.metadata}}'
+                  tags: '{{_atTags}}'
+                  output: _atDoc
+            default:
+              - Storage.addFileToVectorStore:
+                  vector_store_id: '{{_atKb.id}}'
+                  source_url: '{{row.data.url}}'
+                  filename: '{{row.data.name}}'
+                  mime_type: '{{row.data.mime}}'
+                  metadata: '{{row.data.metadata}}'
+                  tags: '{{_atTags}}'
+                  output: _atDoc
+      catch:
+        - set:
+            name: _atErr
+            value: '{{$error}}'
+  - conditions:
+      '{{_atDoc.structuredData.id}}':
+        - set:
+            name: _at.ok
+            value: true
+        - set:
+            name: _at.documentId
+            value: '{{_atDoc.structuredData.id}}'
+        - set:
+            name: _at.documentStatus
+            value: '{{_atDoc.structuredData.status}}'
+      default:
+        - set:
+            name: _at.stage
+            value: attach
+        - set:
+            name: _at.message
+            value: Storage did not return a document
+        - conditions:
+            '{{_atDoc.error.message}}':
+              - set:
+                  name: _at.message
+                  value: '{{_atDoc.error.message}}'
+            '{{_atDoc.message}}':
+              - set:
+                  name: _at.message
+                  value: '{{_atDoc.message}}'
+            '{{_atErr.message}}':
+              - set:
+                  name: _at.message
+                  value: '{{_atErr.message}}'
+        - comment: An identity refusal (401 / 403, typically a run without user) is not retried as a transient failure.
+        - set:
+            name: _at.status
+            value: '{% {{_atDoc.status}} || {{_atDoc.error.status}} || {{_atErr.status}} || 0 %}'
+        - set:
+            name: _at.identity
+            value: false
+        - conditions:
+            '{{_at.status}} == 401 or {{_at.status}} == 403':
+              - set:
+                  name: _at.identity
+                  value: true
+              - set:
+                  name: _at.stage
+                  value: identity
+output: '{{_at}}'

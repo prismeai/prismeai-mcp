@@ -1,0 +1,33 @@
+authorizations:
+  roles:
+    editor: {}
+    control:
+      auth:
+        apiKey: {}
+    files:
+      auth:
+        apiKey: {}
+  rules:
+    - role: control
+      action: execute
+      subject: automations
+    - role: files
+      action:
+        - create
+        - read
+        - delete
+      subject: files
+    - role: editor
+      action:
+        - read
+        - get_usage
+        - aggregate_search
+        - update
+      subject: workspaces
+    - role: editor
+      action: manage
+      subject:
+        - automations
+        - files
+        - pages
+        - events

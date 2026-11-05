@@ -1,0 +1,325 @@
+slug: _agent-expected
+name: sync/Agent expected config
+description: 'Builds, without writing anything, the exact body _ensure-agent sends for a manifest agent (DESIGN 4.2), shared with describeInstance. Arguments {key, plannedKbs?}. config.agentDefaults merged with the agents[] entry (model, temperature, visibility, profile, limits field by field: max_turns, tool_call_budget, token_budget, max_tokens, each sent only when set, never as null); a variant (variantOf) inherits prompt, limits, tools and skills of its base when it declares none. instructions = _content-prompts .prompts[<prompt key>] (agents[].prompt, default the agent key). tools from tools[]: type knowledge → the manifest knowledge base resolved by _resolve-kb, mode file_search = {type file_search, name, description, vector_store_id, max_num_results?}, mode explorer = the Storage knowledge explorer MCP tool of the base {type mcp, name, description, server <apiUrl>/workspaces/slug:storage/webhooks/v1/knowledge_bases/<id>/mcp, scope agent_id,user_id,context_id, catalog_id mcp-knowledge-explorer}; a base that does not resolve is planned with a placeholder id when its key is in plannedKbs (dry run), left out and listed in skippedTools when the manifest says create false, otherwise reported missing; type raw → tool sent as is. skills [{name, description, instructions}] sent when the entry declares the array (managed), not sent otherwise. subAgents [{agent, name, description}] resolved to {agent_id, name, description} by _resolve-agent, plus the delegation system tool (a PATCH of tools would otherwise drop it). Returns {found, body {name, description, instructions, model, temperature, tools, sub_agents, max_turns?, tool_call_budget?, token_budget?, max_tokens?, skills?}, visibility, profile, skippedTools [{tool, kb, reason}], missing [kb:<kb-key> | agent:<agent-key> | prompt:<prompt-key> | toolType:<type> | unknown:<key>]}.'
+private: true
+arguments:
+  key:
+    type: string
+    description: agents[].key
+  plannedKbs:
+    type: array
+    description: 'Dry run of syncAll only: keys of the knowledge bases that sync would create; they count as existing (placeholder id, never saved).'
+do:
+  - set:
+      name: _found
+      value: false
+  - set:
+      name: _body
+      value: null
+  - set:
+      name: _missing
+      value: []
+  - set:
+      name: _skippedTools
+      value: []
+  - set:
+      name: _plannedKbs
+      value: []
+  - conditions:
+      '{{plannedKbs}}':
+        - set:
+            name: _plannedKbs
+            value: '{{plannedKbs}}'
+  - _manifest-get:
+      list: agents
+      key: '{{key}}'
+      output: _m
+  - conditions:
+      '!{{_m.found}}':
+        - set:
+            name: _missing
+            type: push
+            value: unknown:{{key}}
+        - break:
+            scope: automation
+  - set:
+      name: _found
+      value: true
+  - set:
+      name: _agent
+      value: '{{_m.item}}'
+  - set:
+      name: _defaults
+      value: '{{config.agentDefaults}}'
+  - comment: A variant inherits the prompt, limits, tools and skills of its base agent when it declares none (only the declared differences change).
+  - conditions:
+      '{{_agent.variantOf}}':
+        - _manifest-get:
+            list: agents
+            key: '{{_agent.variantOf}}'
+            output: _baseM
+        - conditions:
+            '!{{_baseM.found}}':
+              - set:
+                  name: _missing
+                  type: push
+                  value: agent:{{_agent.variantOf}}
+            default:
+              - conditions:
+                  '!{{_agent.prompt}}':
+                    - set:
+                        name: _agent.prompt
+                        value: '{% {{_baseM.item.prompt}} || {{_agent.variantOf}} %}'
+              - conditions:
+                  '!{{_agent.limits}}':
+                    - set:
+                        name: _agent.limits
+                        value: '{{_baseM.item.limits}}'
+              - conditions:
+                  '!{{_agent.tools}}':
+                    - set:
+                        name: _agent.tools
+                        value: '{{_baseM.item.tools}}'
+              - conditions:
+                  '!{{_agent.skills}}':
+                    - conditions:
+                        '{% isArray({{_baseM.item.skills}}) %}':
+                          - set:
+                              name: _agent.skills
+                              value: '{{_baseM.item.skills}}'
+  - comment: The WHOLE tools array is built here and sent as a whole on every sync, which keeps the sync idempotent.
+  - set:
+      name: _tools
+      value: []
+  - repeat:
+      'on': '{{_agent.tools}}'
+      do:
+        - set:
+            name: _t
+            value: '{{item}}'
+        - conditions:
+            '{{_t.type}} = "knowledge"':
+              - _manifest-get:
+                  list: knowledgeBases
+                  key: '{{_t.kb}}'
+                  output: _kbM
+              - set:
+                  name: _kbId
+                  value: null
+              - conditions:
+                  '{{_kbM.found}}':
+                    - _resolve-kb:
+                        key: '{{_t.kb}}'
+                        output: _kbRes
+                    - conditions:
+                        '{{_kbRes.found}}':
+                          - set:
+                              name: _kbId
+                              value: '{{_kbRes.id}}'
+                        '{{_t.kb}} in {{_plannedKbs}}':
+                          - comment: Dry run of a sync that creates this knowledge base — planned as added with a placeholder id, never saved.
+                          - set:
+                              name: _kbId
+                              value: (created-by-this-sync:{{_t.kb}})
+              - conditions:
+                  '!{{_kbM.found}}':
+                    - set:
+                        name: _missing
+                        type: push
+                        value: kb:{{_t.kb}}
+                  '!{{_kbId}} and {{_kbM.item.create}} == false':
+                    - set:
+                        name: _skippedTools
+                        type: push
+                        value:
+                          tool: '{{_t.name}}'
+                          kb: '{{_t.kb}}'
+                          reason: knowledge base not found on this instance and not created by the workspace (create false)
+                  '!{{_kbId}}':
+                    - set:
+                        name: _missing
+                        type: push
+                        value: kb:{{_t.kb}}
+                  '{{_t.mode}} = "explorer"':
+                    - set:
+                        name: _tools
+                        type: push
+                        value:
+                          type: mcp
+                          name: '{{_t.name}}'
+                          description: '{{_t.description}}'
+                          server: '{{global.apiUrl}}/workspaces/slug:storage/webhooks/v1/knowledge_bases/{{_kbId}}/mcp'
+                          scope: agent_id,user_id,context_id
+                          catalog_id: mcp-knowledge-explorer
+                  default:
+                    - set:
+                        name: _tool
+                        value:
+                          type: file_search
+                          name: '{{_t.name}}'
+                          description: '{{_t.description}}'
+                          vector_store_id: '{{_kbId}}'
+                    - conditions:
+                        '{{_t.max_num_results}}':
+                          - set:
+                              name: _tool.max_num_results
+                              value: '{{_t.max_num_results}}'
+                    - set:
+                        name: _tools
+                        type: push
+                        value: '{{_tool}}'
+            '{{_t.type}} = "raw"':
+              - set:
+                  name: _tools
+                  type: push
+                  value: '{{_t.tool}}'
+            default:
+              - set:
+                  name: _missing
+                  type: push
+                  value: toolType:{{_t.type}}
+  - comment: Sub agents are synced before this agent by syncAll, so their ids resolve.
+  - set:
+      name: _subAgents
+      value: []
+  - repeat:
+      'on': '{{_agent.subAgents}}'
+      do:
+        - set:
+            name: _sa
+            value: '{{item}}'
+        - _resolve-agent:
+            key: '{{_sa.agent}}'
+            output: _saRes
+        - conditions:
+            '!{{_saRes.found}}':
+              - set:
+                  name: _missing
+                  type: push
+                  value: agent:{{_sa.agent}}
+            default:
+              - set:
+                  name: _subAgents
+                  type: push
+                  value:
+                    agent_id: '{{_saRes.id}}'
+                    name: '{{_sa.name}}'
+                    description: '{{_sa.description}}'
+  - conditions:
+      '{{_subAgents.length}} > 0':
+        - set:
+            name: _tools
+            type: push
+            value:
+              type: system
+              name: delegation
+  - comment: The text comes from the agent content (_content-prompts), by prompt key (agents[].prompt, default the agent key).
+  - set:
+      name: _promptName
+      value: '{% {{_agent.prompt}} || {{key}} %}'
+  - _content-prompts:
+      output: _prompts
+  - set:
+      name: _instructions
+      value: '{{_prompts.prompts[{{_promptName}}]}}'
+  - conditions:
+      '!{{_instructions}}':
+        - set:
+            name: _missing
+            type: push
+            value: prompt:{{_promptName}}
+  - set:
+      name: _model
+      value: '{{_defaults.model}}'
+  - conditions:
+      '{{_agent.model}}':
+        - set:
+            name: _model
+            value: '{{_agent.model}}'
+  - set:
+      name: _temperature
+      value: '{{_defaults.temperature}}'
+  - conditions:
+      '{{_agent.temperature}} >= 0':
+        - set:
+            name: _temperature
+            value: '{{_agent.temperature}}'
+  - set:
+      name: _description
+      value: '{{_agent.description}}'
+  - conditions:
+      '!{{_description}}':
+        - set:
+            name: _description
+            value: ''
+  - set:
+      name: _body
+      value:
+        name: '{{_agent.name}}'
+        description: '{{_description}}'
+        instructions: '{{_instructions}}'
+        model: '{{_model}}'
+        temperature: '{{_temperature}}'
+        tools: '{{_tools}}'
+        sub_agents: '{{_subAgents}}'
+  - comment: Limits, field by field (agents[].limits over agentDefaults.limits); a limit is sent only when set, a null would reset it.
+  - set:
+      name: _limitKeys
+      value:
+        - max_turns
+        - tool_call_budget
+        - token_budget
+        - max_tokens
+  - repeat:
+      'on': '{{_limitKeys}}'
+      do:
+        - set:
+            name: _limitName
+            value: '{{item}}'
+        - set:
+            name: _limit
+            value: '{{_defaults.limits[{{_limitName}}]}}'
+        - conditions:
+            '{{_agent.limits[{{_limitName}}]}}':
+              - set:
+                  name: _limit
+                  value: '{{_agent.limits[{{_limitName}}]}}'
+        - conditions:
+            '{{_limit}}':
+              - set:
+                  name: _body[{{_limitName}}]
+                  value: '{{_limit}}'
+  - comment: Skills are managed only when the entry declares the array (an empty array clears them); otherwise the live skills are left as they are.
+  - conditions:
+      '{% isArray({{_agent.skills}}) %}':
+        - set:
+            name: _body.skills
+            value: '{{_agent.skills}}'
+  - set:
+      name: _visibility
+      value: '{{_agent.visibility}}'
+  - conditions:
+      '!{{_visibility}}':
+        - set:
+            name: _visibility
+            value: '{{_defaults.visibility}}'
+  - conditions:
+      '!{{_visibility}}':
+        - set:
+            name: _visibility
+            value: restricted
+  - set:
+      name: _profile
+      value: '{{_agent.profile}}'
+  - conditions:
+      '!{{_profile}}':
+        - set:
+            name: _profile
+            value: '{{_defaults.profile}}'
+output:
+  found: '{{_found}}'
+  body: '{{_body}}'
+  visibility: '{{_visibility}}'
+  profile: '{{_profile}}'
+  skippedTools: '{{_skippedTools}}'
+  missing: '{{_missing}}'

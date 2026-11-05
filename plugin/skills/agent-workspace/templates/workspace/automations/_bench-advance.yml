@@ -1,0 +1,624 @@
+slug: _bench-advance
+name: evaluation/Advance bench
+description: 'One tick of a running bench (runBenchmark right after queueing, pollBenchmark at most every 15 min, the console every minute while open, advanceBenchmark, controlBenchmark). Runs under the bench lock (_lock name bench; a caller that already holds it passes lockHeld; busy → {status: busy}). 0. Reads setting:benchControl fresh (status run | pause | stop; it applies when data.benchId is empty or equal). 1. Every agent with a batch run in flight is followed by _bench-collect (stop = cancel it now; its unfinished cases go back to pending). 2. Custom Code benchEngine op plan on the case rows: orphan inflight rows go back to pending; nothing pending nor in flight → op report, the bench becomes completed (report stored, benchmark.finished); control pause | stop → no batch start, the bench becomes interrupted once nothing is in flight (data.interruption, benchmark.interrupted); otherwise, unless noStart, at most ONE batch start per execution (Agent Evaluations derives the imported case ids and the run id from the execution correlationId): the next agent after lastStartAgent without a run in flight, its first runner.batchSize ready pending cases, within runner.parallelAgents and runner.messagesPerHour (rolling hour, this bench and the recent ones). Start = Evaluation.importCases (replaces the agent case set with the batch) then Evaluation.startRun; the rows become inflight (benchmark.batchStarted); a failure changes no row and is retried at the next tick. 3. The bench row is rewritten whole: data {benchId, agentKeys, agents {<key>: {id, score, passRate, total, completed, errored, status, …}}, runner, totals {total, pending, inFlight, done, passed, failed, errored, cancelled}, batches, starts, batchLog, batchCount, lastStartAgent, errors, lastError, nextAt, eta, blocked, control, interrupting, interruption, report, finishedAt, …}. Arguments {benchId, lockHeld?, noStart?}. Output {benchId, status (running | completed | interrupted | failed | busy | not_found | other stored status), started, collected, totals, agents, nextAt, eta, blocked, errors, lastError, interrupting, interruption}.'
+private: true
+arguments:
+  benchId:
+    type: string
+  lockHeld:
+    type: boolean
+    description: true when the caller already holds the bench lock.
+  noStart:
+    type: boolean
+    description: true = never start a batch in this execution (the control key is still applied).
+do:
+  - set:
+      name: _ownLock
+      value: false
+  - set:
+      name: _noStart
+      value: false
+  - conditions:
+      '{{noStart}} == true':
+        - set:
+            name: _noStart
+            value: true
+  - set:
+      name: _lockHeld
+      value: false
+  - conditions:
+      '{{lockHeld}} == true':
+        - set:
+            name: _lockHeld
+            value: true
+  - conditions:
+      '!{{_lockHeld}}':
+        - _lock:
+            name: bench
+            op: take
+            output: _lk
+        - conditions:
+            '!{{_lk.taken}}':
+              - set:
+                  name: _result
+                  value:
+                    benchId: '{{benchId}}'
+                    status: busy
+                    started: []
+                    holder: '{{_lk.holder}}'
+              - break:
+                  scope: automation
+        - set:
+            name: _ownLock
+            value: true
+  - comment: From here every path reaches the lock release at the end (flag _stop instead of break).
+  - set:
+      name: _stop
+      value: false
+  - _state-get:
+      key: bench:{{benchId}}
+      output: _bench
+  - conditions:
+      '!{{_bench.found}}':
+        - set:
+            name: _result
+            value:
+              benchId: '{{benchId}}'
+              status: not_found
+              started: []
+        - set:
+            name: _stop
+            value: true
+      '{{_bench.row.status}} != "running"':
+        - set:
+            name: _result
+            value:
+              benchId: '{{benchId}}'
+              status: '{{_bench.row.status}}'
+              started: []
+        - set:
+            name: _stop
+            value: true
+  - conditions:
+      '!{{_stop}}':
+        - set:
+            name: _data
+            value: '{{_bench.row.data}}'
+        - set:
+            name: _batches
+            value: {}
+        - conditions:
+            '{{_data.batches}}':
+              - set:
+                  name: _batches
+                  type: merge
+                  value: '{{_data.batches}}'
+        - set:
+            name: _starts
+            value: []
+        - conditions:
+            '{{_data.starts.length}} > 0':
+              - set:
+                  name: _starts
+                  value: '{{_data.starts}}'
+        - set:
+            name: _batchLog
+            value: []
+        - conditions:
+            '{{_data.batchLog.length}} > 0':
+              - set:
+                  name: _batchLog
+                  value: '{{_data.batchLog}}'
+        - set:
+            name: _lastRunError
+            value: '{{_data.lastRunError}}'
+        - set:
+            name: _batchCount
+            value: {}
+        - conditions:
+            '{{_data.batchCount}}':
+              - set:
+                  name: _batchCount
+                  type: merge
+                  value: '{{_data.batchCount}}'
+        - set:
+            name: _errors
+            value: {}
+        - conditions:
+            '{{_data.errors}}':
+              - set:
+                  name: _errors
+                  type: merge
+                  value: '{{_data.errors}}'
+        - set:
+            name: _controlLog
+            value: []
+        - conditions:
+            '{{_data.controlLog.length}} > 0':
+              - set:
+                  name: _controlLog
+                  value: '{{_data.controlLog}}'
+        - set:
+            name: _lastStartAgent
+            value: '{{_data.lastStartAgent}}'
+        - set:
+            name: _runner
+            value: '{{_data.runner}}'
+        - set:
+            name: _status
+            value: running
+        - set:
+            name: _started
+            value: []
+        - set:
+            name: _collected
+            value: []
+        - set:
+            name: _lastError
+            value: null
+        - set:
+            name: _report
+            value: null
+        - set:
+            name: _finishedAt
+            value: null
+        - set:
+            name: _interrupting
+            value: null
+        - set:
+            name: _interruption
+            value: null
+        - comment: 0. Control key, read fresh before any collection or start; a missing row means run.
+        - _state-get:
+            key: setting:benchControl
+            output: _ctlRow
+        - set:
+            name: _ctlStatus
+            value: run
+        - conditions:
+            '{{_ctlRow.row.status}} == "pause" or {{_ctlRow.row.status}} == "stop"':
+              - conditions:
+                  '!{{_ctlRow.row.data.benchId}}':
+                    - set:
+                        name: _ctlStatus
+                        value: '{{_ctlRow.row.status}}'
+                  '{{_ctlRow.row.data.benchId}} == {{benchId}}':
+                    - set:
+                        name: _ctlStatus
+                        value: '{{_ctlRow.row.status}}'
+        - set:
+            name: _cancelInFlight
+            value: false
+        - conditions:
+            '{{_ctlStatus}} == "stop"':
+              - set:
+                  name: _cancelInFlight
+                  value: true
+        - set:
+            name: _control
+            value:
+              status: '{{_ctlStatus}}'
+              checkedAt: '{{run.date}}'
+              key: '{{_ctlRow.row.data}}'
+        - comment: 1. Follow or collect the batch run in flight of every agent.
+        - set:
+            name: _inFlightCancelled
+            value: []
+        - repeat:
+            'on': '{{_batches}}'
+            do:
+              - set:
+                  name: _bk
+                  value: '{{item.key}}'
+              - set:
+                  name: _bv
+                  value: '{{item.value}}'
+              - conditions:
+                  '{{_bv.runId}}':
+                    - _bench-collect:
+                        benchId: '{{benchId}}'
+                        agentKey: '{{_bk}}'
+                        batch: '{{_bv}}'
+                        runner: '{{_runner}}'
+                        interrupt: '{{_cancelInFlight}}'
+                        output: _col
+                    - conditions:
+                        '{{_col.state}} == "collected"':
+                          - set:
+                              name: _batches[{{_bk}}]
+                              value: null
+                          - set:
+                              name: _batchLog
+                              type: push
+                              value: '{{_col.logEntry}}'
+                          - conditions:
+                              '{{_col.logEntry.run.error}}':
+                                - set:
+                                    name: _lastRunError
+                                    value:
+                                      agentKey: '{{_col.logEntry.agentKey}}'
+                                      runId: '{{_col.logEntry.runId}}'
+                                      message: '{{_col.logEntry.run.error}}'
+                                      at: '{{run.date}}'
+                          - set:
+                              name: _collected
+                              type: push
+                              value: '{{_bk}}'
+                          - conditions:
+                              '{{_col.reason}} == "interrupted"':
+                                - set:
+                                    name: _inFlightCancelled
+                                    type: push
+                                    value:
+                                      agentKey: '{{_bk}}'
+                                      runId: '{{_bv.runId}}'
+                                      summary: '{{_col.summary}}'
+                        '{{_col.state}} == "waiting"':
+                          - set:
+                              name: _batches[{{_bk}}]
+                              value: '{{_col.batch}}'
+                        default:
+                          - set:
+                              name: _lastError
+                              value: '{{_col.error}}'
+        - comment: 2. Plan from the case rows (read again) and the batch starts of the recent benches (same hourly budget).
+        - _state-find:
+            query:
+              kind: benchcase
+              key:
+                $regex: '^benchcase:{{benchId}}:'
+            limit: 5000
+            output: _units
+        - _state-find:
+            query:
+              kind: bench
+            limit: 6
+            output: _recent
+        - set:
+            name: _recentStarts
+            value: []
+        - repeat:
+            'on': '{{_recent.rows}}'
+            do:
+              - set:
+                  name: _rb
+                  value: '{{item}}'
+              - conditions:
+                  '{{_rb.key}} != {{_bench.row.key}} and {{_rb.data.starts.length}} > 0':
+                    - repeat:
+                        'on': '{{_rb.data.starts}}'
+                        do:
+                          - set:
+                              name: _recentStarts
+                              type: push
+                              value: '{{item}}'
+        - set:
+            name: _planBench
+            value: '{{_data}}'
+        - set:
+            name: _planBench
+            type: merge
+            value:
+              batches: '{{_batches}}'
+              starts: '{{_starts}}'
+              batchLog: '{{_batchLog}}'
+              lastStartAgent: '{{_lastStartAgent}}'
+        - Custom Code.run:
+            function: benchEngine
+            parameters:
+              op: plan
+              bench: '{{_planBench}}'
+              units: '{{_units.rows}}'
+              runner: '{{_runner}}'
+              options:
+                recentStarts: '{{_recentStarts}}'
+            output: _plan
+        - set:
+            name: _agentsSummary
+            value: '{{_data.agents}}'
+        - conditions:
+            '{{_plan.error}}':
+              - set:
+                  name: _lastError
+                  value:
+                    error: CustomCodeUnavailable
+                    message: '{{_plan.message}}'
+                    at: '{{run.date}}'
+            '{{_plan.totals.total}} == 0':
+              - set:
+                  name: _status
+                  value: failed
+              - set:
+                  name: _finishedAt
+                  value: '{{run.date}}'
+              - set:
+                  name: _lastError
+                  value:
+                    error: NothingQueued
+                    message: The bench has no case row
+                    at: '{{run.date}}'
+            default:
+              - set:
+                  name: _agentsSummary
+                  value: '{{_plan.agents}}'
+              - repeat:
+                  'on': '{{_plan.orphans}}'
+                  do:
+                    - _state-set:
+                        key: '{{item.key}}'
+                        kind: benchcase
+                        status: pending
+                        data: '{{item.data}}'
+              - conditions:
+                  '{{_plan.allDone}}':
+                    - comment: 2a. Every case is done or errored — report and close.
+                    - Custom Code.run:
+                        function: benchEngine
+                        parameters:
+                          op: report
+                          bench: '{{_planBench}}'
+                          units: '{{_units.rows}}'
+                          runner: '{{_runner}}'
+                          manifest:
+                            agents: '{{config.agents}}'
+                            evaluation: '{{config.evaluation}}'
+                        output: _rep
+                    - conditions:
+                        '{{_rep.error}}':
+                          - set:
+                              name: _lastError
+                              value:
+                                error: CustomCodeUnavailable
+                                message: '{{_rep.message}}'
+                                at: '{{run.date}}'
+                        default:
+                          - set:
+                              name: _status
+                              value: completed
+                          - set:
+                              name: _report
+                              value: '{{_rep}}'
+                          - set:
+                              name: _agentsSummary
+                              value: '{{_rep.summary}}'
+                          - set:
+                              name: _finishedAt
+                              value: '{{run.date}}'
+                          - emit:
+                              event: benchmark.finished
+                              payload:
+                                benchId: '{{benchId}}'
+                                status: completed
+                                rejected: '{{_rep.rejected}}'
+                                totals: '{{_rep.totals}}'
+                                agents: '{{_rep.summary}}'
+                  '{{_ctlStatus}} != "run"':
+                    - comment: 2b. Paused or stopped — no start; the bench becomes interrupted once nothing is in flight.
+                    - conditions:
+                        '{{_plan.inFlightAgents.length}} > 0':
+                          - set:
+                              name: _interrupting
+                              value:
+                                since: '{{run.date}}'
+                                control: '{{_ctlStatus}}'
+                                requestedAt: '{{_ctlRow.row.data.at}}'
+                                by: '{{_ctlRow.row.data.by}}'
+                                waitingFor: '{{_plan.inFlightAgents}}'
+                          - conditions:
+                              '{{_data.interrupting.since}}':
+                                - set:
+                                    name: _interrupting.since
+                                    value: '{{_data.interrupting.since}}'
+                        default:
+                          - set:
+                              name: _status
+                              value: interrupted
+                          - set:
+                              name: _interruption
+                              value:
+                                at: '{{run.date}}'
+                                control: '{{_ctlStatus}}'
+                                requestedAt: '{{_ctlRow.row.data.at}}'
+                                reason: '{{_ctlRow.row.data.reason}}'
+                                by: '{{_ctlRow.row.data.by}}'
+                                pendingCases: '{% {{_plan.totals.pending}} + {{_plan.totals.inFlight}} %}'
+                                done: '{{_plan.totals.done}}'
+                                errored: '{{_plan.totals.errored}}'
+                                total: '{{_plan.totals.total}}'
+                                inFlightCancelled: '{{_inFlightCancelled}}'
+                                resumeWith:
+                                  controlBenchmark:
+                                    action: resume
+                                    benchId: '{{benchId}}'
+                          - set:
+                              name: _controlLog
+                              type: push
+                              value:
+                                at: '{{run.date}}'
+                                action: interrupted
+                                control: '{{_ctlStatus}}'
+                                by: '{{_ctlRow.row.data.by}}'
+                          - emit:
+                              event: benchmark.interrupted
+                              payload:
+                                benchId: '{{benchId}}'
+                                interruption: '{{_interruption}}'
+                  default:
+                    - comment: 2c. At most one batch start per execution.
+                    - conditions:
+                        '{{_plan.next.agentKey}} and !{{_noStart}}':
+                          - set:
+                              name: _next
+                              value: '{{_plan.next}}'
+                          - set:
+                              name: _batchNo
+                              value: 1
+                          - set:
+                              name: _prevBatches
+                              value: '{{_batchCount[{{_next.agentKey}}]}}'
+                          - conditions:
+                              isNumber({{_prevBatches}}):
+                                - set:
+                                    name: _batchNo
+                                    value: '{% {{_prevBatches}} + 1 %}'
+                          - set:
+                              name: _lastStartAgent
+                              value: '{{_next.agentKey}}'
+                          - Evaluation.importCases:
+                              agent_id: '{{_next.agentId}}'
+                              cases: '{{_next.cases}}'
+                              output: _imp
+                          - conditions:
+                              '{{_imp.error}} == true':
+                                - set:
+                                    name: _errors[{{_next.agentKey}}]
+                                    value:
+                                      stage: import
+                                      error: '{{_imp.code}}'
+                                      status: '{{_imp.status}}'
+                                      message: '{{_imp.message}}'
+                                      at: '{{run.date}}'
+                              default:
+                                - Evaluation.startRun:
+                                    agent_id: '{{_next.agentId}}'
+                                    output: _start
+                                - conditions:
+                                    '{{_start.id}}':
+                                      - repeat:
+                                          'on': '{{_next.units}}'
+                                          do:
+                                            - set:
+                                                name: _ud
+                                                value: '{{item.data}}'
+                                            - set:
+                                                name: _ud
+                                                type: merge
+                                                value:
+                                                  runId: '{{_start.id}}'
+                                                  batchNo: '{{_batchNo}}'
+                                                  batchStartedAt: '{{run.date}}'
+                                            - _state-set:
+                                                key: '{{item.key}}'
+                                                kind: benchcase
+                                                status: inflight
+                                                data: '{{_ud}}'
+                                      - set:
+                                          name: _batches[{{_next.agentKey}}]
+                                          value:
+                                            runId: '{{_start.id}}'
+                                            agentId: '{{_next.agentId}}'
+                                            'n': '{{_next.n}}'
+                                            caseIds: '{{_next.caseIds}}'
+                                            batchNo: '{{_batchNo}}'
+                                            startedAt: '{{run.date}}'
+                                            lastProgressAt: '{{run.date}}'
+                                            lastCompleted: 0
+                                      - set:
+                                          name: _starts
+                                          type: push
+                                          value:
+                                            at: '{{run.date}}'
+                                            'n': '{{_next.n}}'
+                                            agentKey: '{{_next.agentKey}}'
+                                      - set:
+                                          name: _batchCount[{{_next.agentKey}}]
+                                          value: '{{_batchNo}}'
+                                      - set:
+                                          name: _errors[{{_next.agentKey}}]
+                                          value: null
+                                      - set:
+                                          name: _started
+                                          type: push
+                                          value: '{{_next.agentKey}}'
+                                      - emit:
+                                          event: benchmark.batchStarted
+                                          payload:
+                                            benchId: '{{benchId}}'
+                                            agentKey: '{{_next.agentKey}}'
+                                            runId: '{{_start.id}}'
+                                            batchNo: '{{_batchNo}}'
+                                            'n': '{{_next.n}}'
+                                            caseIds: '{{_next.caseIds}}'
+                                    default:
+                                      - set:
+                                          name: _errors[{{_next.agentKey}}]
+                                          value:
+                                            stage: start
+                                            error: '{{_start.code}}'
+                                            status: '{{_start.status}}'
+                                            message: '{{_start.message}}'
+                                            at: '{{run.date}}'
+        - comment: 3. Store the bench row, rewritten whole under the lock.
+        - set:
+            name: _newData
+            value: '{{_data}}'
+        - set:
+            name: _newData
+            type: merge
+            value:
+              benchId: '{{benchId}}'
+              agents: '{{_agentsSummary}}'
+              runner: '{{_plan.runner}}'
+              totals: '{{_plan.totals}}'
+              batches: '{{_batches}}'
+              starts: '{{_starts}}'
+              batchLog: '{{_batchLog}}'
+              batchCount: '{{_batchCount}}'
+              lastStartAgent: '{{_lastStartAgent}}'
+              errors: '{{_errors}}'
+              lastError: '{{_lastError}}'
+              lastRunError: '{{_lastRunError}}'
+              nextAt: '{{_plan.nextAt}}'
+              eta: '{{_plan.eta}}'
+              blocked: '{{_plan.blocked}}'
+              deferred: '{{_plan.deferred}}'
+              casesInWindow: '{{_plan.casesInWindow}}'
+              progressAt: '{{run.date}}'
+              control: '{{_control}}'
+              interrupting: '{{_interrupting}}'
+              controlLog: '{{_controlLog}}'
+              report: '{{_report}}'
+              finishedAt: '{{_finishedAt}}'
+        - conditions:
+            '{{_status}} == "interrupted"':
+              - set:
+                  name: _newData
+                  type: merge
+                  value:
+                    interruption: '{{_interruption}}'
+        - conditions:
+            '{{_plan.error}}':
+              - set:
+                  name: _newData
+                  type: merge
+                  value:
+                    runner: '{{_data.runner}}'
+                    totals: '{{_data.totals}}'
+        - _state-set:
+            key: bench:{{benchId}}
+            kind: bench
+            status: '{{_status}}'
+            data: '{{_newData}}'
+        - set:
+            name: _result
+            value:
+              benchId: '{{benchId}}'
+              status: '{{_status}}'
+              started: '{{_started}}'
+              collected: '{{_collected}}'
+              totals: '{{_newData.totals}}'
+              agents: '{{_agentsSummary}}'
+              nextAt: '{{_plan.nextAt}}'
+              eta: '{{_plan.eta}}'
+              blocked: '{{_plan.blocked}}'
+              errors: '{{_errors}}'
+              lastError: '{{_lastError}}'
+              interrupting: '{{_interrupting}}'
+              interruption: '{{_interruption}}'
+  - conditions:
+      '{{_ownLock}}':
+        - _lock:
+            name: bench
+            op: release
+            output: _rel
+output: '{{_result}}'

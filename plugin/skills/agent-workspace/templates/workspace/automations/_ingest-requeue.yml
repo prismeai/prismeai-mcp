@@ -1,0 +1,75 @@
+slug: _ingest-requeue
+name: ingestion/helpers/Ingest requeue
+description: 'Retry decision for one item row after a failure (an identity refusal, identity true, goes to error at once with stage identity) (attach failed, handler lost, document failed to index). data.attempts counts the claims of the item (onIngestItem); while it is below maxAttempts the row goes back to queued (error kept as {message, stage, attempt} for the console), otherwise it ends in error {message, stage}. dispatchToken and claimToken are dropped. Body {row (state row), maxAttempts, stage, message}. Returns {status: queued | error, attempts}.'
+private: true
+arguments:
+  row:
+    type: object
+    description: The item state row as read (key, data).
+  maxAttempts:
+    type: number
+  stage:
+    type: string
+    description: attach | stale | indexing | claim
+  message:
+    type: string
+  identity:
+    type: boolean
+    description: The failure is an identity refusal of Storage (401 / 403); it is not retried.
+do:
+  - set:
+      name: _rqAttempts
+      value: 0
+  - conditions:
+      '{{row.data.attempts}} > 0':
+        - set:
+            name: _rqAttempts
+            value: '{{row.data.attempts}}'
+  - set:
+      name: _rqMax
+      value: 3
+  - conditions:
+      '{{maxAttempts}} > 0':
+        - set:
+            name: _rqMax
+            value: '{{maxAttempts}}'
+  - set:
+      name: _rqData
+      value: '{{row.data}}'
+  - set:
+      name: _rqData.dispatchToken
+      value: null
+  - set:
+      name: _rqData.claimToken
+      value: null
+  - set:
+      name: _rqData.lastFailureAt
+      value: '{{run.date}}'
+  - set:
+      name: _rqStatus
+      value: queued
+  - conditions:
+      '{{_rqAttempts}} >= {{_rqMax}}':
+        - set:
+            name: _rqStatus
+            value: error
+      '{{identity}}':
+        - comment: Retrying cannot succeed without an identity Storage accepts; refreshSource re-queues it later.
+        - set:
+            name: _rqStatus
+            value: error
+  - _state-set:
+      key: '{{row.key}}'
+      kind: item
+      status: '{{_rqStatus}}'
+      data: '{{_rqData}}'
+      error:
+        message: '{{message}}'
+        stage: '{{stage}}'
+        attempt: '{{_rqAttempts}}'
+  - set:
+      name: _rqResult
+      value:
+        status: '{{_rqStatus}}'
+        attempts: '{{_rqAttempts}}'
+output: '{{_rqResult}}'

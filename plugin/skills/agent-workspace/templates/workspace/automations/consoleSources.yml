@@ -1,0 +1,402 @@
+slug: consoleSources
+name:
+  en: console/Sources
+  fr: console/Sources
+description: 'Sources endpoint of the operator console (guarded, DESIGN 5.3 and 7). The delivered config.sources is never rewritten: console changes live in the overlay (_overlay-set). Body {op, source?, add?: [items], remove?: [items], ids?: [item ids], urls?: [urls]}. op list -> {sources} (_sources-effective with console details, every source or the one named). The other ops need source (404 SourceNotConfigured). op preview {add, remove} -> the refreshSource dry run {discovered, toQueue, alreadyIngested, toRemove, items} of the source with the change applied in memory, plus overlay (the overlay the change would leave). op save {add, remove} -> {source, overlay {added, removed, by, at, baseHash}, status: open | cleared, journalKey}, journaled as sources.save; 400 NothingToSave when add and remove are empty or change nothing. op export -> {source, yaml, overlay}: the delivered entry with the overlay folded in, as a YAML list item for config.value.sources. op markIntegrated -> {ok, source, integrated} once the delivered list contains every added item and none of the removed ones, journaled as sources.markIntegrated; 409 NotIntegrated {missing, stillDelivered} otherwise. op progress {ids | urls} (80 at most) -> {items: [{id, url, status (absent when never queued), updatedAt, error, attempts}]} read from item:<source>:<id> rows (id = sha256 of the url, 16 hex). Errors {error, message}: 403 Forbidden, 400 InvalidOp | NothingToSave, 404 SourceNotConfigured, 409 NotIntegrated, 502 CustomCodeUnavailable.'
+when:
+  endpoint: true
+validateArguments: true
+arguments:
+  body:
+    type: object
+    properties:
+      op:
+        type: string
+      source:
+        type: string
+      add:
+        type: array
+      remove:
+        type: array
+      ids:
+        type: array
+      urls:
+        type: array
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _output
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - break:
+            scope: automation
+  - set:
+      name: _op
+      value: '{{body.op}}'
+  - set:
+      name: _ops
+      value:
+        - list
+        - preview
+        - save
+        - export
+        - markIntegrated
+        - progress
+  - set:
+      name: _validOp
+      value: false
+  - conditions:
+      '{{_op}} and {{_op}} in {{_ops}}':
+        - set:
+            name: _validOp
+            value: true
+  - conditions:
+      '!{{_validOp}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _output
+            value:
+              error: InvalidOp
+              message: op must be one of {% join({{_ops}}, ", ") %}
+        - break:
+            scope: automation
+  - conditions:
+      '{{_op}} = "list"':
+        - _sources-effective:
+            key: '{{body.source}}'
+            console: true
+            output: _output
+        - break:
+            scope: automation
+  - set:
+      name: _key
+      value: '{{body.source}}'
+  - _manifest-get:
+      list: sources
+      key: '{{_key}}'
+      output: _m
+  - set:
+      name: _known
+      value: false
+  - conditions:
+      '{{_key}} and {{_m.found}}':
+        - set:
+            name: _known
+            value: true
+  - conditions:
+      '!{{_known}}':
+        - set:
+            name: $http
+            value:
+              status: 404
+        - set:
+            name: _output
+            value:
+              error: SourceNotConfigured
+              message: no source {{_key}} in config.sources
+        - break:
+            scope: automation
+  - _sources-effective:
+      key: '{{_key}}'
+      console: true
+      output: _eff
+  - set:
+      name: _cur
+      value: '{{_eff.sources[0]}}'
+  - conditions:
+      '{{_op}} = "preview"':
+        - _overlay-set:
+            list: sources
+            key: '{{_key}}'
+            add: '{{body.add}}'
+            remove: '{{body.remove}}'
+            delivered: '{{_cur.delivered.items}}'
+            dryRun: true
+            output: _plan
+        - _sources-effective:
+            key: '{{_key}}'
+            pending:
+              key: '{{_key}}'
+              added: '{{_plan.overlay.added}}'
+              removed: '{{_plan.overlay.removed}}'
+            output: _pv
+        - refreshSource:
+            body:
+              source: '{{_key}}'
+              dryRun: true
+              params: '{{_pv.sources[0].params}}'
+            output: _output
+        - set:
+            name: _output.overlay
+            value: '{{_plan.overlay}}'
+      '{{_op}} = "save"':
+        - set:
+            name: _hasChange
+            value: false
+        - conditions:
+            '{{body.add.length}} > 0':
+              - set:
+                  name: _hasChange
+                  value: true
+        - conditions:
+            '{{body.remove.length}} > 0':
+              - set:
+                  name: _hasChange
+                  value: true
+        - conditions:
+            '!{{_hasChange}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 400
+              - set:
+                  name: _output
+                  value:
+                    error: NothingToSave
+                    message: add or remove must hold at least one item
+              - break:
+                  scope: automation
+        - conditions:
+            '{{config.console.overlays}} and "sources" not in {{config.console.overlays}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 400
+              - set:
+                  name: _output
+                  value:
+                    error: InvalidOp
+                    message: config.console.overlays does not list sources
+              - break:
+                  scope: automation
+        - _overlay-set:
+            list: sources
+            key: '{{_key}}'
+            add: '{{body.add}}'
+            remove: '{{body.remove}}'
+            delivered: '{{_cur.delivered.items}}'
+            dryRun: true
+            output: _plan
+        - conditions:
+            '!{{_plan.changed}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 400
+              - set:
+                  name: _output
+                  value:
+                    error: NothingToSave
+                    message: the change is already in the delivered list or in the overlay
+              - break:
+                  scope: automation
+        - comment: The journal keeps counts only (an item may be a URL carrying a query token).
+        - _console-journal:
+            op: start
+            action: sources.save
+            args:
+              source: '{{_key}}'
+              add: '{{body.add.length}}'
+              remove: '{{body.remove.length}}'
+            output: _j
+        - _overlay-set:
+            list: sources
+            key: '{{_key}}'
+            add: '{{body.add}}'
+            remove: '{{body.remove}}'
+            delivered: '{{_cur.delivered.items}}'
+            baseHash: '{{_cur.delivered.hash}}'
+            output: _set
+        - _console-journal:
+            op: finish
+            key: '{{_j.key}}'
+            status: ok
+            result:
+              status: '{{_set.status}}'
+              added: '{{_set.overlay.added.length}}'
+              removed: '{{_set.overlay.removed.length}}'
+        - set:
+            name: _output
+            value:
+              source: '{{_key}}'
+              overlay: '{{_set.overlay}}'
+              status: '{{_set.status}}'
+              journalKey: '{{_j.key}}'
+      '{{_op}} = "export"':
+        - set:
+            name: _blank
+            value: {}
+        - set:
+            name: _entry
+            value: '{% deepmerge({{_blank}}, {{_m.item}}) %}'
+        - set:
+            name: _entry.params
+            value: '{{_cur.params}}'
+        - set:
+            name: _yaml
+            value: null
+        - try:
+            do:
+              - Custom Code.run:
+                  function: consoleKit
+                  parameters:
+                    op: yaml
+                    value: '{{_entry}}'
+                  output: _y
+              - set:
+                  name: _yaml
+                  value: '{{_y.yaml}}'
+            catch:
+              - set:
+                  name: _yaml
+                  value: null
+        - conditions:
+            '!{{_yaml}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 502
+              - set:
+                  name: _output
+                  value:
+                    error: CustomCodeUnavailable
+                    message: the Custom Code function consoleKit did not answer
+              - break:
+                  scope: automation
+        - set:
+            name: _output
+            value:
+              source: '{{_key}}'
+              yaml: '{{_yaml}}'
+              overlay: '{{_cur.overlay}}'
+      '{{_op}} = "markIntegrated"':
+        - _overlay-set:
+            list: sources
+            key: '{{_key}}'
+            op: integrate
+            delivered: '{{_cur.delivered.items}}'
+            dryRun: true
+            output: _chk
+        - conditions:
+            '{{_chk.error}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 409
+              - set:
+                  name: _output
+                  value:
+                    error: '{{_chk.error}}'
+                    message: '{{_chk.message}}'
+                    missing: '{{_chk.missing}}'
+                    stillDelivered: '{{_chk.stillDelivered}}'
+              - break:
+                  scope: automation
+            '{{_chk.status}} = "none"':
+              - set:
+                  name: _output
+                  value:
+                    ok: true
+                    source: '{{_key}}'
+                    integrated: false
+                    message: no console change waits for git on this source
+              - break:
+                  scope: automation
+        - _console-journal:
+            op: start
+            action: sources.markIntegrated
+            args:
+              source: '{{_key}}'
+            output: _j
+        - _overlay-set:
+            list: sources
+            key: '{{_key}}'
+            op: integrate
+            delivered: '{{_cur.delivered.items}}'
+            output: _int
+        - _console-journal:
+            op: finish
+            key: '{{_j.key}}'
+            status: ok
+            result:
+              status: '{{_int.status}}'
+        - set:
+            name: _output
+            value:
+              ok: true
+              source: '{{_key}}'
+              integrated: true
+              journalKey: '{{_j.key}}'
+      '{{_op}} = "progress"':
+        - set:
+            name: _refs
+            value: []
+        - conditions:
+            '{{body.ids.length}} > 0':
+              - repeat:
+                  'on': '{{body.ids}}'
+                  do:
+                    - conditions:
+                        '{{$index}} >= 80':
+                          - break:
+                              scope: repeat
+                    - set:
+                        name: _refs[]
+                        value:
+                          id: '{{item}}'
+                          url: null
+            default:
+              - repeat:
+                  'on': '{{body.urls}}'
+                  do:
+                    - conditions:
+                        '{{$index}} >= 80':
+                          - break:
+                              scope: repeat
+                    - Custom Code.run:
+                        function: sha256
+                        parameters:
+                          text: '{{item}}'
+                        output: _h
+                    - set:
+                        name: _refs[]
+                        value:
+                          id: '{{_h.hash}}'
+                          url: '{{item}}'
+        - set:
+            name: _items
+            value: []
+        - repeat:
+            'on': '{{_refs}}'
+            do:
+              - set:
+                  name: _ref
+                  value: '{{item}}'
+              - _state-get:
+                  key: item:{{_key}}:{{_ref.id}}
+                  output: _row
+              - set:
+                  name: _items[]
+                  value:
+                    id: '{{_ref.id}}'
+                    url: '{% {{_row.row.data.url}} || {{_ref.url}} %}'
+                    status: '{% {{_row.row.status}} || "absent" %}'
+                    updatedAt: '{{_row.row.updatedAt}}'
+                    error: '{{_row.row.error}}'
+                    attempts: '{{_row.row.data.attempts}}'
+        - set:
+            name: _output
+            value:
+              items: '{{_items}}'
+output: '{{_output}}'

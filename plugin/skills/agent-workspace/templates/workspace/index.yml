@@ -1,0 +1,153 @@
+# Standard agent workspace — manifest skeleton (DESIGN.md §2).
+#
+# PLACEHOLDERS to replace when the template is copied to workspaces/<slug>/:
+#   my-agent-workspace        workspace slug (<slug>): slug below, every `name:` prefix, file names
+#   My Agent Workspace        workspace display name
+#   myAgentWorkspaceState_v1  imports/state.yml collectionName (<slug>State_v1, camelCase, no dash)
+#   <model-id>                agentDefaults.model: a model enabled on the target instance
+#   main                      example agent key (<agent-key>); its prompt is _content-prompts .prompts.main
+#   kb-docs                   example knowledge base key (<kb-key>)
+#   kb_docs                   tool name the prompt of `main` refers to
+#   reference                 example optional document key (<doc-key>); its text is _content-documents .documents.reference
+#   docs                      example source key (<source-key>), type urls
+#   https://example.com/...   example source URL
+#   Console My Agent          console.title
+#
+# Every other name (config keys, state row keys, automation slugs) is fixed by DESIGN.md.
+#
+# ENGINE vs CONTENT (DESIGN.md §1). This file and automations/content/* are the agent's content:
+# prompts, reference documents, test questions, custom source types. Every other file is engine:
+# a template upgrade replaces it as is (guides/sync.md § Upgrading the engine). Never put
+# agent-specific lines in an engine file. templateVersion below says which engine version this
+# workspace runs.
+#
+# Binding an existing knowledge base by id (knowledgeBases[].existingIdFrom: <name>): declare
+# the secret <name> below and the config value `<name>: '{{secret.<name>}}'`; the engine reads
+# config.<name> and binds only when it holds a plain id (an unset secret is never used).
+#
+# No secret by default: the Agents, Storage and Evaluation apps act with the identity of whoever
+# runs the automation (a user from the console, the MCP, the Studio). An organization API key is
+# only needed for runs without a user: the ingestion schedule (Storage refuses it, see
+# ingestion.unattended) and Agent Factory calls from a schedule: then declare a secret, put `apiKey: '{{secret.<name>}}'` in
+# imports/Agents.yml / imports/Evaluation.yml and `agentFactoryApiKey` / `agentEvaluationsApiKey`
+# in config.value (read by _product-call). Never a personal token.
+# Console page (guides/console.md § 2): once its bundle is uploaded, add under config.value
+#   socleVersion: 1.0.0
+#   bundles:
+#     my-agent-workspace: {bundle: <bundle file url>, name: my-agent-workspace, version: <x.y.z>}
+# (key = the workspace slug: the Studio serves /apps/<workspace slug>), so a push keeps them.
+#
+# Platform file uploads (reference documents, reports, bench exports) are signed with the
+# workspace API key of the security role `files` (fetch prismeaiApiKey), no secret to set.
+name: My Agent Workspace
+slug: my-agent-workspace
+description: Standard agent workspace — one Agent Factory agent, its knowledge bases, sources and evaluation bench, synced from this manifest.
+labels:
+  - agent-workspace
+  - rag
+registerWorkspace: false
+config:
+  value:
+    templateVersion: 1.0.0
+    controlRoles:
+      - owner
+      - admin
+      - editor
+      - control
+    adminRoles:
+      - owner
+      - admin
+    agentDefaults:
+      model: <model-id>
+      temperature: 0.2
+      visibility: restricted
+      profile: agent_light
+      limits:
+        max_turns: 30
+        tool_call_budget: 40
+        token_budget: 500000
+        max_tokens: 32000
+    knowledgeBases:
+      - key: kb-docs
+        name: my-agent-workspace-kb-docs
+        description: Documentation of the agent's domain, filled by the sources and the reference document.
+        create: true
+        parser: tika
+        chunking_strategy:
+          type: static
+          max_chunk_size_tokens: 800
+          chunk_overlap_tokens: 100
+    documents:
+      - key: reference
+        kb: kb-docs
+        fileName: reference.txt
+        optional: true
+    sources:
+      - key: docs
+        type: urls
+        target: kb-docs
+        label: Site documentation
+        params:
+          urls:
+            - https://example.com/docs/page-1
+    ingestion:
+      batchSize: 5
+      maxInFlight: 10
+      staleAfterMinutes: 30
+      maxAttempts: 3
+      maxHops: 4
+      unattended: false
+    agents:
+      - key: main
+        name: my-agent-workspace-main
+        description: Main assistant of the workspace.
+        optional: false
+        variantOf: null
+        tools:
+          - type: knowledge
+            kb: kb-docs
+            name: kb_docs
+            mode: file_search
+            description: Semantic search over the documentation knowledge base.
+          - type: raw
+            tool:
+              type: system
+              name: memory
+              display_name: Memory
+              description: Store and recall information about the user across conversations
+              catalog_id: system-memory
+              parameters:
+                session_memory: true
+                types:
+                  - id: working_memory
+                    enabled: true
+                    config:
+                      max_tokens: 4000
+                      compaction_strategy: summarize
+                  - id: long_term
+                    enabled: false
+                    config:
+                      max_memories: 50
+        skills: []
+        subAgents: []
+    evaluation:
+      agents:
+        - main
+      runner:
+        batchSize: 5
+        maxAttempts: 2
+        messagesPerHour: 120
+        parallelAgents: 1
+        batchTimeoutMin: 45
+        maxRateRetries: 10
+        erroredThreshold: 0.05
+      criteria: []
+    console:
+      title: Console My Agent
+      overlays:
+        - sources
+  schema: {}
+secrets:
+  schema: {}
+customDomains: []
+repositories: {}

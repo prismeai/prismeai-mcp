@@ -1,0 +1,318 @@
+slug: exportBenchmark
+name: evaluation/Export benchmark
+description: 'Control endpoint (guarded, 403 Forbidden). Body {benchId?, last?}. Builds the detailed export of a bench (default the most recently updated one, any status) as a JSON Lines file: line 1 = header {type: header, format: agent-workspace-bench-export, formatVersion, exportedAt, benchId, status, startedAt, finishedAt, durationMs, agentKeys, agents, runner, caseFilter, totals, batches, errors, interruption, controlLog, counts, report, recordFields}, then one line per agent and case {type: case, benchId, agentKey, agentId, caseId, question, expected, criteria, tags, status, attempts, rateRetries, runId, batchNo, answer, score, passed, error, judge {reasons, criteria, model, tokens}, tools {called, names, count, match}, usage {agentModel, agentTokens, agentCost, durationMs, toolCalls, turns}, contextId, collectedAt, lastError, history} (Custom Code benchEngine op export, 25 rows per call). The file bench-<benchId>-<yyyymmdd-hhmm>.jsonl is uploaded as a private workspace file with a share link (_product-call service platform, files API; the text starts with "{" and is sent as is, UTF-8), recorded in the state row setting:benchExport:<benchId> {file {name, id, url}, counts, exportedAt, by} and announced by the event benchmark.exported. last true returns that stored record without rebuilding (404 ExportNotFound when there is none). Output {benchId, file {name, id, url}, counts {records, done, errored, pending, inFlight, cancelled, bytes}, exportedAt}; errors 404 BenchmarkNotFound, 502 ExportUploadFailed, 500 CustomCodeUnavailable.'
+when:
+  endpoint: true
+arguments:
+  body:
+    type: object
+    properties:
+      benchId:
+        type: string
+        description: Bench id. Default the most recently updated bench.
+      last:
+        type: boolean
+        description: Return the last stored export instead of building a new one.
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: Forbidden
+              message: This endpoint requires a control role
+        - break:
+            scope: automation
+  - set:
+      name: _by
+      value: '{{_guard.role}}'
+  - conditions:
+      '{{user.email}}':
+        - set:
+            name: _by
+            value: '{{user.email}}'
+      '{{user.id}}':
+        - set:
+            name: _by
+            value: '{{user.id}}'
+  - set:
+      name: _benchId
+      value: '{{body.benchId}}'
+  - conditions:
+      '!{{_benchId}}':
+        - _state-find:
+            query:
+              kind: bench
+            limit: 1
+            output: _latest
+        - set:
+            name: _benchId
+            value: '{{_latest.rows[0].data.benchId}}'
+  - _state-get:
+      key: bench:{{_benchId}}
+      output: _bench
+  - conditions:
+      '!{{_bench.found}}':
+        - set:
+            name: $http
+            value:
+              status: 404
+        - set:
+            name: _result
+            value:
+              error: BenchmarkNotFound
+              message: No bench to export
+              benchId: '{{_benchId}}'
+        - break:
+            scope: automation
+  - conditions:
+      '{{body.last}} == true':
+        - _state-get:
+            key: setting:benchExport:{{_benchId}}
+            output: _prev
+        - conditions:
+            '{{_prev.found}}':
+              - set:
+                  name: _result
+                  value: '{{_prev.row.data}}'
+              - set:
+                  name: _result.benchId
+                  value: '{{_benchId}}'
+            default:
+              - set:
+                  name: $http
+                  value:
+                    status: 404
+              - set:
+                  name: _result
+                  value:
+                    error: ExportNotFound
+                    message: Bench {{_benchId}} has not been exported yet
+                    benchId: '{{_benchId}}'
+        - break:
+            scope: automation
+  - _state-find:
+      query:
+        kind: benchcase
+        key:
+          $regex: '^benchcase:{{_benchId}}:'
+      sort:
+        key: 1
+      limit: 5000
+      output: _units
+  - set:
+      name: _report
+      value: '{{_bench.row.data.report}}'
+  - conditions:
+      '!{{_report.agents}}':
+        - Custom Code.run:
+            function: benchEngine
+            parameters:
+              op: report
+              bench: '{{_bench.row.data}}'
+              units: '{{_units.rows}}'
+              runner: '{{_bench.row.data.runner}}'
+              manifest:
+                agents: '{{config.agents}}'
+                evaluation: '{{config.evaluation}}'
+            output: _report
+  - set:
+      name: _counts
+      value:
+        records: '{{_units.rows.length}}'
+        done: 0
+        errored: 0
+        pending: 0
+        inFlight: 0
+        cancelled: 0
+        bytes: 0
+  - comment: Records, 25 rows per Custom Code call so each request stays small whatever the bench size.
+  - set:
+      name: _lines
+      value: ''
+  - set:
+      name: _chunk
+      value: []
+  - set:
+      name: _failed
+      value: null
+  - set:
+      name: _total
+      value: '{{_units.rows.length}}'
+  - repeat:
+      'on': '{{_units.rows}}'
+      do:
+        - conditions:
+            '{{item.status}} == "done"':
+              - set:
+                  name: _counts.done
+                  value: '{% {{_counts.done}} + 1 %}'
+            '{{item.status}} == "errored"':
+              - set:
+                  name: _counts.errored
+                  value: '{% {{_counts.errored}} + 1 %}'
+            '{{item.status}} == "pending"':
+              - set:
+                  name: _counts.pending
+                  value: '{% {{_counts.pending}} + 1 %}'
+            '{{item.status}} == "inflight"':
+              - set:
+                  name: _counts.inFlight
+                  value: '{% {{_counts.inFlight}} + 1 %}'
+            '{{item.status}} == "cancelled"':
+              - set:
+                  name: _counts.cancelled
+                  value: '{% {{_counts.cancelled}} + 1 %}'
+        - set:
+            name: _chunk
+            type: push
+            value: '{{item}}'
+        - set:
+            name: _isLast
+            value: false
+        - set:
+            name: _pos
+            value: '{% {{$index}} + 1 %}'
+        - conditions:
+            '{{_pos}} >= {{_total}}':
+              - set:
+                  name: _isLast
+                  value: true
+        - conditions:
+            '{{_chunk.length}} >= 25 or {{_isLast}}':
+              - Custom Code.run:
+                  function: benchEngine
+                  parameters:
+                    op: export
+                    units: '{{_chunk}}'
+                    options:
+                      part: records
+                  output: _rec
+              - conditions:
+                  '{{_rec.error}}':
+                    - set:
+                        name: _failed
+                        value: '{{_rec.message}}'
+                  default:
+                    - set:
+                        name: _lines
+                        value: '{{_lines}}{{_rec.lines}}'
+              - set:
+                  name: _chunk
+                  value: []
+  - Custom Code.run:
+      function: benchEngine
+      parameters:
+        op: export
+        bench: '{{_bench.row}}'
+        options:
+          part: header
+          exportedAt: '{{run.date}}'
+          trigger: manual
+          report: '{{_report}}'
+          counts: '{{_counts}}'
+      output: _head
+  - conditions:
+      '{{_head.error}}':
+        - set:
+            name: _failed
+            value: '{{_head.message}}'
+  - conditions:
+      '{{_failed}}':
+        - set:
+            name: $http
+            value:
+              status: 500
+        - set:
+            name: _result
+            value:
+              error: CustomCodeUnavailable
+              message: 'benchEngine export failed: {{_failed}}'
+              benchId: '{{_benchId}}'
+        - break:
+            scope: automation
+  - set:
+      name: _text
+      value: '{{_head.line}}{{_lines}}'
+  - set:
+      name: _lines
+      value: ''
+  - set:
+      name: _counts.bytes
+      value: '{{_text.length}}'
+  - _product-call:
+      service: platform
+      method: POST
+      path: workspaces/{{global.workspaceId}}/files
+      multipart:
+        - fieldname: file
+          value: '{{_text}}'
+          filename: '{{_head.fileName}}'
+          contentType: application/x-ndjson
+        - fieldname: shareToken
+          value: 'true'
+        - fieldname: public
+          value: 'false'
+      output: _up
+  - set:
+      name: _text
+      value: ''
+  - set:
+      name: _file
+      value: '{{_up.body[0]}}'
+  - conditions:
+      '!{{_file.url}}':
+        - set:
+            name: $http
+            value:
+              status: 502
+        - set:
+            name: _result
+            value:
+              error: ExportUploadFailed
+              message: The export file {{_head.fileName}} could not be uploaded (status {{_up.status}})
+              benchId: '{{_benchId}}'
+        - emit:
+            event: error
+            payload:
+              error: ExportUploadFailed
+              message: The export of bench {{_benchId}} could not be uploaded
+              details:
+                benchId: '{{_benchId}}'
+                status: '{{_up.status}}'
+        - break:
+            scope: automation
+  - set:
+      name: _record
+      value:
+        benchId: '{{_benchId}}'
+        status: '{{_bench.row.status}}'
+        file:
+          name: '{{_head.fileName}}'
+          id: '{{_file.id}}'
+          url: '{{_file.url}}?token={{_file.shareToken}}'
+        format: agent-workspace-bench-export
+        counts: '{{_counts}}'
+        exportedAt: '{{run.date}}'
+        by: '{{_by}}'
+  - _state-set:
+      key: setting:benchExport:{{_benchId}}
+      kind: setting
+      data: '{{_record}}'
+  - emit:
+      event: benchmark.exported
+      payload:
+        benchId: '{{_benchId}}'
+        fileName: '{{_head.fileName}}'
+        fileId: '{{_file.id}}'
+        counts: '{{_counts}}'
+  - set:
+      name: _result
+      value: '{{_record}}'
+output: '{{_result}}'

@@ -1,0 +1,127 @@
+slug: _console-summary
+name: console/Result summary
+description: 'Keeps the few fields of a control automation result the console journal shows (counts, ids, statuses), never the whole payload (DESIGN 5.5). Arguments {action, result}. Returns {summary}: syncAll {dryRun, actions, failed, drifted, warnings}; refreshSource {source, dryRun, discovered, queued, requeued, alreadyIngested, skipped, removed, pruned, failed, toQueue, toRemove}; controlIngest {action, status, cancelled}; pumpIngest {phase, dispatched, remaining}; importCases {count, hash}; runBenchmark {benchId, queued, status}; advanceBenchmark {benchId, status, started, collected}; controlBenchmark {action, benchId, status}; benchmarkReport {benchId, status}; exportBenchmark {benchId, fileName}; any other action {}.'
+private: true
+arguments:
+  action:
+    type: string
+  result:
+    type: object
+do:
+  - set:
+      name: _s
+      value: {}
+  - conditions:
+      '{{action}} = "syncAll"':
+        - set:
+            name: _failed
+            value: 0
+        - repeat:
+            'on': '{{result.actions}}'
+            do:
+              - conditions:
+                  '{{item.action}} = "failed"':
+                    - set:
+                        name: _failed
+                        value: '{% {{_failed}} + 1 %}'
+        - set:
+            name: _s
+            value:
+              dryRun: '{{result.dryRun}}'
+              actions: '{{result.actions.length}}'
+              failed: '{{_failed}}'
+              drifted: '{{result.drifted}}'
+              warnings: '{{result.warnings.length}}'
+      '{{action}} = "refreshSource"':
+        - set:
+            name: _s
+            value:
+              source: '{{result.source}}'
+              dryRun: '{{result.dryRun}}'
+              discovered: '{{result.discovered}}'
+              queued: '{{result.queued}}'
+              requeued: '{{result.requeued}}'
+              alreadyIngested: '{{result.alreadyIngested}}'
+              skipped: '{{result.skipped}}'
+              removed: '{{result.removed}}'
+              pruned: '{{result.pruned}}'
+              failed: '{{result.failed}}'
+              toQueue: '{{result.toQueue}}'
+              toRemove: '{{result.toRemove}}'
+        - comment: Counts only; a list (failed items, items to queue) is reduced to its length.
+        - conditions:
+            'isArray({{result.failed}})':
+              - set:
+                  name: _s.failed
+                  value: '{{result.failed.length}}'
+        - conditions:
+            'isArray({{result.toQueue}})':
+              - set:
+                  name: _s.toQueue
+                  value: '{{result.toQueue.length}}'
+        - conditions:
+            'isArray({{result.toRemove}})':
+              - set:
+                  name: _s.toRemove
+                  value: '{{result.toRemove.length}}'
+        - conditions:
+            'isArray({{result.removed}})':
+              - set:
+                  name: _s.removed
+                  value: '{{result.removed.length}}'
+      '{{action}} = "controlIngest"':
+        - set:
+            name: _s
+            value:
+              action: '{{result.action}}'
+              status: '{{result.status}}'
+              cancelled: '{{result.cancelled}}'
+      '{{action}} = "pumpIngest"':
+        - set:
+            name: _s
+            value:
+              phase: '{{result.phase}}'
+              dispatched: '{{result.dispatched}}'
+              remaining: '{{result.remaining}}'
+      '{{action}} = "importCases"':
+        - set:
+            name: _s
+            value:
+              count: '{{result.count}}'
+              hash: '{{result.hash}}'
+      '{{action}} = "runBenchmark"':
+        - set:
+            name: _s
+            value:
+              benchId: '{{result.benchId}}'
+              queued: '{{result.queued}}'
+              status: '{{result.status}}'
+      '{{action}} = "advanceBenchmark"':
+        - set:
+            name: _s
+            value:
+              benchId: '{{result.benchId}}'
+              status: '{{result.status}}'
+              started: '{{result.started}}'
+              collected: '{{result.collected}}'
+      '{{action}} = "controlBenchmark"':
+        - set:
+            name: _s
+            value:
+              action: '{{result.action}}'
+              benchId: '{{result.benchId}}'
+              status: '{{result.status}}'
+      '{{action}} = "benchmarkReport"':
+        - set:
+            name: _s
+            value:
+              benchId: '{{result.benchId}}'
+              status: '{{result.status}}'
+      '{{action}} = "exportBenchmark"':
+        - set:
+            name: _s
+            value:
+              benchId: '{{result.benchId}}'
+              fileName: '{{result.file.name}}'
+output:
+  summary: '{{_s}}'

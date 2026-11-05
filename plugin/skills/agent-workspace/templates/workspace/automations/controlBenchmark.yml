@@ -1,0 +1,349 @@
+slug: controlBenchmark
+name: evaluation/Control benchmark
+description: 'Control endpoint (guarded, 403 Forbidden). Body {action: pause | resume | stop | abandon, benchId?, reason?}. Writes the control key setting:benchControl (status run | pause | stop, data {action, benchId, reason, by, at}) that every bench tick reads fresh before any batch start. pause: no new batch, the batch in flight finishes and is collected, then the bench becomes interrupted. stop: the batch runs in flight are cancelled now (their unfinished cases go back to pending, attempts unchanged) and the bench becomes interrupted. pause and stop are applied at once by one _bench-advance tick without start (busy lock → applied at the next tick). resume: key back to run; an interrupted bench (default the latest one) goes back to running and one tick runs; a pause not applied yet is withdrawn. abandon (admin only, 403 AdminRequired): the batch runs in flight are cancelled, the bench (running or interrupted, default the running one) becomes abandoned and is never advanced again; key back to run. benchId default: the running bench (resume: the latest interrupted one). Output {action, benchId, status (bench status after the action), control {status, data}}; errors 400 InvalidAction (unknown action, or no bench to act on), 409 BenchmarkBusy (abandon while a tick holds the lock).'
+when:
+  endpoint: true
+arguments:
+  body:
+    type: object
+    properties:
+      action:
+        type: string
+        description: pause | resume | stop | abandon
+      benchId:
+        type: string
+        description: Bench to act on. Default the running bench (resume - the latest interrupted bench).
+      reason:
+        type: string
+        description: Free text kept in the control key and the bench interruption.
+      by:
+        type: string
+        description: Author written by the console; default the caller.
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: Forbidden
+              message: This endpoint requires a control role
+        - break:
+            scope: automation
+  - set:
+      name: _action
+      value: '{{body.action}}'
+  - set:
+      name: _validAction
+      value: false
+  - conditions:
+      '{{_action}} == "pause" or {{_action}} == "resume" or {{_action}} == "stop" or {{_action}} == "abandon"':
+        - set:
+            name: _validAction
+            value: true
+  - conditions:
+      '!{{_validAction}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _result
+            value:
+              error: InvalidAction
+              message: action must be pause, resume, stop or abandon
+              received: '{{body.action}}'
+        - break:
+            scope: automation
+  - set:
+      name: _isAdmin
+      value: false
+  - conditions:
+      '{{_guard.admin}} == true':
+        - set:
+            name: _isAdmin
+            value: true
+  - conditions:
+      '{{_action}} == "abandon" and !{{_isAdmin}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: AdminRequired
+              message: abandon is reserved to the workspace owners and admins
+        - break:
+            scope: automation
+  - set:
+      name: _by
+      value: '{{_guard.role}}'
+  - comment: Author = the caller's session identity, never a body field.
+  - conditions:
+      '{{user.email}}':
+        - set:
+            name: _by
+            value: '{{user.email}}'
+      '{{user.id}}':
+        - set:
+            name: _by
+            value: '{{user.id}}'
+  - set:
+      name: _reason
+      value: manual
+  - conditions:
+      '{{body.reason}}':
+        - set:
+            name: _reason
+            value: '{{body.reason}}'
+  - comment: Target bench.
+  - set:
+      name: _benchId
+      value: '{{body.benchId}}'
+  - conditions:
+      '!{{_benchId}}':
+        - _state-find:
+            query:
+              kind: bench
+              status: running
+            limit: 1
+            output: _found
+        - set:
+            name: _benchId
+            value: '{{_found.rows[0].data.benchId}}'
+  - set:
+      name: _needInterrupted
+      value: false
+  - conditions:
+      '{{_action}} == "resume" or {{_action}} == "abandon"':
+        - conditions:
+            '!{{_benchId}}':
+              - set:
+                  name: _needInterrupted
+                  value: true
+  - conditions:
+      '{{_needInterrupted}}':
+        - _state-find:
+            query:
+              kind: bench
+              status: interrupted
+            limit: 1
+            output: _found
+        - set:
+            name: _benchId
+            value: '{{_found.rows[0].data.benchId}}'
+  - _state-get:
+      key: bench:{{_benchId}}
+      output: _bench
+  - conditions:
+      '!{{_bench.found}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _result
+            value:
+              error: InvalidAction
+              message: No bench to {{_action}}
+              benchId: '{{_benchId}}'
+        - break:
+            scope: automation
+  - set:
+      name: _status
+      value: '{{_bench.row.status}}'
+  - set:
+      name: _ctlStatus
+      value: run
+  - conditions:
+      '{{_action}} == "pause"':
+        - set:
+            name: _ctlStatus
+            value: pause
+      '{{_action}} == "stop"':
+        - set:
+            name: _ctlStatus
+            value: stop
+  - set:
+      name: _ctlData
+      value:
+        action: '{{_action}}'
+        benchId: '{{_benchId}}'
+        reason: '{{_reason}}'
+        by: '{{_by}}'
+        at: '{{run.date}}'
+  - conditions:
+      '{{_action}} == "pause" or {{_action}} == "stop"':
+        - _state-set:
+            key: setting:benchControl
+            kind: setting
+            status: '{{_ctlStatus}}'
+            data: '{{_ctlData}}'
+        - conditions:
+            '{{_status}} == "running"':
+              - _bench-advance:
+                  benchId: '{{_benchId}}'
+                  noStart: true
+                  output: _adv
+              - conditions:
+                  '{{_adv.status}} != "busy"':
+                    - set:
+                        name: _status
+                        value: '{{_adv.status}}'
+      '{{_action}} == "resume"':
+        - _state-set:
+            key: setting:benchControl
+            kind: setting
+            status: run
+            data: '{{_ctlData}}'
+        - conditions:
+            '{{_status}} == "interrupted"':
+              - _lock:
+                  name: bench
+                  op: take
+                  output: _lk
+              - conditions:
+                  '!{{_lk.taken}}':
+                    - set:
+                        name: $http
+                        value:
+                          status: 409
+                    - set:
+                        name: _result
+                        value:
+                          error: BenchmarkBusy
+                          message: A bench tick is running right now, retry in a few seconds
+                    - break:
+                        scope: automation
+              - set:
+                  name: _data
+                  value: '{{_bench.row.data}}'
+              - set:
+                  name: _data
+                  type: merge
+                  value:
+                    lastInterruption: '{{_bench.row.data.interruption}}'
+                    interruption: null
+                    interrupting: null
+                    resumedAt: '{{run.date}}'
+              - set:
+                  name: _controlLog
+                  value: []
+              - conditions:
+                  '{{_data.controlLog.length}} > 0':
+                    - set:
+                        name: _controlLog
+                        value: '{{_data.controlLog}}'
+              - set:
+                  name: _controlLog
+                  type: push
+                  value:
+                    at: '{{run.date}}'
+                    action: resumed
+                    by: '{{_by}}'
+                    source: controlBenchmark
+              - set:
+                  name: _data.controlLog
+                  value: '{{_controlLog}}'
+              - _state-set:
+                  key: bench:{{_benchId}}
+                  kind: bench
+                  status: running
+                  data: '{{_data}}'
+              - _bench-advance:
+                  benchId: '{{_benchId}}'
+                  lockHeld: true
+                  output: _adv
+              - _lock:
+                  name: bench
+                  op: release
+                  output: _rel
+              - set:
+                  name: _status
+                  value: '{{_adv.status}}'
+              - emit:
+                  event: benchmark.resumed
+                  payload:
+                    benchId: '{{_benchId}}'
+                    by: '{{_by}}'
+      '{{_action}} == "abandon"':
+        - _lock:
+            name: bench
+            op: take
+            output: _lk
+        - conditions:
+            '!{{_lk.taken}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 409
+              - set:
+                  name: _result
+                  value:
+                    error: BenchmarkBusy
+                    message: A bench tick is running right now, retry in a few seconds
+              - break:
+                  scope: automation
+        - _state-get:
+            key: bench:{{_benchId}}
+            output: _bench
+        - conditions:
+            '{{_bench.row.status}} == "running" or {{_bench.row.status}} == "interrupted"':
+              - repeat:
+                  'on': '{{_bench.row.data.batches}}'
+                  do:
+                    - conditions:
+                        '{{item.value.runId}}':
+                          - Evaluation.cancelRun:
+                              run_id: '{{item.value.runId}}'
+                              output: _cancel
+              - set:
+                  name: _data
+                  value: '{{_bench.row.data}}'
+              - set:
+                  name: _data
+                  type: merge
+                  value:
+                    abandonedAt: '{{run.date}}'
+                    abandonedBy: '{{_by}}'
+                    abandonReason: '{{_reason}}'
+                    batches: {}
+              - _state-set:
+                  key: bench:{{_benchId}}
+                  kind: bench
+                  status: abandoned
+                  data: '{{_data}}'
+              - set:
+                  name: _status
+                  value: abandoned
+              - emit:
+                  event: benchmark.abandoned
+                  payload:
+                    benchId: '{{_benchId}}'
+                    by: '{{_by}}'
+                    reason: '{{_reason}}'
+        - _state-set:
+            key: setting:benchControl
+            kind: setting
+            status: run
+            data: '{{_ctlData}}'
+        - _lock:
+            name: bench
+            op: release
+            output: _rel
+  - set:
+      name: _result
+      value:
+        action: '{{_action}}'
+        benchId: '{{_benchId}}'
+        status: '{{_status}}'
+        control:
+          status: '{{_ctlStatus}}'
+          data: '{{_ctlData}}'
+output: '{{_result}}'

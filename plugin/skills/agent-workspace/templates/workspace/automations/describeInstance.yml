@@ -1,0 +1,337 @@
+slug: describeInstance
+name: control/Describe instance
+description: 'Read-only inventory of what is live, diffed against what the workspace would apply (DESIGN 4.6); run it before syncAll on an instance edited by hand. Guarded (403 Forbidden). Body {agents? (manifest keys, array or one key; default every config.agents entry), includeInstructions? (default true: full instructions and tool descriptions), upload? (default false: the same JSON saved as a private workspace file)}; the same names are accepted as direct arguments. Writes nothing (no product resource, no state row, resolution caches included); the only write is the optional file. Each agent: resolution by _resolve-agent, live draft by Agents.getAgent (x-draft-mode), expected body by _agent-expected, then Custom Code agentConfig report (same drift rule as _ensure-agent; the output is redacted: secret-like keys, header values, token-like URL query values). syncAll.wouldDo create | update | drift | failed | optional (an optional agent a default syncAll leaves untouched; ifRequested = what syncAll {agents: [key]} would do), reason in-sync | workspace-changed | no-baseline | edited-outside-workspace | not-found | read-failed (the agent list or the agent cannot be read: wouldDo failed with error AgentReadFailed, never create). diff goes from the workspace to the agent: fields {<field>: {from: workspace, to: live}}, instructions {same, fromLength, toLength, changes [{op - (workspace only) | + (agent only), line, text}] (at most 200 lines)}, tools {added (agent only), removed (workspace only), renamed, changed}, skills, subAgents. 400 UnknownManifestKey, 503 CustomCodeUnavailable (agentConfig not deployed: nothing is returned rather than unredacted data). Returns {instance {workspace {id, name}, caller {id, email, role}, date}, agents [{key, name, optional, variantOf, resolution {by, id, ids}, live, published, expected, diff, syncAll, externalTools}], knowledgeBases [{key, id, by, name}], file? {name, url}}.'
+when:
+  endpoint: true
+arguments:
+  body:
+    type: object
+    description: '{agents?, includeInstructions?, upload?}'
+  agents:
+    type: array
+  includeInstructions:
+    type: boolean
+  upload:
+    type: boolean
+do:
+  - conditions:
+      '!{{body}}':
+        - set:
+            name: body
+            value: {}
+  - conditions:
+      '{{agents.length}} > 0':
+        - conditions:
+            '!{{body.agents}}':
+              - set:
+                  name: body.agents
+                  value: '{{agents}}'
+  - conditions:
+      '{{includeInstructions}} == false':
+        - set:
+            name: body.includeInstructions
+            value: false
+  - conditions:
+      '{{upload}} == true':
+        - set:
+            name: body.upload
+            value: true
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _output
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - break:
+            scope: automation
+  - set:
+      name: _withText
+      value: true
+  - conditions:
+      '{{body.includeInstructions}} = false':
+        - set:
+            name: _withText
+            value: false
+  - set:
+      name: _upload
+      value: false
+  - conditions:
+      '{{body.upload}} = true':
+        - set:
+            name: _upload
+            value: true
+  - set:
+      name: _allKeys
+      value: []
+  - repeat:
+      'on': '{{config.agents}}'
+      do:
+        - set:
+            name: _allKeys
+            type: push
+            value: '{{item.key}}'
+  - set:
+      name: _keys
+      value: '{{_allKeys}}'
+  - conditions:
+      '{{body.agents}}':
+        - set:
+            name: _keys
+            value:
+              - '{{body.agents}}'
+        - conditions:
+            '{% isArray({{body.agents}}) %}':
+              - set:
+                  name: _keys
+                  value: '{{body.agents}}'
+  - set:
+      name: _unknown
+      value: []
+  - repeat:
+      'on': '{{_keys}}'
+      do:
+        - conditions:
+            '{{item}} in {{_allKeys}}':
+              - comment: declared
+            default:
+              - set:
+                  name: _unknown
+                  type: push
+                  value: '{{item}}'
+  - conditions:
+      '{{_unknown.length}} > 0':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _output
+            value:
+              error: UnknownManifestKey
+              message: 'unknown agent keys: {% join({{_unknown}}, ", ") %} (declared: {% join({{_allKeys}}, ", ") %})'
+        - break:
+            scope: automation
+  - comment: Knowledge bases as syncAll resolves them (read-only).
+  - set:
+      name: _kbs
+      value: []
+  - repeat:
+      'on': '{{config.knowledgeBases}}'
+      do:
+        - set:
+            name: _kbKey
+            value: '{{item.key}}'
+        - _resolve-kb:
+            key: '{{_kbKey}}'
+            output: _kbRes
+        - set:
+            name: _kbs
+            type: push
+            value:
+              key: '{{_kbKey}}'
+              id: '{{_kbRes.id}}'
+              by: '{{_kbRes.by}}'
+              name: '{{_kbRes.name}}'
+  - set:
+      name: _agents
+      value: []
+  - set:
+      name: _ccFailed
+      value: false
+  - repeat:
+      'on': '{{_keys}}'
+      do:
+        - set:
+            name: _key
+            value: '{{item}}'
+        - _manifest-get:
+            list: agents
+            key: '{{_key}}'
+            output: _m
+        - _resolve-agent:
+            key: '{{_key}}'
+            output: _res
+        - set:
+            name: _live
+            value: null
+        - conditions:
+            '{{_res.found}}':
+              - Agents.getAgent:
+                  agent_id: '{{_res.id}}'
+                  headers:
+                    x-draft-mode: 'true'
+                  output: _liveRes
+              - conditions:
+                  '{{_liveRes.id}}':
+                    - set:
+                        name: _live
+                        value: '{{_liveRes}}'
+        - _agent-expected:
+            key: '{{_key}}'
+            output: _exp
+        - _state-get:
+            key: res:agentHash:{{_key}}
+            output: _stored
+        - Custom Code.run:
+            function: agentConfig
+            parameters:
+              op: report
+              live: '{{_live}}'
+              expected:
+                body: '{{_exp.body}}'
+                visibility: '{{_exp.visibility}}'
+                profile: '{{_exp.profile}}'
+                missing: '{{_exp.missing}}'
+              stored: '{{_stored.row.data}}'
+              options:
+                includeInstructions: '{{_withText}}'
+                kbs: '{{_kbs}}'
+                apiUrl: '{{global.apiUrl}}'
+            output: _rep
+        - conditions:
+            '!{{_rep.syncAll}}':
+              - set:
+                  name: _ccFailed
+                  value: true
+              - set:
+                  name: _ccError
+                  value: '{{_rep.message}}'
+              - break:
+                  scope: repeat
+        - set:
+            name: _optional
+            value: false
+        - conditions:
+            '{{_m.item.optional}}':
+              - set:
+                  name: _optional
+                  value: true
+        - set:
+            name: _entry
+            value:
+              key: '{{_key}}'
+              name: '{{_m.item.name}}'
+              optional: '{{_optional}}'
+              variantOf: '{{_m.item.variantOf}}'
+              resolution:
+                by: '{{_res.by}}'
+                id: '{{_res.id}}'
+                ids: '{{_res.ids}}'
+              live: '{{_rep.live}}'
+              published: '{{_rep.published}}'
+              expected: '{{_rep.expected}}'
+              diff: '{{_rep.diff}}'
+              syncAll: '{{_rep.syncAll}}'
+              externalTools: '{{_rep.externalTools}}'
+        - conditions:
+            '{{_res.warning}}':
+              - set:
+                  name: _entry.resolution.warning
+                  value: '{{_res.warning}}'
+        - comment: A failed read (e.g. 401 on the Agents import) is reported as failed, never as an absent agent to create.
+        - conditions:
+            '{{_res.error}}':
+              - set:
+                  name: _entry.syncAll
+                  value:
+                    wouldDo: failed
+                    reason: read-failed
+                    error: '{{_res.error}}'
+                    summary: '{{_res.message}}'
+            '{{_res.found}} and !{{_live}}':
+              - set:
+                  name: _entry.syncAll
+                  value:
+                    wouldDo: failed
+                    reason: read-failed
+                    error: AgentReadFailed
+                    summary: Agents.getAgent failed for {{_res.id}} (status {{_liveRes.status}})
+        - conditions:
+            '{{_optional}}':
+              - set:
+                  name: _entry.syncAll
+                  value:
+                    wouldDo: optional
+                    reason: '{{_rep.syncAll.reason}}'
+                    summary: 'optional agent: a default syncAll neither creates nor updates it; syncAll {agents: [{{_key}}]} would apply ifRequested'
+                    ifRequested: '{{_rep.syncAll}}'
+        - set:
+            name: _agents
+            type: push
+            value: '{{_entry}}'
+  - conditions:
+      '{{_ccFailed}}':
+        - set:
+            name: $http
+            value:
+              status: 503
+        - set:
+            name: _output
+            value:
+              error: CustomCodeUnavailable
+              message: 'The Custom Code function agentConfig is not deployed: set a new value of the root config key lastDeploySync of the Custom Code app, save, then run describeInstance again.'
+              details: '{{_ccError}}'
+        - break:
+            scope: automation
+  - set:
+      name: _output
+      value:
+        instance:
+          workspace:
+            id: '{{global.workspaceId}}'
+            name: '{{global.workspaceName}}'
+          caller:
+            id: '{{user.id}}'
+            email: '{{user.email}}'
+            role: '{{_guard.role}}'
+          date: '{{run.date}}'
+        agents: '{{_agents}}'
+        knowledgeBases: '{{_kbs}}'
+  - comment: Optional report file (private workspace file; the share token is never returned).
+  - conditions:
+      '{{_upload}}':
+        - set:
+            name: _ts
+            value: '{% date({{run.date}}).ts %}'
+        - set:
+            name: _fileName
+            value: instance-{{_ts}}.json
+        - Custom Code.run:
+            function: sha256
+            parameters:
+              text: '{% json({{_output}}) %}'
+            output: _enc
+        - _product-call:
+            service: platform
+            method: POST
+            path: workspaces/{{global.workspaceId}}/files
+            multipart:
+              - fieldname: file
+                value: '{{_enc.base64}}'
+                filename: '{{_fileName}}'
+                contentType: application/json
+              - fieldname: public
+                value: 'false'
+            output: _up
+        - conditions:
+            '{{_up.body[0].url}}':
+              - set:
+                  name: _output.file
+                  value:
+                    name: '{{_fileName}}'
+                    url: '{{_up.body[0].url}}'
+            default:
+              - set:
+                  name: _output.file
+                  value:
+                    name: '{{_fileName}}'
+                    uploaded: false
+                    status: '{{_up.status}}'
+output: '{{_output}}'

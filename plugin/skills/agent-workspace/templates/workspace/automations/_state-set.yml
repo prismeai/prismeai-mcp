@@ -1,0 +1,100 @@
+slug: _state-set
+name: helpers/State set
+description: 'Upserts a state row by key (DESIGN 3). Arguments {key, kind?, status?, data?, error?}: kind and status are written when given (kind defaults to setting on insert); data REPLACES the whole data column when given (never merged) and is kept otherwise; error is always written, as given or null (omit it to clear). updatedAt = run.date. A concurrent insert of the same key falls back to an update. Returns {row}.'
+private: true
+arguments:
+  key:
+    type: string
+  kind:
+    type: string
+    description: resource | item | setting | lock | bench | benchcase | journal | overlay
+  status:
+    type: string
+  data:
+    type: object
+    description: Replaces the whole data column when provided.
+  error:
+    type: object
+    description: Stored as given; null when omitted.
+do:
+  - set:
+      name: _kind
+      value: '{{kind}}'
+  - conditions:
+      '!{{_kind}}':
+        - set:
+            name: _kind
+            value: setting
+  - set:
+      name: _error
+      value: null
+  - conditions:
+      '{{error}}':
+        - set:
+            name: _error
+            value: '{{error}}'
+  - set:
+      name: _set
+      value:
+        error: '{{_error}}'
+        updatedAt: '{{run.date}}'
+  - conditions:
+      '{{kind}}':
+        - set:
+            name: _set
+            type: merge
+            value:
+              kind: '{{kind}}'
+  - conditions:
+      '{{status}}':
+        - set:
+            name: _set
+            type: merge
+            value:
+              status: '{{status}}'
+  - conditions:
+      '{{data}}':
+        - set:
+            name: _set
+            type: merge
+            value:
+              data: '{{data}}'
+  - state.find:
+      query:
+        key: '{{key}}'
+      options:
+        limit: 1
+      output: _existing
+  - conditions:
+      '{{_existing[0].key}}':
+        - state.updateOne:
+            query:
+              key: '{{key}}'
+            data:
+              $set: '{{_set}}'
+      default:
+        - comment: Insert inside try/catch — a concurrent insert of the same key (unique index) falls back to an update.
+        - try:
+            do:
+              - state.insert:
+                  data:
+                    key: '{{key}}'
+                    kind: '{{_kind}}'
+                    status: '{{status}}'
+                    data: '{{data}}'
+                    error: '{{_error}}'
+                    updatedAt: '{{run.date}}'
+            catch:
+              - state.updateOne:
+                  query:
+                    key: '{{key}}'
+                  data:
+                    $set: '{{_set}}'
+  - state.find:
+      query:
+        key: '{{key}}'
+      options:
+        limit: 1
+      output: _rows
+output:
+  row: '{{_rows[0]}}'

@@ -1,0 +1,239 @@
+slug: statusReport
+name: control/Status report
+description: 'Live status of the workspace (DESIGN 4.7). Guarded (403 Forbidden), read-only, body {}. knowledgeBases: _resolve-kb + Storage.getVectorStore document_counts. agents: _resolve-agent + draft (Agents.getAgent x-draft-mode) status, published, publishedAt, hasDraftChanges, model, with the manifest labels optional and variantOf. documents: state rows res:kbdoc:<doc-key> (hash, lines, uploadedAt). sources: _sources-effective with the last refresh pass (state setting:lastRefresh:<source-key>). ingest: _ingest-counts (queued, dispatched, processing, ingested, error, cancelled, removed, inFlight, phase, control, up to 50 failed items). cases: setting:cases {count, loadedAt}. benchmark: the latest bench:* row {key, benchId, status, startedAt, updatedAt, totals, agents, lastRunError {agentKey, runId, message, at} (the last error Agent Evaluations reported for a batch run)}. Returns {templateVersion (config.templateVersion: the engine version this workspace runs), knowledgeBases, agents, documents, sources, ingest, cases, benchmark}.'
+when:
+  endpoint: true
+arguments:
+  body:
+    type: object
+    description: '{} (no option)'
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _output
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - break:
+            scope: automation
+  - set:
+      name: _kbs
+      value: []
+  - repeat:
+      'on': '{{config.knowledgeBases}}'
+      do:
+        - set:
+            name: _kbKey
+            value: '{{item.key}}'
+        - _resolve-kb:
+            key: '{{_kbKey}}'
+            output: _kbRes
+        - set:
+            name: _entry
+            value:
+              key: '{{_kbKey}}'
+              id: '{{_kbRes.id}}'
+              name: '{{_kbRes.name}}'
+              document_counts: null
+        - conditions:
+            '{{_kbRes.found}}':
+              - Storage.getVectorStore:
+                  vector_store_id: '{{_kbRes.id}}'
+                  output: _kbGet
+              - set:
+                  name: _entry.document_counts
+                  value: '{{_kbGet.structuredData.document_counts}}'
+              - conditions:
+                  '!{{_kbGet.structuredData.id}}':
+                    - set:
+                        name: _entry.error
+                        value: KnowledgeBaseNotFound
+        - set:
+            name: _kbs
+            type: push
+            value: '{{_entry}}'
+  - set:
+      name: _agents
+      value: []
+  - repeat:
+      'on': '{{config.agents}}'
+      do:
+        - set:
+            name: _agentKey
+            value: '{{item.key}}'
+        - set:
+            name: _optional
+            value: false
+        - conditions:
+            '{{item.optional}}':
+              - set:
+                  name: _optional
+                  value: true
+        - set:
+            name: _entry
+            value:
+              key: '{{_agentKey}}'
+              id: null
+              status: null
+              published: false
+              publishedAt: null
+              hasDraftChanges: null
+              model: null
+              optional: '{{_optional}}'
+              variantOf: '{{item.variantOf}}'
+        - _resolve-agent:
+            key: '{{_agentKey}}'
+            output: _agRes
+        - conditions:
+            '{{_agRes.found}}':
+              - set:
+                  name: _entry.id
+                  value: '{{_agRes.id}}'
+              - Agents.getAgent:
+                  agent_id: '{{_agRes.id}}'
+                  headers:
+                    x-draft-mode: 'true'
+                  output: _agGet
+              - conditions:
+                  '{{_agGet.id}}':
+                    - set:
+                        name: _entry.status
+                        value: '{{_agGet.status}}'
+                    - set:
+                        name: _entry.publishedAt
+                        value: '{{_agGet.published_at}}'
+                    - set:
+                        name: _entry.hasDraftChanges
+                        value: '{{_agGet.has_draft_changes}}'
+                    - set:
+                        name: _entry.model
+                        value: '{{_agGet.model}}'
+                    - conditions:
+                        '{{_agGet.published_at}}':
+                          - set:
+                              name: _entry.published
+                              value: true
+                  default:
+                    - set:
+                        name: _entry.error
+                        value: AgentReadFailed
+        - set:
+            name: _agents
+            type: push
+            value: '{{_entry}}'
+  - set:
+      name: _docs
+      value: []
+  - repeat:
+      'on': '{{config.documents}}'
+      do:
+        - set:
+            name: _doc
+            value: '{{item}}'
+        - _state-get:
+            key: res:kbdoc:{{_doc.key}}
+            output: _docRow
+        - set:
+            name: _docs
+            type: push
+            value:
+              key: '{{_doc.key}}'
+              kb: '{{_doc.kb}}'
+              hash: '{{_docRow.row.data.hash}}'
+              lines: '{{_docRow.row.data.lines}}'
+              uploadedAt: '{{_docRow.row.data.uploadedAt}}'
+  - _sources-effective:
+      output: _eff
+  - set:
+      name: _sources
+      value: []
+  - repeat:
+      'on': '{{_eff.sources}}'
+      do:
+        - set:
+            name: _src
+            value: '{{item}}'
+        - _state-get:
+            key: setting:lastRefresh:{{_src.key}}
+            output: _lr
+        - set:
+            name: _sources
+            type: push
+            value:
+              key: '{{_src.key}}'
+              type: '{{_src.type}}'
+              target: '{{_src.target}}'
+              lastRefresh: '{{_lr.row.data}}'
+  - comment: Ingestion queue, in the shape owned by the ingestion module.
+  - _ingest-counts:
+      failedLimit: 50
+      output: _ingest
+  - set:
+      name: _cases
+      value: null
+  - _state-get:
+      key: setting:cases
+      output: _casesRow
+  - conditions:
+      '{{_casesRow.found}}':
+        - set:
+            name: _cases
+            value:
+              count: '{{_casesRow.row.data.count}}'
+              loadedAt: '{{_casesRow.row.data.loadedAt}}'
+  - set:
+      name: _benchmark
+      value: null
+  - _state-find:
+      query:
+        kind: bench
+      sort:
+        updatedAt: -1
+      limit: 1
+      output: _benches
+  - conditions:
+      '{{_benches.rows[0].key}}':
+        - set:
+            name: _bench
+            value: '{{_benches.rows[0]}}'
+        - set:
+            name: _benchId
+            value: '{{_bench.data.benchId}}'
+        - conditions:
+            '!{{_benchId}}':
+              - set:
+                  name: _bParts
+                  value: '{% split({{_bench.key}}, ":") %}'
+              - set:
+                  name: _benchId
+                  value: '{{_bParts[1]}}'
+        - set:
+            name: _benchmark
+            value:
+              key: '{{_bench.key}}'
+              benchId: '{{_benchId}}'
+              status: '{{_bench.status}}'
+              startedAt: '{{_bench.data.startedAt}}'
+              updatedAt: '{{_bench.updatedAt}}'
+              totals: '{{_bench.data.totals}}'
+              agents: '{{_bench.data.agents}}'
+              lastRunError: '{{_bench.data.lastRunError}}'
+  - set:
+      name: _output
+      value:
+        templateVersion: '{{config.templateVersion}}'
+        knowledgeBases: '{{_kbs}}'
+        agents: '{{_agents}}'
+        documents: '{{_docs}}'
+        sources: '{{_sources}}'
+        ingest: '{{_ingest}}'
+        cases: '{{_cases}}'
+        benchmark: '{{_benchmark}}'
+output: '{{_output}}'

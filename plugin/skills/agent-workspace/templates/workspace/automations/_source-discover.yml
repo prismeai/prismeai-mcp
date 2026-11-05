@@ -1,0 +1,264 @@
+slug: _source-discover
+name: ingestion/helpers/Source discover
+description: 'Lists what one source should put in its knowledge base. One branch per source type: `urls` (params.urls: list of URL strings or {url, name?, mime?, metadata?}) and `files` (params.files: list of workspace file ids or URLs, or {id?, url?, name?, mime?, metadata?}); any other type is handed to the agent content _content-sources (refs as the built-in branches build them), SourceTypeUnsupported when it does not handle it. Nothing is written. Item ids are stable: the first 16 hex of sha256(url) (Custom Code sha256); a file given by id gets the pseudo url file:<id>, attached by native_file_id. Duplicates (same id) are kept once. Body {source: effective source entry {key, type, target, label, params}}. Returns {items: [{id, url, name, mime, fileId, fetchUrl, metadata}], failed: [{ref, error {error, message}}], error?, message?}.'
+private: true
+arguments:
+  source:
+    type: object
+    description: One entry of _sources-effective.sources (the console preview passes params changed in memory).
+do:
+  - set:
+      name: _dItems
+      value: []
+  - set:
+      name: _dIds
+      value: []
+  - set:
+      name: _dFailed
+      value: []
+  - set:
+      name: _dError
+      value: null
+  - set:
+      name: _dMessage
+      value: null
+  - comment: |
+      Each branch only builds _dRefs = [{url, name, mime, fileId, fetchUrl, metadata}] from the
+      source params; hashing, validation and dedup are shared below.
+  - set:
+      name: _dRefs
+      value: []
+  - conditions:
+      '{{source.type}} = "urls"':
+        - repeat:
+            'on': '{{source.params.urls}}'
+            do:
+              - set:
+                  name: _dEntry
+                  value: '{{item}}'
+              - conditions:
+                  isString({{_dEntry}}):
+                    - set:
+                        name: _dRefs
+                        type: push
+                        value:
+                          url: '{{_dEntry}}'
+                  isObject({{_dEntry}}):
+                    - set:
+                        name: _dRefs
+                        type: push
+                        value:
+                          url: '{{_dEntry.url}}'
+                          name: '{{_dEntry.name}}'
+                          mime: '{{_dEntry.mime}}'
+                          fetchUrl: '{{_dEntry.fetchUrl}}'
+                          metadata: '{{_dEntry.metadata}}'
+                  default:
+                    - set:
+                        name: _dFailed
+                        type: push
+                        value:
+                          ref: '{{_dEntry}}'
+                          error:
+                            error: InvalidSourceEntry
+                            message: params.urls entries are URL strings or {url, name?, mime?, metadata?}
+      '{{source.type}} = "files"':
+        - repeat:
+            'on': '{{source.params.files}}'
+            do:
+              - set:
+                  name: _dEntry
+                  value: '{{item}}'
+              - set:
+                  name: _dRef
+                  value: null
+              - conditions:
+                  isString({{_dEntry}}):
+                    - set:
+                        name: _dRef
+                        value:
+                          ref: '{{_dEntry}}'
+                  isObject({{_dEntry}}):
+                    - set:
+                        name: _dRef
+                        value:
+                          ref: '{{_dEntry.url}}'
+                          id: '{{_dEntry.id}}'
+                          name: '{{_dEntry.name}}'
+                          mime: '{{_dEntry.mime}}'
+                          fetchUrl: '{{_dEntry.fetchUrl}}'
+                          metadata: '{{_dEntry.metadata}}'
+                  default:
+                    - set:
+                        name: _dFailed
+                        type: push
+                        value:
+                          ref: '{{_dEntry}}'
+                          error:
+                            error: InvalidSourceEntry
+                            message: params.files entries are workspace file ids, URLs or {id?, url?, name?, mime?, metadata?}
+              - conditions:
+                  '{{_dRef}}':
+                    - set:
+                        name: _dIsUrl
+                        value: false
+                    - conditions:
+                        '{{_dRef.ref}}':
+                          - conditions:
+                              '{{_dRef.ref}} matches regex("^https?://")':
+                                - set:
+                                    name: _dIsUrl
+                                    value: true
+                    - conditions:
+                        '{{_dIsUrl}}':
+                          - set:
+                              name: _dRefs
+                              type: push
+                              value:
+                                url: '{{_dRef.ref}}'
+                                name: '{{_dRef.name}}'
+                                mime: '{{_dRef.mime}}'
+                                fetchUrl: '{{_dRef.fetchUrl}}'
+                                metadata: '{{_dRef.metadata}}'
+                        '{{_dRef.id}}':
+                          - set:
+                              name: _dRefs
+                              type: push
+                              value:
+                                url: file:{{_dRef.id}}
+                                fileId: '{{_dRef.id}}'
+                                name: '{{_dRef.name}}'
+                                mime: '{{_dRef.mime}}'
+                                metadata: '{{_dRef.metadata}}'
+                        '{{_dRef.ref}}':
+                          - comment: A plain string that is not a URL is a workspace file id.
+                          - set:
+                              name: _dRefs
+                              type: push
+                              value:
+                                url: file:{{_dRef.ref}}
+                                fileId: '{{_dRef.ref}}'
+                                name: '{{_dRef.name}}'
+                                mime: '{{_dRef.mime}}'
+                                metadata: '{{_dRef.metadata}}'
+      default:
+        - comment: |
+            Custom source types live in the agent content (_content-sources), never in this engine
+            file, so a template upgrade can replace it. Design rules: guides/ingestion.md section 3.
+        - _content-sources:
+            source: '{{source}}'
+            output: _dCustom
+        - conditions:
+            '{{_dCustom.handled}}':
+              - repeat:
+                  'on': '{{_dCustom.refs}}'
+                  do:
+                    - set:
+                        name: _dRefs
+                        type: push
+                        value: '{{item}}'
+              - repeat:
+                  'on': '{{_dCustom.failed}}'
+                  do:
+                    - set:
+                        name: _dFailed
+                        type: push
+                        value: '{{item}}'
+            default:
+              - set:
+                  name: _dError
+                  value: SourceTypeUnsupported
+              - set:
+                  name: _dMessage
+                  value: 'Source {{source.key}} has type {{source.type}}, which neither the engine (urls, files) nor _content-sources handles'
+              - set:
+                  name: _dFailed
+                  type: push
+                  value:
+                    ref: '{{source.key}}'
+                    error:
+                      error: SourceTypeUnsupported
+                      message: '{{_dMessage}}'
+  - comment: Shared tail — URL check, stable id (sha256 of the url, 16 hex), dedup.
+  - repeat:
+      'on': '{{_dRefs}}'
+      do:
+        - set:
+            name: _dCand
+            value: '{{item}}'
+        - set:
+            name: _dValid
+            value: false
+        - conditions:
+            '{{_dCand.url}}':
+              - conditions:
+                  '{{_dCand.url}} matches regex("^(https?://|file:)")':
+                    - set:
+                        name: _dValid
+                        value: true
+        - conditions:
+            '!{{_dValid}}':
+              - set:
+                  name: _dFailed
+                  type: push
+                  value:
+                    ref: '{{_dCand.url}}'
+                    error:
+                      error: InvalidUrl
+                      message: 'Not an http(s) URL nor a workspace file: {{_dCand.url}}'
+            default:
+              - Custom Code.run:
+                  function: sha256
+                  parameters:
+                    text: '{{_dCand.url}}'
+                  output: _dHash
+              - conditions:
+                  '!{{_dHash.hash}}':
+                    - set:
+                        name: _dFailed
+                        type: push
+                        value:
+                          ref: '{{_dCand.url}}'
+                          error:
+                            error: CustomCodeUnavailable
+                            message: Custom Code sha256 did not return a hash
+                  '{{_dHash.hash}} in {{_dIds}}':
+                    - comment: Same url listed twice — kept once.
+                  default:
+                    - set:
+                        name: _dIds
+                        type: push
+                        value: '{{_dHash.hash}}'
+                    - set:
+                        name: _dName
+                        value: '{{_dCand.name}}'
+                    - conditions:
+                        '!{{_dName}}':
+                          - set:
+                              name: _dName
+                              value: '{{_dCand.url}}'
+                    - set:
+                        name: _dItems
+                        type: push
+                        value:
+                          id: '{{_dHash.hash}}'
+                          url: '{{_dCand.url}}'
+                          name: '{{_dName}}'
+                          mime: '{{_dCand.mime}}'
+                          fileId: '{{_dCand.fileId}}'
+                          fetchUrl: '{{_dCand.fetchUrl}}'
+                          metadata: '{{_dCand.metadata}}'
+  - set:
+      name: _dResult
+      value:
+        items: '{{_dItems}}'
+        failed: '{{_dFailed}}'
+  - conditions:
+      '{{_dError}}':
+        - set:
+            name: _dResult.error
+            value: '{{_dError}}'
+        - set:
+            name: _dResult.message
+            value: '{{_dMessage}}'
+output: '{{_dResult}}'

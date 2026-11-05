@@ -1,0 +1,200 @@
+slug: consoleAction
+name:
+  en: console/Action
+  fr: console/Action
+description: 'Control endpoint of the operator console (guarded, DESIGN 5.3). Body {action, args}: action is one of the _console-dispatch allow-list (syncAll, describeInstance, refreshSource, controlIngest, pumpIngest, importCases, runBenchmark, advanceBenchmark, controlBenchmark, benchmarkReport, exportBenchmark); args is passed as the body of that automation, which keeps its own guard and contract. Admin-only actions (syncAll force, runBenchmark force, controlIngest stop, refreshSource prune outside a dry run, controlBenchmark abandon) are refused by the automation itself with AdminRequired, relayed as ok false. Not journaled: read-only actions (describeInstance, benchmarkReport, syncAll dryRun, refreshSource dryRun, exportBenchmark last) and the ticks the console sends while it is open (advanceBenchmark, pumpIngest); every other action writes a journal line before the run (running) and completes it after (ok | error). Control rows take their author from the session, never from the body. Answers HTTP 200 {action, ok, error, message, journalKey, result} once the action ran: result is the automation output; ok is false when it carries an error, or for syncAll when one action failed (error SyncActionFailed, message "<type> <key>: <code>"). Refused before the run: 403 Forbidden (no control role), 400 InvalidAction (not in the allow-list).'
+when:
+  endpoint: true
+validateArguments: true
+arguments:
+  body:
+    type: object
+    properties:
+      action:
+        type: string
+      args:
+        type: object
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _output
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - break:
+            scope: automation
+  - set:
+      name: _action
+      value: '{{body.action}}'
+  - set:
+      name: _args
+      value: '{{body.args}}'
+  - conditions:
+      '!{{_args}}':
+        - set:
+            name: _args
+            value: {}
+  - _console-dispatch:
+      action: '{{_action}}'
+      checkOnly: true
+      output: _allow
+  - conditions:
+      '!{{_allow.known}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _output
+            value:
+              error: InvalidAction
+              message: action must be one of {% join({{_allow.actions}}, ", ") %}
+              action: '{{_action}}'
+        - break:
+            scope: automation
+  - comment: |
+      Admin-only actions (force, stop, prune, abandon) are decided by the automation itself, which
+      answers AdminRequired; consoleAction relays it (one rule, one place). Control rows take
+      their author from the session (the child run sees the same user), never from the body.
+  - set:
+      name: _readOnly
+      value: false
+  - conditions:
+      '{{_action}} = "describeInstance" or {{_action}} = "benchmarkReport" or {{_action}} = "advanceBenchmark" or {{_action}} = "pumpIngest"':
+        - set:
+            name: _readOnly
+            value: true
+      '({{_action}} = "syncAll" or {{_action}} = "refreshSource") and {{_args.dryRun}}':
+        - set:
+            name: _readOnly
+            value: true
+      '{{_action}} = "exportBenchmark" and {{_args.last}}':
+        - set:
+            name: _readOnly
+            value: true
+  - set:
+      name: _journalKey
+      value: null
+  - conditions:
+      '!{{_readOnly}}':
+        - comment: Journal arguments are a summary; inline cases are reduced to their count.
+        - set:
+            name: _jArgs
+            value: '{{_args}}'
+        - conditions:
+            '{{_action}} = "importCases" and {{_args.cases}}':
+              - comment: A new object, so the cases sent to importCases stay untouched.
+              - set:
+                  name: _jArgs
+                  value:
+                    casesCount: '{{_args.cases.length}}'
+        - _console-journal:
+            op: start
+            action: '{{_action}}'
+            args: '{{_jArgs}}'
+            output: _j
+        - set:
+            name: _journalKey
+            value: '{{_j.key}}'
+  - try:
+      do:
+        - _console-dispatch:
+            action: '{{_action}}'
+            args: '{{_args}}'
+            output: _res
+      catch:
+        - set:
+            name: _res
+            value:
+              error: '{% {{$error.error}} || "ActionFailed" %}'
+              message: '{% {{$error.message}} || "the action stopped with an error" %}'
+  - set:
+      name: _ok
+      value: true
+  - set:
+      name: _error
+      value: null
+  - set:
+      name: _message
+      value: null
+  - conditions:
+      '{{_res.error}}':
+        - set:
+            name: _ok
+            value: false
+        - set:
+            name: _error
+            value: '{{_res.error}}'
+        - set:
+            name: _message
+            value: '{{_res.message}}'
+  - conditions:
+      '{{_action}} = "syncAll" and {{_ok}}':
+        - repeat:
+            'on': '{{_res.actions}}'
+            do:
+              - conditions:
+                  '{{item.action}} = "failed"':
+                    - set:
+                        name: _ok
+                        value: false
+                    - set:
+                        name: _error
+                        value: SyncActionFailed
+                    - set:
+                        name: _message
+                        value: '{{item.type}} {{item.key}}: {% {{item.error}} || "failed" %}'
+                    - break:
+                        scope: repeat
+  - conditions:
+      '{{_journalKey}}':
+        - set:
+            name: _jStatus
+            value: ok
+        - conditions:
+            '!{{_ok}}':
+              - set:
+                  name: _jStatus
+                  value: error
+        - _console-summary:
+            action: '{{_action}}'
+            result: '{{_res}}'
+            output: _sum
+        - set:
+            name: _jResult
+            value: '{{_sum.summary}}'
+        - conditions:
+            '!{{_ok}}':
+              - set:
+                  name: _jResult.error
+                  value: '{{_error}}'
+              - set:
+                  name: _jResult.message
+                  value: '{{_message}}'
+        - _console-journal:
+            op: finish
+            key: '{{_journalKey}}'
+            status: '{{_jStatus}}'
+            result: '{{_jResult}}'
+  - comment: The dispatched automation may have set its own status (409, 502...); the console reads ok / error instead.
+  - set:
+      name: $http
+      value:
+        status: 200
+  - set:
+      name: _output
+      value:
+        action: '{{_action}}'
+        ok: '{{_ok}}'
+        error: '{{_error}}'
+        message: '{{_message}}'
+        journalKey: '{{_journalKey}}'
+        result: '{{_res}}'
+output: '{{_output}}'

@@ -1,0 +1,120 @@
+slug: _resolve-kb
+name: helpers/Resolve knowledge base
+description: 'Resolves a manifest knowledge base key to its Storage id, read-only (DESIGN 4.1). Arguments {key}. Order: bound id (knowledgeBases[].existingIdFrom names a config value holding the secret id; bound only when it is a plain id, an unset secret is ignored) → cached state row res:kb:<key> whose id still exists (Storage.getVectorStore) → exact name among the caller''s own knowledge bases (Storage.listVectorStores scope owned, paged; the name filter is a substring match, the exact match is done here). Storage authenticates as the caller. Writes nothing (the cache is written by _ensure-kb). Returns {id, by: bound | cached | name | notFound, name, found, createdAt}.'
+private: true
+arguments:
+  key:
+    type: string
+    description: knowledgeBases[].key
+do:
+  - set:
+      name: _result
+      value:
+        id: null
+        by: notFound
+        name: null
+        found: false
+  - _manifest-get:
+      list: knowledgeBases
+      key: '{{key}}'
+      output: _m
+  - conditions:
+      '!{{_m.found}}':
+        - break:
+            scope: automation
+  - set:
+      name: _result.name
+      value: '{{_m.item.name}}'
+  - conditions:
+      '{{_m.item.existingIdFrom}}':
+        - set:
+            name: _boundId
+            value: '{{config[{{_m.item.existingIdFrom}}]}}'
+        - conditions:
+            '{{_boundId}}':
+              - conditions:
+                  '{{_boundId}} matches regex("^[A-Za-z0-9_-]+$")':
+                    - set:
+                        name: _result
+                        value:
+                          id: '{{_boundId}}'
+                          by: bound
+                          name: '{{_m.item.name}}'
+                          found: true
+                    - break:
+                        scope: automation
+  - _state-get:
+      key: res:kb:{{key}}
+      output: _cached
+  - conditions:
+      '{{_cached.row.data.id}}':
+        - Storage.getVectorStore:
+            vector_store_id: '{{_cached.row.data.id}}'
+            output: _kbGet
+        - conditions:
+            '!{{_kbGet.error}} and {{_kbGet.structuredData.id}}':
+              - set:
+                  name: _result
+                  value:
+                    id: '{{_cached.row.data.id}}'
+                    by: cached
+                    name: '{{_kbGet.structuredData.name}}'
+                    found: true
+                    createdAt: '{{_cached.row.data.createdAt}}'
+              - break:
+                  scope: automation
+  - set:
+      name: _page
+      value: 1
+  - repeat:
+      until: 20
+      do:
+        - Storage.listVectorStores:
+            scope: owned
+            name: '{{_m.item.name}}'
+            limit: 100
+            page: '{{_page}}'
+            output: _list
+        - conditions:
+            '{{_list.error}}':
+              - break:
+                  scope: repeat
+        - set:
+            name: _items
+            value: '{{_list.items}}'
+        - conditions:
+            '!{{_items}}':
+              - set:
+                  name: _items
+                  value: '{{_list.structuredData.data}}'
+        - repeat:
+            'on': '{{_items}}'
+            do:
+              - conditions:
+                  '{{item.name}} = {{_m.item.name}} and !{{_result.found}}':
+                    - set:
+                        name: _result
+                        value:
+                          id: '{{item.id}}'
+                          by: name
+                          name: '{{item.name}}'
+                          found: true
+                          createdAt: '{{item.created_at}}'
+        - conditions:
+            '{{_result.found}}':
+              - break:
+                  scope: repeat
+        - set:
+            name: _n
+            value: '{{_items.length}}'
+        - conditions:
+            '!{{_n}}':
+              - break:
+                  scope: repeat
+            '{{_n}} < 100':
+              - break:
+                  scope: repeat
+        - set:
+            name: _page
+            value: '{% {{_page}} + 1 %}'
+output: '{{_result}}'

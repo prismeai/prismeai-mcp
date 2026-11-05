@@ -1,0 +1,159 @@
+slug: _resolve-agent
+name: helpers/Resolve agent
+description: 'Resolves a manifest agent key to its Agent Factory id, read-only (DESIGN 4.1). Arguments {key}. Lists the own agents of the Agents import identity (Agents.listAgents scope own, paged) and keeps the exact name matches (ids). Order: cached state row res:agent:<key> whose id still exists (Agents.getAgent) → exact name; several same-name agents → the cached one, else the oldest (createdAt), with a warning. Writes nothing (the cache is written by _ensure-agent). Returns {id, by: cached | name | notFound | readFailed, ids, found, warning?, error? (AgentReadFailed when the list cannot be read, e.g. 401: never treated as notFound), status?, message?}.'
+private: true
+arguments:
+  key:
+    type: string
+    description: agents[].key
+do:
+  - set:
+      name: _result
+      value:
+        id: null
+        by: notFound
+        ids: []
+        found: false
+  - _manifest-get:
+      list: agents
+      key: '{{key}}'
+      output: _m
+  - conditions:
+      '!{{_m.found}}':
+        - break:
+            scope: automation
+  - set:
+      name: _ids
+      value: []
+  - set:
+      name: _oldestId
+      value: null
+  - set:
+      name: _oldestTs
+      value: null
+  - set:
+      name: _page
+      value: 1
+  - repeat:
+      until: 20
+      do:
+        - Agents.listAgents:
+            scope: own
+            limit: 100
+            page: '{{_page}}'
+            output: _list
+        - conditions:
+            '{{_list.error}}':
+              - comment: A failed read is never taken for an absent agent (it would plan a duplicate).
+              - set:
+                  name: _result.by
+                  value: readFailed
+              - set:
+                  name: _result.error
+                  value: AgentReadFailed
+              - set:
+                  name: _result.status
+                  value: '{{_list.status}}'
+              - set:
+                  name: _result.message
+                  value: Agents.listAgents failed (status {{_list.status}})
+              - break:
+                  scope: automation
+        - repeat:
+            'on': '{{_list.items}}'
+            do:
+              - conditions:
+                  '{{item.name}} = {{_m.item.name}}':
+                    - set:
+                        name: _ids
+                        type: push
+                        value: '{{item.id}}'
+                    - set:
+                        name: _ts
+                        value: 0
+                    - conditions:
+                        '{{item.createdAt}}':
+                          - set:
+                              name: _ts
+                              value: '{% date({{item.createdAt}}).ts %}'
+                    - conditions:
+                        '!{{_oldestId}}':
+                          - set:
+                              name: _oldestId
+                              value: '{{item.id}}'
+                          - set:
+                              name: _oldestTs
+                              value: '{{_ts}}'
+                        '{{_ts}} < {{_oldestTs}}':
+                          - set:
+                              name: _oldestId
+                              value: '{{item.id}}'
+                          - set:
+                              name: _oldestTs
+                              value: '{{_ts}}'
+        - set:
+            name: _n
+            value: '{{_list.items.length}}'
+        - conditions:
+            '!{{_n}}':
+              - break:
+                  scope: repeat
+            '{{_n}} < 100':
+              - break:
+                  scope: repeat
+        - set:
+            name: _page
+            value: '{% {{_page}} + 1 %}'
+  - set:
+      name: _result.ids
+      value: '{{_ids}}'
+  - _state-get:
+      key: res:agent:{{key}}
+      output: _cached
+  - set:
+      name: _cachedId
+      value: '{{_cached.row.data.id}}'
+  - conditions:
+      '{{_cachedId}} and {{_cachedId}} in {{_ids}}':
+        - set:
+            name: _result.id
+            value: '{{_cachedId}}'
+        - set:
+            name: _result.by
+            value: cached
+        - set:
+            name: _result.found
+            value: true
+      '{{_cachedId}}':
+        - comment: Cached id no longer named like the manifest entry (renamed by hand?) — kept when it still exists.
+        - Agents.getAgent:
+            agent_id: '{{_cachedId}}'
+            output: _get
+        - conditions:
+            '!{{_get.error}} and {{_get.id}}':
+              - set:
+                  name: _result.id
+                  value: '{{_cachedId}}'
+              - set:
+                  name: _result.by
+                  value: cached
+              - set:
+                  name: _result.found
+                  value: true
+  - conditions:
+      '!{{_result.found}} and {{_oldestId}}':
+        - set:
+            name: _result.id
+            value: '{{_oldestId}}'
+        - set:
+            name: _result.by
+            value: name
+        - set:
+            name: _result.found
+            value: true
+  - conditions:
+      '{{_ids.length}} > 1':
+        - set:
+            name: _result.warning
+            value: '{{_ids.length}} own agents are named {{_m.item.name}}: {{_result.id}} is used ({{_result.by}}).'
+output: '{{_result}}'

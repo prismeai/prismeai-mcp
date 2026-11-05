@@ -1,0 +1,235 @@
+slug: _bench-collect
+name: evaluation/Collect batch
+description: 'Follows the batch run in flight of one agent (called by _bench-advance under the bench lock). Evaluation.getRun {include_results}: not terminal → progress tracked (lastCompleted, lastProgressAt); no progress for runner.batchTimeoutMin → Evaluation.cancelRun then read again, reason stalled; interrupt true (bench stopped) → cancelled at once, reason interrupted; run not found → reason missing; other read failure → state error, retried at the next tick. Terminal (completed | failed | cancelled), stalled, interrupted or missing → Evaluation.listCases of the agent (its case set IS the batch: every batch replaces it), Custom Code benchEngine op collect, and the case rows of the batch are written at once (done, pending again for a retry or a rate-limit backoff, errored). Emits benchmark.batchCollected. Arguments {benchId, agentKey, batch {runId, agentId, n, caseIds, batchNo, startedAt, lastProgressAt, lastCompleted}, runner, interrupt}. Output {state: waiting | collected | error, batch, reason, summary, logEntry {agentKey, runId, batchNo, n, startedAt, endedAt, reason, runStatus, summary, run {score, durationMs, agentModel, judgeModel, error}}, error}.'
+private: true
+arguments:
+  benchId:
+    type: string
+  agentKey:
+    type: string
+  batch:
+    type: object
+  runner:
+    type: object
+  interrupt:
+    type: boolean
+    description: true when the bench is stopped — a run still in progress is cancelled now.
+do:
+  - set:
+      name: _batch
+      value: '{{batch}}'
+  - set:
+      name: _reason
+      value: ''
+  - set:
+      name: _state
+      value: waiting
+  - set:
+      name: _error
+      value: null
+  - set:
+      name: _summary
+      value: null
+  - set:
+      name: _logEntry
+      value: null
+  - set:
+      name: _timeoutMin
+      value: 15
+  - conditions:
+      '{{runner.batchTimeoutMin}} >= 2':
+        - set:
+            name: _timeoutMin
+            value: '{{runner.batchTimeoutMin}}'
+  - Evaluation.getRun:
+      run_id: '{{batch.runId}}'
+      include_results: true
+      output: _run
+  - set:
+      name: _readFailed
+      value: false
+  - conditions:
+      '{{_run.error}} == true and {{_run.code}}':
+        - set:
+            name: _readFailed
+            value: true
+  - conditions:
+      '{{_readFailed}} and {{_run.status}} == 404':
+        - set:
+            name: _reason
+            value: missing
+        - set:
+            name: _run
+            value: {}
+      '{{_readFailed}}':
+        - set:
+            name: _state
+            value: error
+        - set:
+            name: _error
+            value:
+              error: '{{_run.code}}'
+              message: '{{_run.message}}'
+              runId: '{{batch.runId}}'
+              status: '{{_run.status}}'
+              at: '{{run.date}}'
+      '{{_run.status}} == "completed" or {{_run.status}} == "failed" or {{_run.status}} == "cancelled"':
+        - set:
+            name: _reason
+            value: completed
+      '{{interrupt}}':
+        - Evaluation.cancelRun:
+            run_id: '{{batch.runId}}'
+            output: _cancel
+        - Evaluation.getRun:
+            run_id: '{{batch.runId}}'
+            include_results: true
+            output: _run
+        - set:
+            name: _reason
+            value: interrupted
+      default:
+        - set:
+            name: _completed
+            value: 0
+        - conditions:
+            isNumber({{_run.progress.completed}}):
+              - set:
+                  name: _completed
+                  value: '{{_run.progress.completed}}'
+        - set:
+            name: _lastCompleted
+            value: 0
+        - conditions:
+            isNumber({{batch.lastCompleted}}):
+              - set:
+                  name: _lastCompleted
+                  value: '{{batch.lastCompleted}}'
+        - set:
+            name: _lastProgressAt
+            value: '{{batch.startedAt}}'
+        - conditions:
+            '{{batch.lastProgressAt}}':
+              - set:
+                  name: _lastProgressAt
+                  value: '{{batch.lastProgressAt}}'
+        - conditions:
+            '{{_completed}} > {{_lastCompleted}}':
+              - set:
+                  name: _batch
+                  type: merge
+                  value:
+                    lastCompleted: '{{_completed}}'
+                    lastProgressAt: '{{run.date}}'
+            default:
+              - set:
+                  name: _idleMs
+                  value: '{% date({{run.date}}).ts - date({{_lastProgressAt}}).ts %}'
+              - set:
+                  name: _timeoutMs
+                  value: '{% {{_timeoutMin}} * 60000 %}'
+              - conditions:
+                  '{{_idleMs}} > {{_timeoutMs}}':
+                    - Evaluation.cancelRun:
+                        run_id: '{{batch.runId}}'
+                        output: _cancel
+                    - Evaluation.getRun:
+                        run_id: '{{batch.runId}}'
+                        include_results: true
+                        output: _run
+                    - set:
+                        name: _reason
+                        value: stalled
+  - conditions:
+      '{{_reason}}':
+        - set:
+            name: _runBody
+            value: {}
+        - conditions:
+            '!{{_run.code}}':
+              - set:
+                  name: _runBody
+                  value: '{{_run}}'
+        - Evaluation.listCases:
+            agent_id: '{{batch.agentId}}'
+            limit: 100
+            page: 1
+            output: _cases
+        - set:
+            name: _caseItems
+            value: '{{_cases.items}}'
+        - _state-find:
+            query:
+              kind: benchcase
+              key:
+                $regex: '^benchcase:{{benchId}}:{{agentKey}}:'
+            limit: 5000
+            output: _units
+        - Custom Code.run:
+            function: benchEngine
+            parameters:
+              op: collect
+              units: '{{_units.rows}}'
+              runId: '{{batch.runId}}'
+              run: '{{_runBody}}'
+              cases: '{{_caseItems}}'
+              runner: '{{runner}}'
+              reason: '{{_reason}}'
+            output: _col
+        - conditions:
+            '{{_col.error}}':
+              - set:
+                  name: _state
+                  value: error
+              - set:
+                  name: _error
+                  value:
+                    error: CustomCodeUnavailable
+                    message: '{{_col.message}}'
+                    runId: '{{batch.runId}}'
+                    at: '{{run.date}}'
+            default:
+              - repeat:
+                  'on': '{{_col.updates}}'
+                  do:
+                    - _state-set:
+                        key: '{{item.key}}'
+                        kind: benchcase
+                        status: '{{item.status}}'
+                        data: '{{item.data}}'
+              - set:
+                  name: _state
+                  value: collected
+              - set:
+                  name: _summary
+                  value: '{{_col.summary}}'
+              - set:
+                  name: _logEntry
+                  value:
+                    agentKey: '{{agentKey}}'
+                    runId: '{{batch.runId}}'
+                    batchNo: '{{batch.batchNo}}'
+                    'n': '{{batch.n}}'
+                    startedAt: '{{batch.startedAt}}'
+                    endedAt: '{{run.date}}'
+                    reason: '{{_reason}}'
+                    runStatus: '{{_runBody.status}}'
+                    summary: '{{_col.summary}}'
+                    run:
+                      score: '{{_runBody.score}}'
+                      durationMs: '{{_runBody.duration_ms}}'
+                      agentModel: '{{_runBody.agent_model}}'
+                      judgeModel: '{{_runBody.judge_model}}'
+                      error: '{{_runBody.error}}'
+              - emit:
+                  event: benchmark.batchCollected
+                  payload:
+                    benchId: '{{benchId}}'
+                    entry: '{{_logEntry}}'
+output:
+  state: '{{_state}}'
+  batch: '{{_batch}}'
+  reason: '{{_reason}}'
+  summary: '{{_summary}}'
+  logEntry: '{{_logEntry}}'
+  error: '{{_error}}'

@@ -1,0 +1,62 @@
+slug: pollBenchmark
+name: evaluation/Poll benchmark
+description: 'Schedule (`* * * * *`, but the platform runs schedules at most every 15 min; an open console sends advanceBenchmark every minute while a bench runs, which is what keeps the documented pace; runner.batchTimeoutMin is above 15 so a batch is never cancelled as stalled between two schedule runs). No-op unless a bench is running: runs _bench-advance for every bench in status running (normally one) — collect finished batches, retry error-like cases, start the next batch within the hourly budget, compute the report once every case is done or errored. At most one batch start per execution: once a bench started one, the next ones are advanced with noStart. No argument. Output {checked, benchId, status, started, collected, benches: [{benchId, status, started, collected, totals, nextAt, lastError}]}.'
+private: true
+when:
+  schedules:
+    - '* * * * *'
+arguments: {}
+do:
+  - _state-find:
+      query:
+        kind: bench
+        status: running
+      limit: 10
+      output: _running
+  - set:
+      name: _benches
+      value: []
+  - set:
+      name: _first
+      value: {}
+  - set:
+      name: _startedOne
+      value: false
+  - repeat:
+      'on': '{{_running.rows}}'
+      do:
+        - _bench-advance:
+            benchId: '{{item.data.benchId}}'
+            noStart: '{{_startedOne}}'
+            output: _adv
+        - conditions:
+            '{{_adv.started.length}} > 0':
+              - set:
+                  name: _startedOne
+                  value: true
+        - conditions:
+            '!{{_first.benchId}}':
+              - set:
+                  name: _first
+                  value: '{{_adv}}'
+        - set:
+            name: _benches
+            type: push
+            value:
+              benchId: '{{_adv.benchId}}'
+              status: '{{_adv.status}}'
+              started: '{{_adv.started}}'
+              collected: '{{_adv.collected}}'
+              totals: '{{_adv.totals}}'
+              nextAt: '{{_adv.nextAt}}'
+              lastError: '{{_adv.lastError}}'
+  - set:
+      name: _result
+      value:
+        checked: '{{_benches.length}}'
+        benchId: '{{_first.benchId}}'
+        status: '{{_first.status}}'
+        started: '{{_first.started}}'
+        collected: '{{_first.collected}}'
+        benches: '{{_benches}}'
+output: '{{_result}}'

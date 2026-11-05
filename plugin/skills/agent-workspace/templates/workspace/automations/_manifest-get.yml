@@ -1,0 +1,33 @@
+slug: _manifest-get
+name: helpers/Manifest get
+description: 'Returns the manifest entry identified by key from one list of config (DESIGN 2): agents | knowledgeBases | documents | sources (sources here are the DELIVERED entries; readers that need the console overlay call _sources-effective). Arguments {list, key}. Returns {found, item} (item null when not found).'
+private: true
+arguments:
+  list:
+    type: string
+    description: agents | knowledgeBases | documents | sources
+  key:
+    type: string
+do:
+  - set:
+      name: _found
+      value: false
+  - set:
+      name: _item
+      value: null
+  - repeat:
+      'on': '{{config[{{list}}]}}'
+      do:
+        - conditions:
+            '{{item.key}} = {{key}}':
+              - set:
+                  name: _item
+                  value: '{{item}}'
+              - set:
+                  name: _found
+                  value: true
+              - break:
+                  scope: repeat
+output:
+  found: '{{_found}}'
+  item: '{{_item}}'

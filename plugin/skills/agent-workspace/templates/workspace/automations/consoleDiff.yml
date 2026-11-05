@@ -1,0 +1,78 @@
+slug: consoleDiff
+name:
+  en: console/Differences
+  fr: console/Écarts
+description: 'Read endpoint of the console differences view (guarded, writes nothing, DESIGN 5.3). Body {part: agents | kbs, agents?: [agent keys]}. part agents -> {agents: [describeInstance agent entries {key, name, optional, variantOf, resolution, live, expected, diff, syncAll}]} read without instructions text nor upload; diff goes from what the workspace would apply to what the agent has. part kbs -> {kbs: [{key, name, id, by, status, document_counts, settings {fields: [{field, manifest, live, same, readable}], same}}], documents: [syncAll dry-run kbdoc actions]}. Errors {error, message}: 403 Forbidden, 400 InvalidOp; a describeInstance error is passed through next to an empty agents list.'
+when:
+  endpoint: true
+validateArguments: true
+arguments:
+  body:
+    type: object
+    properties:
+      part:
+        type: string
+      agents:
+        type: array
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _output
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - break:
+            scope: automation
+  - conditions:
+      '{{body.part}} = "agents"':
+        - set:
+            name: _args
+            value:
+              includeInstructions: false
+              upload: false
+        - conditions:
+            '{{body.agents.length}} > 0':
+              - set:
+                  name: _args.agents
+                  value: '{{body.agents}}'
+        - describeInstance:
+            body: '{{_args}}'
+            output: _desc
+        - set:
+            name: _output
+            value:
+              agents: '{{_desc.agents}}'
+        - conditions:
+            '!{{_desc.agents}}':
+              - set:
+                  name: _output.agents
+                  value: []
+        - conditions:
+            '{{_desc.error}}':
+              - set:
+                  name: _output.error
+                  value: '{{_desc.error}}'
+              - set:
+                  name: _output.message
+                  value: '{{_desc.message}}'
+      '{{body.part}} = "kbs"':
+        - _console-kb-diff:
+            output: _output
+      default:
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _output
+            value:
+              error: InvalidOp
+              message: part must be agents or kbs
+output: '{{_output}}'

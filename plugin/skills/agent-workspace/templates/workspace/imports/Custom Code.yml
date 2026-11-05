@@ -1,0 +1,1552 @@
+slug: Custom Code
+appSlug: Custom Code
+config:
+  disableNpmRegistry: true
+  functions:
+    agentConfig:
+      language: nodejs
+      parameters:
+        op:
+          type: string
+          description: check | plan | report | summary
+        live:
+          type: object
+          description: Live agent draft (Agents.getAgent with x-draft-mode), or null
+        expected:
+          type: object
+          description: 'check / plan: the body _ensure-agent sends + visibility (+ profile); report: {body, visibility, profile, missing}'
+        stored:
+          type: object
+          description: Data of the state row res:agentHash:<agent-key> ({hash, snapshot}), or null
+        options:
+          type: object
+          description: 'check / plan: {skippedTools}; report: {includeInstructions, kbs [{id, key, name}], apiUrl}'
+        data:
+          type: object
+          description: 'summary: the syncAll actions array'
+      code: |
+        /*
+          agentConfig(op, live, expected, stored, options, data)
+          Agent configuration fingerprint, drift decision, sync plan, instance description and sync
+          summary (DESIGN 4.3, 4.6, 6.1). Pure: no I/O. Never throws: {error, message} on failure.
+          op:
+          - check: drift guard of _ensure-agent. live = the live agent draft (GET v1/agents/:id with
+            x-draft-mode), expected = the body _ensure-agent sends + visibility, stored = the data of the
+            state row res:agentHash:<key> ({hash, snapshot}) or null, options.skippedTools.
+            Snapshot = the managed fields (description, instructions, model, temperature, visibility,
+            tool_call_budget, token_budget, max_turns / max_tokens when the expected body sets them, skills
+            and hooks when it carries an array, sub_agents, tools), normalised: tools and sub agents sorted
+            by name, tool ids dropped, headers / auth / secret-like keys replaced by a hash, URL query values
+            redacted. hash = sha256 of the snapshot (16 hex).
+            Rule: live = expected -> in-sync; live = stored -> workspace-changed (update); otherwise drift,
+            edited-outside-workspace with a stored hash, no-baseline without. A baseline stored before a
+            field became managed is matched without that field, so managing a new field is no hand edit.
+            A localized description ({"en": "..."} or that JSON as a string) is compared by its text;
+            keepDescription = the live value when its text is the expected one (sent back unchanged).
+            Returns {drift, reason, liveHash, expectedHash, storedHash, changes, summary, liveSnapshot,
+            plan, keepDescription?}.
+          - plan: live null -> creation plan {mode: create, create {...}}; live set -> the plan of check.
+          - report: describeInstance entry of one agent. live (or null), expected {body, visibility,
+            profile, missing} (or null), stored as above, options {includeInstructions, kbs [{id, key,
+            name}], apiUrl}. Returns {live, published, expected, diff, syncAll {wouldDo, reason, summary,
+            missing?}, externalTools}, redacted (secret-like keys, header values, token-like URL query
+            values, Bearer / iak_ / sk- / JWT strings).
+          - summary: data = syncAll actions -> {summary: one line per action, warnings: destructive
+            sentences prefixed by the resource key, unbound / created knowledge bases, skipped documents,
+            agents left in drift or failed}.
+          plan shape (check and plan): {mode: update, same, fields [{field, from, to}], instructions
+          {fromLength, toLength, addedLines, removedLines, lostSections, firstChanges}, tools {added,
+          removed, replaced, changed}, skills {added, removed, changed}, subAgents {added, removed,
+          changed}, kept (unmanaged live fields), skippedTools, destructive [sentences], counts}.
+          Destructive: tool removed or replaced by another type, tool target changed, tool parameter
+          dropped, sub agent removed, skill / hook removed, a limit lowered or removed, model changed,
+          visibility changed, instructions shorter by more than 10 % or losing headings, an omitted tool
+          that exists live.
+        */
+        const crypto = require('crypto');
+        /* The functions sandbox has no global URL: take it from the url module. */
+        const NodeURL = require('url').URL;
+        try {
+          const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+          const isEmpty = (v) => v === undefined || v === null || v === '' ||
+            (Array.isArray(v) && !v.length) || (isObj(v) && !Object.keys(v).length);
+          const stable = (v) => {
+            if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+            if (isObj(v)) return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
+            return JSON.stringify(v === undefined ? null : v);
+          };
+          const sha = (v) => crypto.createHash('sha256').update(typeof v === 'string' ? v : stable(v)).digest('hex').slice(0, 16);
+          const num = (v) => {
+            if (v === undefined || v === null || v === '') return null;
+            const n = Number(v);
+            return isFinite(n) ? n : String(v);
+          };
+          const str = (v) => (v === undefined || v === null ? null : (typeof v === 'string' ? v : stable(v)));
+          const opts = isObj(options) ? options : {};
+
+          /* ---- redaction ---- */
+          const SECRET_KEY = /(secret|password|passwd|credential|cookie|authorization|api[-_]?key|apikey|private[-_]?key|token|signature)$/i;
+          const SECRET_PARAM = /(token|key|sig|signature|secret|code|auth|password|passwd|credential|session|jwt|access)/i;
+          const looksLikeToken = (s) => s.length >= 16 && /^[A-Za-z0-9._~+\/=:-]+$/.test(s) && /[0-9]/.test(s) && /[A-Za-z]/.test(s);
+          const redactUrl = (s) => {
+            if (!/^https?:\/\//i.test(s)) return s;
+            let u;
+            try { u = new NodeURL(s); } catch (e) { return s; }
+            let changed = false;
+            if (u.username || u.password) { u.username = 'REDACTED'; u.password = ''; changed = true; }
+            const params = [];
+            u.searchParams.forEach((v, k) => params.push([k, v]));
+            if (params.length) {
+              const q = params.map(([k, v]) => {
+                if (SECRET_PARAM.test(k) || looksLikeToken(v)) { changed = true; return encodeURIComponent(k) + '=REDACTED'; }
+                return encodeURIComponent(k) + '=' + encodeURIComponent(v);
+              });
+              if (changed) return u.origin + u.pathname + '?' + q.join('&') + (u.hash || '');
+            }
+            return changed ? u.toString() : s;
+          };
+          const redactString = (s) => {
+            let out = s;
+            out = out.replace(/https?:\/\/[^\s"'<>`)\]]+/gi, (m) => redactUrl(m));
+            out = out.replace(/\bat:[A-Za-z0-9._\-]{8,}/g, 'at:REDACTED');
+            out = out.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=\-]{8,}/g, '$1 REDACTED');
+            out = out.replace(/\biak_[A-Za-z0-9._\-]{6,}/g, 'iak_REDACTED');
+            out = out.replace(/\bsk-[A-Za-z0-9_\-]{10,}/g, 'sk-REDACTED');
+            out = out.replace(/\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}/g, 'JWT_REDACTED');
+            out = out.replace(/([?&](?:token|access_token|api_key|apikey|key|sig|signature|code|secret|password)=)[^&\s"'<>]+/gi, '$1REDACTED');
+            return out;
+          };
+          const redactDeep = (v, keyName) => {
+            if (typeof v === 'string') {
+              if (keyName && SECRET_KEY.test(keyName) && v) return 'REDACTED';
+              return redactString(v);
+            }
+            if (Array.isArray(v)) return v.map((x) => redactDeep(x, null));
+            if (isObj(v)) {
+              const o = {};
+              Object.keys(v).forEach((k) => {
+                const x = v[k];
+                if (/^headers$/i.test(k) && isObj(x)) {
+                  const h = {};
+                  Object.keys(x).forEach((hk) => { h[hk] = 'REDACTED'; });
+                  o[k] = h;
+                } else if (SECRET_KEY.test(k) && x !== null && x !== undefined && typeof x !== 'boolean' && typeof x !== 'number') {
+                  o[k] = 'REDACTED';
+                } else {
+                  o[k] = redactDeep(x, k);
+                }
+              });
+              return o;
+            }
+            return v;
+          };
+
+          /* ---- snapshot (managed fields, normalised) ---- */
+          const TOOL_VOLATILE = { id: 1, activation: 1 };
+          const isSecretToolKey = (k) => /^(headers|auth|env|credentials?)$/i.test(k) || SECRET_KEY.test(k);
+          const normValue = (v) => {
+            if (typeof v === 'string') return redactUrl(v);
+            if (Array.isArray(v)) return v.map(normValue);
+            if (isObj(v)) {
+              const o = {};
+              Object.keys(v).sort().forEach((k) => { if (!isEmpty(v[k])) o[k] = normValue(v[k]); });
+              return o;
+            }
+            return v;
+          };
+          const normTool = (t) => {
+            const out = {};
+            if (!isObj(t)) return { value: str(t) };
+            Object.keys(t).sort().forEach((k) => {
+              const v = t[k];
+              if (TOOL_VOLATILE[k] || isEmpty(v)) return;
+              if (isSecretToolKey(k)) { out[k + '~hash'] = sha(v); return; }
+              if (k === 'max_num_results') { out[k] = num(v); return; }
+              const n = normValue(v);
+              out[k] = n;
+              if (typeof v === 'string' && n !== v) out[k + '~hash'] = sha(v);
+            });
+            return out;
+          };
+          const byName = (a, b) => {
+            const x = String(a.name || '') + '\u0000' + String(a.type || '');
+            const y = String(b.name || '') + '\u0000' + String(b.type || '');
+            return x < y ? -1 : (x > y ? 1 : 0);
+          };
+          const descText = (v) => {
+            let x = v;
+            if (typeof x === 'string') {
+              const t = x.trim();
+              if (t.charAt(0) !== '{') return x;
+              try { x = JSON.parse(t); } catch (e) { return v; }
+            }
+            if (isObj(x)) {
+              const vals = Object.keys(x).sort().map((k) => x[k]).filter((s) => typeof s === 'string' && s !== '');
+              const uniq = vals.filter((s, i) => vals.indexOf(s) === i);
+              return uniq.length === 1 ? uniq[0] : stable(x);
+            }
+            return str(x);
+          };
+          /* max_turns / max_tokens are managed only when the expected body sets them (never sent as null,
+             which would reset them); skills / hooks only when it carries an array. */
+          const flagsOf = (exp) => ({
+            turns: isObj(exp) && !isEmpty(exp.max_turns),
+            tokens: isObj(exp) && !isEmpty(exp.max_tokens),
+            skills: isObj(exp) && Array.isArray(exp.skills),
+            hooks: isObj(exp) && Array.isArray(exp.hooks)
+          });
+          const without = (snap, keys) => {
+            const o = {};
+            Object.keys(snap).forEach((k) => { if (keys.indexOf(k) < 0) o[k] = snap[k]; });
+            return o;
+          };
+          const normSkill = (x) => {
+            if (!isObj(x)) return { name: str(x) };
+            const o = { name: str(x.name), display_name: sha(str(x.display_name)), description: sha(str(x.description)),
+              instructions: sha(str(x.instructions)), length: (str(x.instructions) || '').length };
+            if (x.skill_id) o.skill_id = str(x.skill_id);
+            return o;
+          };
+          const normHook = (h) => (isObj(h) ? normValue(h) : { id: str(h) });
+          const byId = (a, b) => (String(a.id || '') < String(b.id || '') ? -1 : (String(a.id || '') > String(b.id || '') ? 1 : 0));
+          const listDiff = (from, to, idKey, fieldsOf) => {
+            const out = { added: [], removed: [], changed: [] };
+            const A = Array.isArray(from) ? from : [], B = Array.isArray(to) ? to : [];
+            A.forEach((a) => {
+              const b = B.find((x) => x[idKey] === a[idKey]);
+              if (!b) { out.removed.push(a[idKey]); return; }
+              const keys = {};
+              (fieldsOf ? fieldsOf : Object.keys(a).concat(Object.keys(b))).forEach((k) => { keys[k] = 1; });
+              const fields = Object.keys(keys).filter((k) => stable(a[k]) !== stable(b[k]));
+              if (fields.length) {
+                const c = {};
+                c[idKey] = a[idKey];
+                c.fields = fields;
+                if (idKey === 'name' && a.length !== undefined) { c.fromLength = a.length; c.toLength = b.length; }
+                out.changed.push(c);
+              }
+            });
+            B.forEach((b) => { if (!A.find((x) => x[idKey] === b[idKey])) out.added.push(b[idKey]); });
+            return out;
+          };
+          const skillDiff = (from, to) => listDiff(from, to, 'name', ['display_name', 'description', 'instructions', 'skill_id']);
+          const hookDiff = (from, to) => listDiff(from, to, 'id', null);
+          const snapshot = (cfg, fl) => {
+            const f = isObj(fl) ? fl : {};
+            const c = isObj(cfg) ? cfg : {};
+            const tools = (Array.isArray(c.tools) ? c.tools : []).map(normTool).sort(byName);
+            const subs = (Array.isArray(c.sub_agents) ? c.sub_agents : []).map((s) => ({
+              agent_id: str(s && s.agent_id), name: str(s && s.name), description: str(s && s.description)
+            })).sort(byName);
+            const snap = {
+              description: descText(c.description),
+              instructions: str(c.instructions),
+              model: str(c.model),
+              temperature: num(c.temperature),
+              tool_call_budget: num(c.tool_call_budget),
+              token_budget: num(c.token_budget),
+              visibility: str(c.visibility),
+              sub_agents: subs,
+              tools: tools
+            };
+            if (f.turns) snap.max_turns = num(c.max_turns);
+            if (f.tokens) snap.max_tokens = num(c.max_tokens);
+            if (f.skills) snap.skills = (Array.isArray(c.skills) ? c.skills : []).map(normSkill).sort(byName);
+            if (f.hooks) snap.hooks = (Array.isArray(c.hooks) ? c.hooks : []).map(normHook).sort(byId);
+            return snap;
+          };
+
+          /* ---- diff (describe and drift summary) ---- */
+          const lines = (s) => String(s || '').replace(/\r\n/g, '\n').split('\n');
+          const cut = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
+          const lineDiff = (a, b, maxOut) => {
+            const A = lines(a), B = lines(b);
+            let p = 0;
+            while (p < A.length && p < B.length && A[p] === B[p]) p++;
+            let ea = A.length - 1, eb = B.length - 1;
+            while (ea >= p && eb >= p && A[ea] === B[eb]) { ea--; eb--; }
+            const a2 = A.slice(p, ea + 1), b2 = B.slice(p, eb + 1);
+            const out = [];
+            let truncated = false;
+            const push = (o) => { if (out.length < maxOut) out.push(o); else truncated = true; };
+            if (a2.length * b2.length <= 4000000) {
+              const n = a2.length, m = b2.length;
+              const L = [];
+              for (let i = 0; i <= n; i++) L.push(new Uint32Array(m + 1));
+              for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) {
+                L[i][j] = a2[i] === b2[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+              }
+              let i = 0, j = 0;
+              while (i < n || j < m) {
+                if (i < n && j < m && a2[i] === b2[j]) { i++; j++; continue; }
+                if (i < n && (j >= m || L[i + 1][j] >= L[i][j + 1])) { push({ op: '-', line: p + i + 1, text: cut(a2[i], 300) }); i++; }
+                else { push({ op: '+', line: p + j + 1, text: cut(b2[j], 300) }); j++; }
+              }
+            } else {
+              a2.forEach((t, k) => push({ op: '-', line: p + k + 1, text: cut(t, 300) }));
+              b2.forEach((t, k) => push({ op: '+', line: p + k + 1, text: cut(t, 300) }));
+            }
+            return { firstDifferingLine: p + 1, fromLines: A.length, toLines: B.length, changes: out, truncated: truncated };
+          };
+          const toolTarget = (t) => t.vector_store_id || (t.server ? String(t.server).split('?')[0] : null) ||
+            (t.function && t.function.name) || null;
+          const SCALARS = ['description', 'model', 'temperature', 'tool_call_budget', 'token_budget', 'max_turns', 'max_tokens', 'visibility'];
+          const diffSnap = (from, to, detail) => {
+            const changes = [];
+            const fields = {};
+            SCALARS.forEach((f) => {
+              if (stable(from[f]) !== stable(to[f])) {
+                changes.push(f);
+                fields[f] = { from: from[f], to: to[f] };
+              }
+            });
+            if (fields.description && !detail) fields.description = { changed: true };
+            let instructions = { same: true, length: (to.instructions || '').length };
+            if ((from.instructions || '') !== (to.instructions || '')) {
+              changes.push('instructions');
+              const ld = lineDiff(from.instructions, to.instructions, detail ? 200 : 3);
+              instructions = {
+                same: false,
+                fromLength: (from.instructions || '').length,
+                toLength: (to.instructions || '').length,
+                firstDifferingLine: ld.firstDifferingLine,
+                fromLines: ld.fromLines,
+                toLines: ld.toLines,
+                changes: ld.changes,
+                truncated: ld.truncated
+              };
+            }
+            const fromTools = from.tools || [], toTools = to.tools || [];
+            const used = {};
+            const tools = { added: [], removed: [], renamed: [], changed: [] };
+            fromTools.forEach((ft) => {
+              let k = toTools.findIndex((tt, i) => !used[i] && tt.name === ft.name);
+              let how = 'name';
+              if (k < 0 && toolTarget(ft)) {
+                k = toTools.findIndex((tt, i) => !used[i] && tt.type === ft.type && toolTarget(tt) === toolTarget(ft));
+                how = 'target';
+              }
+              if (k < 0) { tools.removed.push({ name: ft.name, type: ft.type }); return; }
+              used[k] = true;
+              const tt = toTools[k];
+              const keys = {};
+              Object.keys(ft).concat(Object.keys(tt)).forEach((x) => { keys[x] = 1; });
+              const diffKeys = Object.keys(keys).filter((x) => stable(ft[x]) !== stable(tt[x]));
+              if (how === 'target') tools.renamed.push({ from: ft.name, to: tt.name, type: tt.type, fields: diffKeys });
+              else if (diffKeys.length) tools.changed.push({ name: ft.name, type: tt.type, fields: diffKeys });
+            });
+            toTools.forEach((tt, i) => { if (!used[i]) tools.added.push({ name: tt.name, type: tt.type }); });
+            if (tools.added.length || tools.removed.length || tools.changed.length || tools.renamed.length) changes.push('tools');
+            const fromSubs = from.sub_agents || [], toSubs = to.sub_agents || [];
+            const subAgents = { added: [], removed: [], changed: [] };
+            fromSubs.forEach((fs) => {
+              const ts = toSubs.find((x) => x.name === fs.name);
+              if (!ts) subAgents.removed.push(fs.name);
+              else if (stable(fs) !== stable(ts)) subAgents.changed.push(fs.name);
+            });
+            toSubs.forEach((ts) => { if (!fromSubs.find((x) => x.name === ts.name)) subAgents.added.push(ts.name); });
+            if (subAgents.added.length || subAgents.removed.length || subAgents.changed.length) changes.push('subAgents');
+            const skills = ('skills' in from || 'skills' in to) ? skillDiff(from.skills, to.skills) : { added: [], removed: [], changed: [] };
+            if (skills.added.length || skills.removed.length || skills.changed.length) changes.push('skills');
+            const hooks = ('hooks' in from || 'hooks' in to) ? hookDiff(from.hooks, to.hooks) : null;
+            if (hooks && (hooks.added.length || hooks.removed.length || hooks.changed.length)) changes.push('hooks');
+            const parts = [];
+            if (!instructions.same) {
+              parts.push('instructions ' + instructions.fromLength + ' -> ' + instructions.toLength + ' chars (first difference at line ' +
+                instructions.firstDifferingLine + ')');
+            }
+            SCALARS.slice(1).forEach((f) => { if (fields[f]) parts.push(f + ' ' + fields[f].from + ' -> ' + fields[f].to); });
+            if (fields.description) parts.push('description changed');
+            if (tools.added.length) parts.push('tools added: ' + tools.added.map((t) => t.name).join(', '));
+            if (tools.removed.length) parts.push('tools removed: ' + tools.removed.map((t) => t.name).join(', '));
+            if (tools.renamed.length) parts.push('tools renamed: ' + tools.renamed.map((t) => t.from + ' -> ' + t.to).join(', '));
+            if (tools.changed.length) parts.push('tools changed: ' + tools.changed.map((t) => t.name + ' (' + t.fields.join(', ') + ')').join(', '));
+            if (changes.indexOf('subAgents') >= 0) parts.push('sub agents changed');
+            if (skills.added.length) parts.push('skills added: ' + skills.added.join(', '));
+            if (skills.removed.length) parts.push('skills removed: ' + skills.removed.join(', '));
+            if (skills.changed.length) parts.push('skills changed: ' + skills.changed.map((k) => k.name).join(', '));
+            if (hooks && (hooks.added.length || hooks.removed.length || hooks.changed.length)) parts.push('hooks changed');
+            const res = { same: !changes.length, changes: changes, summary: cut(parts.join('; '), 900), fields: fields,
+              instructions: instructions, tools: tools, skills: skills, subAgents: subAgents };
+            if (hooks) res.hooks = hooks;
+            return res;
+          };
+
+          /* ---- sync plan: what applying expected over the live agent changes (check / plan) ---- */
+          const PLAN_KEPT = ['max_turns', 'max_tokens', 'fallback_models', 'allowed_models', 'skills', 'guardrails', 'tool_permissions',
+            'tool_activation', 'hooks', 'rate_limits', 'canvas_enabled', 'conversation_file_tools_enabled', 'starters', 'category',
+            'tags', 'icon_url', 'conversation_kb_id', 'profile'];
+          const toolRef = (t) => {
+            if (!isObj(t)) return null;
+            if (t.vector_store_id) return 'kb:' + t.vector_store_id;
+            const sv = t.server ? String(t.server).split('?')[0] : '';
+            const m = sv.match(/\/knowledge_bases\/([^/?]+)\/mcp/);
+            if (m) return 'kb:' + m[1];
+            if (sv) return 'server:' + sv;
+            if (t.type === 'system') return 'system:' + t.name;
+            return null;
+          };
+          const paths = (v, pre, out) => {
+            if (isObj(v)) { Object.keys(v).forEach((k) => paths(v[k], pre ? pre + '.' + k : k, out)); return out; }
+            if (Array.isArray(v)) {
+              v.forEach((x, i) => {
+                const id = isObj(x) && (x.id || x.name) ? String(x.id || x.name) : String(i);
+                paths(x, (pre || '') + '[' + id + ']', out);
+              });
+              if (!v.length) out[pre] = '[]';
+              return out;
+            }
+            out[pre] = stable(v);
+            return out;
+          };
+          const short = (v) => cut(typeof v === 'string' ? v : stable(v), 200);
+          const typeOf = (t) => t.type || '?';
+          const buildPlan = (liveDoc, exp, skipped) => {
+            const fl = flagsOf(exp);
+            const L = snapshot(liveDoc, fl), E = snapshot(exp, fl);
+            const destructive = [];
+            const fields = [];
+            ['model', 'temperature', 'tool_call_budget', 'token_budget', 'max_turns', 'max_tokens', 'visibility', 'description'].forEach((f) => {
+              if (stable(L[f]) === stable(E[f])) return;
+              fields.push({ field: f, from: f === 'description' ? cut(String(L[f] || ''), 300) : L[f], to: f === 'description' ? cut(String(E[f] || ''), 300) : E[f] });
+              if (f === 'model') destructive.push('Model changed: ' + L[f] + ' -> ' + E[f] + '.');
+              if (f === 'visibility') destructive.push('Visibility changed: ' + L[f] + ' -> ' + E[f] + '.');
+              if ((f === 'tool_call_budget' || f === 'token_budget' || f === 'max_turns' || f === 'max_tokens') && L[f] !== null && L[f] !== undefined) {
+                if (E[f] === null || E[f] === undefined) destructive.push(f + ' removed (' + L[f] + ' -> profile default).');
+                else if (Number(E[f]) < Number(L[f])) destructive.push(f + ' lowered: ' + L[f] + ' -> ' + E[f] + '.');
+              }
+            });
+            let instructions = null;
+            const fi = L.instructions || '', ti = E.instructions || '';
+            if (fi !== ti) {
+              const ld = lineDiff(fi, ti, 100000);
+              const added = ld.changes.filter((c) => c.op === '+').length;
+              const removed = ld.changes.filter((c) => c.op === '-').length;
+              const heads = (s) => lines(s).filter((x) => /^\x23{1,6}\s/.test(x)).map((x) => x.trim());
+              const toHeads = heads(ti);
+              const lostSections = heads(fi).filter((h) => toHeads.indexOf(h) < 0);
+              instructions = { fromLength: fi.length, toLength: ti.length, fromLines: ld.fromLines, toLines: ld.toLines,
+                addedLines: added, removedLines: removed, firstDifferingLine: ld.firstDifferingLine, lostSections: lostSections,
+                firstChanges: ld.changes.slice(0, 6) };
+              fields.push({ field: 'instructions', from: { length: fi.length, lines: ld.fromLines }, to: { length: ti.length, lines: ld.toLines } });
+              if (fi.length && ti.length < fi.length * 0.9) {
+                destructive.push('Instructions shortened by ' + Math.round((1 - ti.length / fi.length) * 100) + ' % (' + fi.length + ' -> ' + ti.length + ' characters).');
+              }
+              if (lostSections.length) {
+                destructive.push('Instruction sections removed: ' + lostSections.slice(0, 8).map((h) => '"' + h + '"').join(', ') +
+                  (lostSections.length > 8 ? ' (+' + (lostSections.length - 8) + ')' : '') + '.');
+              }
+            }
+            const LT = L.tools || [], ET = E.tools || [];
+            const usedE = {};
+            const pairs = [];
+            const removed = [];
+            LT.forEach((lt) => {
+              let k = ET.findIndex((et, i) => !usedE[i] && et.name === lt.name);
+              let how = 'name';
+              if (k < 0 && toolRef(lt)) {
+                k = ET.findIndex((et, i) => !usedE[i] && toolRef(et) === toolRef(lt));
+                how = 'target';
+              }
+              if (k < 0) { removed.push(lt); return; }
+              usedE[k] = true;
+              pairs.push({ from: lt, to: ET[k], how: how });
+            });
+            const added = ET.filter((et, i) => !usedE[i]);
+            const tools = { added: [], removed: [], replaced: [], changed: [] };
+            added.forEach((t) => tools.added.push({ name: t.name, type: typeOf(t), target: toolRef(t) }));
+            removed.forEach((t) => {
+              tools.removed.push({ name: t.name, type: typeOf(t), target: toolRef(t) });
+              destructive.push('Tool "' + t.name + '" (' + typeOf(t) + ') removed: the agent loses this capability.');
+            });
+            pairs.forEach((p) => {
+              const a = p.from, b = p.to;
+              const diffs = [];
+              const keys = {};
+              Object.keys(a).concat(Object.keys(b)).forEach((x) => { keys[x] = 1; });
+              Object.keys(keys).forEach((x) => {
+                if (stable(a[x]) === stable(b[x])) return;
+                if (x === 'name' || x === 'type') return;
+                if (x === 'description') { diffs.push({ field: 'description', fromLength: String(a[x] || '').length, toLength: String(b[x] || '').length }); return; }
+                if (x === 'server' || x === 'vector_store_id' || x === 'server~hash') {
+                  if (toolRef(a) !== toolRef(b) && !diffs.some((d) => d.field === 'target')) diffs.push({ field: 'target', from: toolRef(a), to: toolRef(b) });
+                  return;
+                }
+                if (x === 'parameters' || isObj(a[x]) || isObj(b[x])) {
+                  const pa = paths(a[x], '', {}), pb = paths(b[x], '', {});
+                  const pbKeys = Object.keys(pb);
+                  /* a dropped block is reported once, at its outermost dropped path */
+                  const rootOf = (k) => {
+                    const cuts = [];
+                    for (let i = 0; i < k.length; i++) { if (k[i] === '.') cuts.push(i); else if (k[i] === ']') cuts.push(i + 1); }
+                    cuts.push(k.length);
+                    for (let j = 0; j < cuts.length; j++) {
+                      const q = k.slice(0, cuts[j]);
+                      if (q && !pbKeys.some((y) => y === q || y.indexOf(q + '.') === 0 || y.indexOf(q + '[') === 0)) return q;
+                    }
+                    return k;
+                  };
+                  const dropped = Object.keys(pa).filter((k) => !(k in pb)).map(rootOf).filter((k, i, arr) => arr.indexOf(k) === i);
+                  const newer = Object.keys(pb).filter((k) => !(k in pa));
+                  const changed = Object.keys(pa).filter((k) => k in pb && pa[k] !== pb[k]);
+                  diffs.push({ field: x, dropped: dropped, added: newer, changed: changed.map((k) => ({ path: k, from: pa[k], to: pb[k] })) });
+                  dropped.slice(0, 5).forEach((k) => destructive.push('Tool "' + a.name + '": parameter ' + x + '.' + k + ' removed.'));
+                  return;
+                }
+                diffs.push({ field: x, from: a[x] === undefined ? null : short(a[x]), to: b[x] === undefined ? null : short(b[x]) });
+              });
+              const sameName = a.name === b.name, sameType = typeOf(a) === typeOf(b);
+              if (!sameName || !sameType) {
+                tools.replaced.push({ from: { name: a.name, type: typeOf(a) }, to: { name: b.name, type: typeOf(b) }, matchedBy: p.how, target: toolRef(b), fields: diffs });
+                if (!sameType) {
+                  destructive.push('Tool "' + a.name + '" (' + typeOf(a) + ') replaced by "' + b.name + '" (' + typeOf(b) + ')' +
+                    (p.how === 'target' ? ' on the same target (' + toolRef(b) + ')' : '') + ': the tool type changes, and with it the functions offered to the model.');
+                } else {
+                  destructive.push('Tool "' + a.name + '" renamed "' + b.name + '" (same target ' + toolRef(b) + '): the model calls change name.');
+                }
+              } else if (diffs.length) {
+                tools.changed.push({ name: b.name, type: typeOf(b), fields: diffs });
+              }
+              const tgt = diffs.find((d) => d.field === 'target');
+              if (tgt && sameName && sameType) destructive.push('Tool "' + a.name + '": target changed (' + tgt.from + ' -> ' + tgt.to + ').');
+            });
+            const LS = L.sub_agents || [], ES = E.sub_agents || [];
+            const subAgents = { added: [], removed: [], changed: [] };
+            LS.forEach((s) => {
+              const t = ES.find((x) => x.name === s.name);
+              if (!t) { subAgents.removed.push(s.name); destructive.push('Sub agent "' + s.name + '" removed.'); }
+              else if (stable(s) !== stable(t)) subAgents.changed.push(s.name);
+            });
+            ES.forEach((s) => { if (!LS.find((x) => x.name === s.name)) subAgents.added.push(s.name); });
+            const skills = fl.skills ? skillDiff(L.skills, E.skills) : { added: [], removed: [], changed: [] };
+            skills.removed.forEach((n) => destructive.push('Skill "' + n + '" removed: the agent can no longer activate it.'));
+            const hooks = fl.hooks ? hookDiff(L.hooks, E.hooks) : { added: [], removed: [], changed: [] };
+            hooks.removed.forEach((n) => destructive.push('Hook "' + n + '" removed from the agent.'));
+            const managedKeys = { max_turns: fl.turns, skills: fl.skills, max_tokens: fl.tokens, hooks: fl.hooks };
+            const kept = {};
+            if (isObj(liveDoc)) PLAN_KEPT.forEach((k) => { if (!managedKeys[k] && !isEmpty(liveDoc[k])) kept[k] = normValue(liveDoc[k]); });
+            const skippedTools = Array.isArray(skipped) ? skipped.filter(isObj) : [];
+            skippedTools.forEach((s) => {
+              if (LT.find((t) => t.name === s.tool)) destructive.push('Tool "' + s.tool + '" left out (knowledge base ' + s.kb + ' not available on this instance): the live tool of the same name is removed.');
+            });
+            return {
+              mode: 'update', same: !fields.length && !tools.added.length && !tools.removed.length && !tools.replaced.length &&
+                !tools.changed.length && !subAgents.added.length && !subAgents.removed.length && !subAgents.changed.length &&
+                !skills.added.length && !skills.removed.length && !skills.changed.length &&
+                !hooks.added.length && !hooks.removed.length && !hooks.changed.length,
+              fields: fields, instructions: instructions, tools: tools, skills: skills, subAgents: subAgents, kept: kept,
+              skippedTools: skippedTools, destructive: destructive,
+              counts: { fields: fields.length, toolsAdded: tools.added.length, toolsRemoved: tools.removed.length,
+                toolsReplaced: tools.replaced.length, toolsChanged: tools.changed.length, subAgentsRemoved: subAgents.removed.length,
+                skillsAdded: skills.added.length, skillsRemoved: skills.removed.length, skillsChanged: skills.changed.length,
+                destructive: destructive.length }
+            };
+          };
+          const createPlan = (exp, skipped) => {
+            const E = snapshot(exp, flagsOf(exp));
+            return {
+              mode: 'create', same: false,
+              create: { name: isObj(exp) ? exp.name || null : null, model: E.model, temperature: E.temperature, visibility: E.visibility,
+                tool_call_budget: E.tool_call_budget, token_budget: E.token_budget, max_turns: E.max_turns === undefined ? null : E.max_turns,
+                max_tokens: E.max_tokens === undefined ? null : E.max_tokens, instructionsLength: (E.instructions || '').length,
+                tools: (E.tools || []).map((t) => ({ name: t.name, type: typeOf(t), target: toolRef(t) })),
+                sub_agents: (E.sub_agents || []).map((s) => s.name), skills: (E.skills || []).map((k) => k.name),
+                profile: isObj(exp) ? exp.profile || null : null },
+              fields: [], instructions: null, tools: { added: (E.tools || []).map((t) => ({ name: t.name, type: typeOf(t), target: toolRef(t) })), removed: [], replaced: [], changed: [] },
+              skills: { added: (E.skills || []).map((k) => k.name), removed: [], changed: [] },
+              subAgents: { added: (E.sub_agents || []).map((s) => s.name), removed: [], changed: [] },
+              skippedTools: Array.isArray(skipped) ? skipped.filter(isObj) : [], destructive: [],
+              counts: { fields: 0, toolsAdded: (E.tools || []).length, toolsRemoved: 0, toolsReplaced: 0, toolsChanged: 0, subAgentsRemoved: 0, destructive: 0 }
+            };
+          };
+
+          /* ---- drift rule (shared by check and report) ---- */
+          const driftCheck = (liveDoc, exp, st) => {
+            const fl = flagsOf(exp);
+            const L = snapshot(liveDoc, fl), E = snapshot(exp, fl);
+            const lh = sha(L), eh = sha(E);
+            const sh = isObj(st) && st.hash ? String(st.hash) : null;
+            const missing = [];
+            if (sh) {
+              const ss = isObj(st.snapshot) ? st.snapshot : {};
+              ['max_turns', 'max_tokens', 'skills', 'hooks'].forEach((k) => {
+                const flag = { max_turns: fl.turns, max_tokens: fl.tokens, skills: fl.skills, hooks: fl.hooks }[k];
+                if (flag && !(k in ss)) missing.push(k);
+              });
+            }
+            const matchesStored = sh && (lh === sh || (missing.length > 0 && sha(without(L, missing)) === sh));
+            const base = { liveHash: lh, expectedHash: eh, storedHash: sh, liveSnapshot: L };
+            const ld = liveDoc && liveDoc.description;
+            const ldObj = isObj(ld) || (typeof ld === 'string' && ld.trim().charAt(0) === '{' && descText(ld) !== ld);
+            if (ldObj && descText(ld) === descText(exp && exp.description)) base.keepDescription = ld;
+            base.plan = buildPlan(liveDoc, exp, opts.skippedTools);
+            if (lh === eh) return Object.assign(base, { drift: false, reason: 'in-sync', changes: [], summary: '' });
+            if (matchesStored) {
+              const d = diffSnap(L, E, false);
+              return Object.assign(base, { drift: false, reason: 'workspace-changed', changes: d.changes, summary: d.summary });
+            }
+            let ref = sh && isObj(st.snapshot) ? st.snapshot : E;
+            if (missing.length && isObj(st.snapshot)) {
+              ref = Object.assign({}, st.snapshot);
+              missing.forEach((k) => { ref[k] = L[k]; });
+            }
+            const d = diffSnap(ref, L, false);
+            return Object.assign(base, {
+              drift: true,
+              reason: sh ? 'edited-outside-workspace' : 'no-baseline',
+              comparedTo: sh && isObj(st.snapshot) ? 'last-apply' : 'expected',
+              changes: d.changes,
+              summary: d.summary
+            });
+          };
+
+          /* ---- sync summary ---- */
+          const planSummary = (actions) => {
+            const summary = [];
+            const warnings = [];
+            (Array.isArray(actions) ? actions : []).filter(isObj).forEach((a) => {
+              const key = a.key || '?';
+              if (a.type === 'agent') {
+                const p = isObj(a.plan) ? a.plan : null;
+                const c = p && isObj(p.counts) ? p.counts : null;
+                let line = 'agent ' + key + ': ' + (a.action || '?');
+                if (a.drift && a.drift.reason) line += ' (' + a.drift.reason + (a.forced ? ', forced' : '') + ')';
+                if (p && p.mode === 'create' && c) line += ' - ' + c.toolsAdded + ' tools';
+                else if (c) {
+                  line += ' - ' + (p.same ? 'no change' : c.fields + ' fields, tools +' + c.toolsAdded + ' -' + c.toolsRemoved + ' replaced ' +
+                    c.toolsReplaced + ' changed ' + c.toolsChanged +
+                    ((c.skillsAdded || c.skillsRemoved || c.skillsChanged) ? ', skills +' + c.skillsAdded + ' -' + c.skillsRemoved + ' changed ' + c.skillsChanged : '')) +
+                    (c.destructive ? ', ' + c.destructive + ' destructive' : '');
+                }
+                if (Array.isArray(a.skippedTools) && a.skippedTools.length) line += ', tools left out: ' + a.skippedTools.map((s) => s.tool).join(', ');
+                if (Array.isArray(a.missing) && a.missing.length) line += ', missing: ' + a.missing.join(', ');
+                summary.push(line);
+                if (a.action === 'drift' && !a.forced) {
+                  warnings.push(key + ': edited outside the workspace (' + ((a.drift && a.drift.reason) || '?') + '), nothing applied without force; the plan is what force would apply.');
+                }
+                if (a.action === 'failed') warnings.push(key + ': sync failed (' + (a.error || 'failed') + (Array.isArray(a.missing) && a.missing.length ? ', missing ' + a.missing.join(', ') : '') + ').');
+                (p && Array.isArray(p.destructive) ? p.destructive : []).forEach((d) => warnings.push(key + ': ' + d));
+                return;
+              }
+              if (a.type === 'kbdoc') {
+                summary.push('document ' + key + ': ' + (a.action || '?') + ' (' + (a.lines || 0) + ' lines' + (a.reason ? ', ' + a.reason : '') + ')' + (a.error ? ' - ' + a.error : ''));
+                if (a.action === 'skipped') warnings.push(key + ': document text is empty (' + (a.reason || 'EmptyText') + '), nothing uploaded, the knowledge base is left as it is.');
+                if (a.action === 'failed') warnings.push(key + ': document upload failed (' + (a.error || 'failed') + ').');
+                return;
+              }
+              let line = a.type + ' ' + key + ': ' + (a.action || '?');
+              if (a.error) line += ' - ' + a.error;
+              if (a.missing && !Array.isArray(a.missing)) line += ' (' + a.missing + ')';
+              summary.push(line);
+              if (a.type === 'kb') {
+                if (a.action === 'unbound') warnings.push(key + ': knowledge base not available' + (a.missing ? ' - ' + a.missing : '') + '; the tools that use it are left out.');
+                if (a.action === 'would-create') warnings.push(key + ': knowledge base not found, it will be created (empty) - check it was not renamed by hand.');
+                if (a.action === 'created') warnings.push(key + ': knowledge base created.');
+                if (a.action === 'failed') warnings.push(key + ': knowledge base sync failed (' + (a.error || 'failed') + ').');
+              }
+              if (a.type === 'source' && a.action === 'failed') warnings.push(key + ': source refresh failed (' + (a.error || 'failed') + ').');
+            });
+            return { summary: summary, warnings: warnings };
+          };
+
+          if (op === 'plan') {
+            if (!isObj(expected)) return { error: 'InvalidArguments', message: 'expected is required' };
+            return { plan: isObj(live) ? buildPlan(live, expected, opts.skippedTools) : createPlan(expected, opts.skippedTools) };
+          }
+          if (op === 'summary') {
+            return planSummary(Array.isArray(data) ? data : (isObj(data) && Array.isArray(data.actions) ? data.actions : []));
+          }
+          if (op === 'check') {
+            if (!isObj(expected)) return { error: 'InvalidArguments', message: 'expected is required' };
+            if (!isObj(live)) return { error: 'InvalidArguments', message: 'live is required' };
+            return driftCheck(live, expected, stored);
+          }
+
+          /* ---- description of an agent (report) ---- */
+          const kbs = Array.isArray(opts.kbs) ? opts.kbs : [];
+          const describeTool = (t, withText) => {
+            if (!isObj(t)) return { value: str(t) };
+            const d = { type: t.type || null, name: t.name || null, displayName: t.display_name || null,
+              descriptionLength: typeof t.description === 'string' ? t.description.length : 0 };
+            if (withText && t.description) d.description = t.description;
+            const target = {};
+            const ref = toolRef(t);
+            const kbId = ref && ref.indexOf('kb:') === 0 ? ref.slice(3) : null;
+            if (kbId) {
+              target.kind = t.vector_store_id ? 'knowledgeBase' : 'knowledgeExplorer';
+              target.kbId = kbId;
+              const kb = kbs.find((k) => k.id === kbId);
+              target.kbKey = kb ? (kb.key || null) : null;
+              target.kbName = kb ? (kb.name || null) : null;
+              if (t.max_num_results !== undefined) target.max_num_results = t.max_num_results;
+            } else if (t.server) {
+              target.kind = 'mcp';
+              target.server = String(t.server);
+            } else if (t.type === 'function' && isObj(t.function)) {
+              target.kind = 'function';
+              target.function = t.function.name || null;
+            } else {
+              target.kind = t.type || 'other';
+            }
+            if (t.scope) target.scope = t.scope;
+            d.target = target;
+            let authMode = 'none';
+            if (isObj(t.auth)) authMode = 'oauth';
+            else if (isObj(t.headers) && Object.keys(t.headers).length) authMode = 'headers:' + Object.keys(t.headers).sort().join(',');
+            else if (t.server && String(t.server).indexOf(String(opts.apiUrl || '\u0000')) === 0) authMode = 'platform';
+            d.authMode = authMode;
+            const known = { type: 1, name: 1, display_name: 1, description: 1, vector_store_id: 1, max_num_results: 1, server: 1, scope: 1, id: 1, activation: 1, auth: 1, headers: 1 };
+            const extra = {};
+            Object.keys(t).forEach((k) => { if (!known[k] && !isEmpty(t[k])) extra[k] = t[k]; });
+            if (Object.keys(extra).length) d.extra = extra;
+            return d;
+          };
+          const UNMANAGED = ['max_turns', 'max_tokens', 'fallback_models', 'allowed_models', 'skills', 'guardrails', 'tool_permissions',
+            'tool_activation', 'hooks', 'rate_limits', 'canvas_enabled', 'conversation_file_tools_enabled', 'starters', 'category',
+            'tags', 'icon_url', 'conversation_kb_id'];
+          const describeAgent = (doc, withText) => {
+            if (!isObj(doc)) return null;
+            const instr = typeof doc.instructions === 'string' ? doc.instructions : '';
+            const d = {
+              id: doc.id || null,
+              name: doc.name || null,
+              description: doc.description === undefined ? null : doc.description,
+              model: doc.model || null,
+              temperature: doc.temperature === undefined ? null : doc.temperature,
+              profile: doc.profile || null,
+              limits: {
+                tool_call_budget: doc.tool_call_budget === undefined ? null : doc.tool_call_budget,
+                token_budget: doc.token_budget === undefined ? null : doc.token_budget,
+                max_turns: doc.max_turns === undefined ? null : doc.max_turns,
+                max_tokens: doc.max_tokens === undefined ? null : doc.max_tokens
+              },
+              visibility: doc.visibility || null,
+              status: doc.status || null,
+              publishedAt: doc.published_at || null,
+              hasDraftChanges: doc.has_draft_changes === undefined ? null : doc.has_draft_changes,
+              sub_agents: Array.isArray(doc.sub_agents) ? doc.sub_agents.map((s) => ({ agent_id: s.agent_id, name: s.name, description: s.description })) : [],
+              instructions: { length: instr.length, hash: sha(instr) },
+              tools: (Array.isArray(doc.tools) ? doc.tools : []).map((t) => describeTool(t, withText))
+            };
+            if (withText) d.instructions.text = instr;
+            if (Array.isArray(doc.skills) && doc.skills.length) {
+              d.skills = doc.skills.filter(isObj).map((k) => ({ name: k.name || null, displayName: k.display_name || null,
+                descriptionLength: (str(k.description) || '').length, instructionsLength: (str(k.instructions) || '').length }));
+            }
+            const other = {};
+            UNMANAGED.forEach((k) => { if (!isEmpty(doc[k])) other[k] = doc[k]; });
+            d.unmanaged = other;
+            return d;
+          };
+
+          if (op === 'report') {
+            const withText = opts.includeInstructions !== false;
+            const exp = isObj(expected) && isObj(expected.body) ? Object.assign({}, expected.body, { visibility: expected.visibility }) : null;
+            const fl = flagsOf(exp);
+            const missingDeps = isObj(expected) && Array.isArray(expected.missing) ? expected.missing : [];
+            const out = { live: describeAgent(live, withText), published: null, expected: null, diff: null, syncAll: null, externalTools: [] };
+            if (out.live) {
+              if (fl.turns) delete out.live.unmanaged.max_turns;
+              if (fl.tokens) delete out.live.unmanaged.max_tokens;
+              if (fl.skills) delete out.live.unmanaged.skills;
+              if (fl.hooks) delete out.live.unmanaged.hooks;
+            }
+            if (isObj(live) && isObj(live.published_config)) {
+              const pub = Object.assign({}, live.published_config, { visibility: live.visibility });
+              const pt = { turns: fl.turns && pub.max_turns !== undefined, tokens: fl.tokens && pub.max_tokens !== undefined,
+                skills: fl.skills && pub.skills !== undefined, hooks: false };
+              const ph = sha(snapshot(pub, pt));
+              const dh = sha(snapshot(live, pt));
+              out.published = { sameAsDraft: ph === dh };
+              if (ph !== dh) out.published.draftVsPublished = diffSnap(snapshot(pub, pt), snapshot(live, pt), false).summary;
+            }
+            if (exp) {
+              out.expected = describeAgent(Object.assign({ profile: expected.profile }, exp), withText);
+              ['id', 'status', 'publishedAt', 'hasDraftChanges', 'unmanaged'].forEach((k) => { delete out.expected[k]; });
+              if (missingDeps.length) out.expected.missing = missingDeps;
+            }
+            if (exp && isObj(live)) {
+              const L = snapshot(live, fl), E = snapshot(exp, fl);
+              const d = diffSnap(E, L, true);
+              d.direction = 'workspace -> live (added = on the agent only, removed = in the workspace only)';
+              d.profile = { live: live.profile || null, expected: expected.profile || null,
+                note: 'profile is sent at creation only: syncAll never changes it on an existing agent' };
+              if (!withText) {
+                d.instructions = { same: d.instructions.same, fromLength: d.instructions.fromLength, toLength: d.instructions.toLength };
+              }
+              out.diff = d;
+              const c = driftCheck(live, exp, stored);
+              let wouldDo = 'update';
+              if (c.drift) wouldDo = 'drift';
+              if (missingDeps.length) wouldDo = 'failed';
+              out.syncAll = { wouldDo: wouldDo, reason: c.reason, summary: c.summary || (c.reason === 'in-sync' ? 'in sync, nothing to apply' : '') };
+              if (missingDeps.length) out.syncAll.missing = missingDeps;
+            } else if (exp) {
+              out.syncAll = { wouldDo: missingDeps.length ? 'failed' : 'create', reason: 'not-found', summary: 'no agent with this name: syncAll would create it' };
+              if (missingDeps.length) out.syncAll.missing = missingDeps;
+            }
+            const expNames = {};
+            (exp && Array.isArray(exp.tools) ? exp.tools : []).forEach((t) => { expNames[t.name] = 1; });
+            if (isObj(live) && Array.isArray(live.tools)) {
+              live.tools.forEach((t, i) => {
+                if (!isObj(t) || expNames[t.name]) return;
+                out.externalTools.push(out.live.tools[i]);
+              });
+            }
+            return redactDeep(out, null);
+          }
+          return { error: 'InvalidOp', message: 'op must be check, plan, report or summary' };
+        } catch (err) {
+          return { error: 'AgentConfigFailed', message: err && err.message };
+        }
+    sha256:
+      language: nodejs
+      parameters:
+        text:
+          type: string
+          description: Text to hash
+      code: |
+        /*
+          sha256(text)
+          Hash of a text for change detection (DESIGN 6.1). Returns {hash (first 16 hex of the sha256),
+          lines (line count, 0 for an empty text), length, base64 (UTF-8 bytes of the text, for a
+          multipart upload)}. Never throws: {error, message} on failure.
+        */
+        const crypto = require('crypto');
+        try {
+          const t = typeof text === 'string' ? text : (text === undefined || text === null ? '' : JSON.stringify(text));
+          const hash = crypto.createHash('sha256').update(t).digest('hex').slice(0, 16);
+          const lines = t.length ? t.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n').length : 0;
+          return { hash: hash, lines: lines, length: t.length, base64: Buffer.from(t, 'utf8').toString('base64') };
+        } catch (err) {
+          return { error: 'Sha256Failed', message: err && err.message };
+        }
+    benchEngine:
+      language: nodejs
+      parameters:
+        op:
+          type: string
+          description: cases | units | plan | collect | report | export
+        bench:
+          type: object
+          description: Bench row data (plan, units, report), or the whole bench row {key, status, data, updatedAt} (export header)
+        units:
+          type: object
+          description: Case rows of the bench (state rows benchcase:<benchId>:*)
+        cases:
+          type: object
+          description: 'cases: raw cases; units: normalised cases; collect: Evaluation.listCases items of the agent'
+        agents:
+          type: object
+          description: 'units: targeted agents [{key, id}]'
+        runner:
+          type: object
+          description: config.evaluation.runner (defaults applied here)
+        run:
+          type: object
+          description: 'collect: Evaluation.getRun body with results'
+        runId:
+          type: string
+          description: 'collect: run id of the batch'
+        reason:
+          type: string
+          description: 'collect: completed | stalled | missing | interrupted'
+        options:
+          type: object
+          description: 'Op options: defaultCriteria (cases); onlyErrored, ids, tags, limit (units); recentStarts (plan); worst (report); part, exportedAt, trigger, report, counts (export)'
+        manifest:
+          type: object
+          description: 'report: {agents: config.agents, evaluation: config.evaluation}'
+        now:
+          type: string
+          description: Optional ISO date (tests); default now
+      code: |
+        /*
+          benchEngine(op, bench, units, cases, agents, runner, run, runId, reason, options, manifest, now)
+          Pure bench engine of the evaluation module (no I/O). Every op returns {error, message} instead of throwing.
+
+          Row shapes (DESIGN.md section 3):
+            case row  key benchcase:<benchId>:<agentKey>:<caseId>, kind benchcase,
+                      status pending | inflight | done | errored | cancelled,
+                      data {benchId, agentKey, agentId, caseId, order, question, expected, criteria, tags,
+                            case (the Agent Evaluations case), answer, score, passed, reasons, tokens, durationMs,
+                            attempts, rateRetries, notBefore, runId, batchNo, lastRunId, lastError, result, history}
+            bench row data {agentKeys, agents {key: {id, score, passRate, total, completed, errored, status, ...}},
+                      runner, totals, batches {key: {runId, batchNo, n, caseIds, startedAt, lastProgressAt, lastCompleted}},
+                      starts [{at, n, agentKey}], batchLog, batchCount, lastStartAgent, startedAt, ...}
+
+          op cases   (cases, options {defaultCriteria}) → {cases (normalised {id, question, expected, criteria, tags,
+                     expected_tools?, forbidden_tools?}), evalCases (Agent Evaluations cases), count, hash, errors}.
+                     A case is {id, question, expected, criteria, tags}; input / expected_output are accepted as aliases.
+                     Invalid entries are skipped and listed in errors. The case id travels as the tag case:<id>.
+          op units   (bench {benchId}, cases (normalised), agents [{key, id}], units (existing case rows of the bench),
+                     runner, options {onlyErrored, ids, tags, limit}) → {units [{key, kind, status, data}], byAgent
+                     {key: {queued, skippedInFlight, cancelled, unchanged}}, count, casesCount, unknownIds, partial, runner}.
+                     Full mode (re)queues every selected case of the agents (cases in a batch in flight excepted) and
+                     cancels the rows whose case left the set (never with a filter). onlyErrored requeues only errored /
+                     cancelled rows (attempts reset).
+          op plan    (bench, units, runner, options {recentStarts}) → {now, progress, totals, agents, casesInWindow,
+                     budgetLeft, next {agentKey, agentId, n, caseIds, cases, units}, blocked, nextAt, allDone, eta, avgCaseMs,
+                     inFlightAgents, parallelAgents, deferred, orphans}. One batch at most per agent in flight, agents
+                     alternate after bench.lastStartAgent, at most runner.parallelAgents agents in flight, cases started in
+                     the last hour (this bench + recentStarts) stay within runner.messagesPerHour.
+          op collect (units, runId, run (Evaluation.getRun body with results), cases (Evaluation.listCases items of the
+                     agent = the batch), runner, reason completed | stalled | missing | interrupted) → {updates [{key, status,
+                     data}], summary {done, retried, rateRetried, errored, unmatchedResults, interrupted?}}.
+                     Error-like results go back to pending until runner.maxAttempts, then errored; quota / rate results are
+                     requeued with a backoff (notBefore) without consuming an attempt, up to runner.maxRateRetries; a monthly
+                     quota exhaustion is errored at once; interrupted = unfinished cases back to pending, attempts unchanged.
+          op report  (bench, units, manifest {agents: config.agents, evaluation}) → {benchId, engine, startedAt,
+                     erroredThreshold, contextSharedPerBatch, totals, agents, summary, cases, comparison {valid, reason, table,
+                     pairs}, comparisons, worst [{caseId, agent, score, reasons}], replay, rejected, notes}.
+                     Errored cases are excluded from score and passRate; erroredRate = (errored + not executed) / total; an
+                     agent above the threshold is rejected (not comparable). Pairs compare every two agents on their common
+                     non-errored cases, a = baseline (the variantOf target when one derives from the other).
+          op export  options.part header (bench row {key, status, data, updatedAt}, options {exportedAt, trigger, report,
+                     counts}) → {line, stamp, fileName}; options.part records (units) → {lines, count}: JSON Lines, one line
+                     per (agent, case) with question, expected, answer, score, passed, judge reasons, tokens, duration.
+        */
+        try {
+          const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+          const arr = (v) => { let x = v; if (typeof x === 'string') { try { x = JSON.parse(x); } catch (e) { x = []; } } return Array.isArray(x) ? x : []; };
+          const obj = (v) => { let x = v; if (typeof x === 'string') { try { x = JSON.parse(x); } catch (e) { x = null; } } return isObj(x) ? x : {}; };
+          const str = (v) => (v === undefined || v === null) ? '' : (typeof v === 'string' ? v.trim() : (typeof v === 'object' ? JSON.stringify(v) : String(v).trim()));
+          const nn = (v) => (v === undefined ? null : v);
+          const opt = obj(typeof options === 'undefined' ? null : options);
+          const nowRaw = typeof now === 'undefined' ? null : now;
+          const nowMs = (typeof nowRaw === 'string' && Number.isFinite(Date.parse(nowRaw))) ? Date.parse(nowRaw) : Date.now();
+          const nowIso = new Date(nowMs).toISOString();
+          const HOUR = 3600000;
+          const round = (v, d) => { const p = Math.pow(10, d); return Math.round(v * p) / p; };
+          const mean = (a) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
+          const CASE_TAG = 'case:';
+          const opName = String(typeof op === 'undefined' ? '' : op);
+          const pRunner = typeof runner === 'undefined' ? null : runner;
+          const pBench = obj(typeof bench === 'undefined' ? null : bench);
+          const pUnits = arr(typeof units === 'undefined' ? null : units).filter((r) => r && r.key);
+          const pManifest = obj(typeof manifest === 'undefined' ? null : manifest);
+
+          const runnerOf = (r) => {
+            const x = obj(r);
+            const int = (v, d, min) => { const n = Number(v); return Number.isFinite(n) && n >= min ? Math.floor(n) : d; };
+            const thr = Number(x.erroredThreshold);
+            return {
+              batchSize: int(x.batchSize, 5, 1),
+              maxAttempts: int(x.maxAttempts, 2, 1),
+              messagesPerHour: int(x.messagesPerHour, 120, 1),
+              parallelAgents: int(x.parallelAgents, 1, 1),
+              batchTimeoutMin: int(x.batchTimeoutMin, 45, 2),
+              maxRateRetries: int(x.maxRateRetries, 10, 0),
+              erroredThreshold: Number.isFinite(thr) && thr >= 0 && thr <= 1 ? thr : 0.05
+            };
+          };
+          const rn = runnerOf(pRunner || pBench.runner);
+          const caseIdOf = (tags) => {
+            const t = arr(tags).find((x) => String(x).indexOf(CASE_TAG) === 0);
+            return t ? String(t).slice(CASE_TAG.length) : '';
+          };
+          const safeId = (v) => str(v).replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 120);
+          const listOf = (v) => {
+            let x = v;
+            if (typeof x === 'string') { try { x = JSON.parse(x); } catch (e) { x = [x]; } }
+            return Array.isArray(x) ? x.map(str).filter(Boolean) : [];
+          };
+          const evalCaseOf = (c) => {
+            const e = { input: c.question, expected_output: c.expected || '', criteria: c.criteria, tags: c.tags.concat([CASE_TAG + c.id]) };
+            if (c.expected_tools) e.expected_tools = c.expected_tools;
+            if (c.forbidden_tools) e.forbidden_tools = c.forbidden_tools;
+            return e;
+          };
+          const agentIdOf = (b, key) => {
+            const a = obj(b.agents)[key];
+            if (typeof a === 'string') return a;
+            return isObj(a) && a.id ? a.id : null;
+          };
+
+          /* ---------------------------------------------------------------- cases */
+          if (opName === 'cases') {
+            const crypto = require('crypto');
+            let list = typeof cases === 'undefined' ? null : cases;
+            if (typeof list === 'string') { try { list = JSON.parse(list); } catch (e) { return { cases: [], evalCases: [], count: 0, hash: null, errors: ['cases is not valid JSON'] }; } }
+            if (isObj(list) && Array.isArray(list.cases)) list = list.cases;
+            if (!Array.isArray(list)) return { cases: [], evalCases: [], count: 0, hash: null, errors: ['cases must be an array of {id, question, expected, criteria, tags}'] };
+            let defaults = listOf(opt.defaultCriteria);
+            if (!defaults.length) defaults = ['The answer is correct, complete and consistent with the expected answer'];
+            const errors = []; const out = []; const seen = {};
+            list.forEach((c, i) => {
+              const where = 'case ' + (i + 1);
+              if (!isObj(c)) { errors.push(where + ': not an object'); return; }
+              const id = safeId(c.id !== undefined ? c.id : c.qid);
+              const question = str(c.question !== undefined ? c.question : c.input);
+              if (!id) { errors.push(where + ': missing id'); return; }
+              if (seen[id]) { errors.push(where + ' (' + id + '): duplicate id'); return; }
+              if (!question) { errors.push(where + ' (' + id + '): missing question'); return; }
+              seen[id] = true;
+              let criteria = listOf(c.criteria);
+              if (!criteria.length) criteria = defaults.slice();
+              const n = { id: id, question: question, expected: str(c.expected !== undefined ? c.expected : c.expected_output), criteria: criteria, tags: listOf(c.tags).map((t) => t.replace(/\s+/g, '_')).filter((t) => t.indexOf(CASE_TAG) !== 0) };
+              if (Array.isArray(c.expected_tools) && c.expected_tools.length) n.expected_tools = c.expected_tools;
+              if (Array.isArray(c.forbidden_tools) && c.forbidden_tools.length) n.forbidden_tools = c.forbidden_tools;
+              out.push(n);
+            });
+            const hash = out.length ? crypto.createHash('sha256').update(JSON.stringify(out)).digest('hex').slice(0, 16) : null;
+            return { cases: out, evalCases: out.map(evalCaseOf), count: out.length, hash: hash, errors: errors };
+          }
+
+          /* ---------------------------------------------------------------- units */
+          if (opName === 'units') {
+            const bid = str(pBench.benchId);
+            if (!bid) return { error: 'InvalidOp', message: 'bench.benchId is required' };
+            const list = arr(typeof cases === 'undefined' ? null : cases).filter((c) => isObj(c) && c.id && c.question);
+            const agentList = arr(typeof agents === 'undefined' ? null : agents).filter((a) => a && a.key);
+            const only = opt.onlyErrored === true || opt.onlyErrored === 'true';
+            const ids = listOf(opt.ids);
+            const tags = listOf(opt.tags);
+            const limit = Number(opt.limit);
+            let selected = list.map((c, i) => ({ c: c, order: i }));
+            const unknownIds = ids.filter((id) => !list.some((c) => c.id === id));
+            if (ids.length) selected = selected.filter((x) => ids.indexOf(x.c.id) >= 0);
+            if (tags.length) selected = selected.filter((x) => arr(x.c.tags).some((t) => tags.indexOf(t) >= 0));
+            if (Number.isFinite(limit) && limit >= 1) selected = selected.slice(0, Math.floor(limit));
+            const partial = ids.length > 0 || tags.length > 0 || (Number.isFinite(limit) && limit >= 1);
+            const byKey = {};
+            pUnits.forEach((r) => { byKey[r.key] = r; });
+            const out = []; const byAgent = {}; const inSet = {};
+            agentList.forEach((a) => { byAgent[a.key] = { queued: 0, skippedInFlight: 0, cancelled: 0, unchanged: 0 }; });
+            selected.forEach((x) => {
+              const c = x.c;
+              agentList.forEach((a) => {
+                const key = 'benchcase:' + bid + ':' + a.key + ':' + c.id;
+                inSet[key] = true;
+                const ex = byKey[key];
+                const exData = ex ? obj(ex.data) : {};
+                const fresh = {
+                  benchId: bid, agentKey: a.key, agentId: a.id || exData.agentId || null, caseId: c.id, order: x.order,
+                  question: c.question, expected: c.expected, criteria: c.criteria, tags: c.tags, case: evalCaseOf(c),
+                  answer: null, score: null, passed: null, reasons: null, tokens: null, durationMs: null,
+                  attempts: 0, rateRetries: 0, notBefore: null, runId: null, batchNo: null, lastRunId: null,
+                  lastError: null, result: null, history: arr(exData.history).slice(-10), queuedAt: nowIso,
+                  replays: (Number(exData.replays) || 0) + (ex ? 1 : 0)
+                };
+                if (only) {
+                  if (ex && (ex.status === 'errored' || ex.status === 'cancelled')) { out.push({ key: key, kind: 'benchcase', status: 'pending', data: fresh }); byAgent[a.key].queued++; }
+                  else byAgent[a.key].unchanged++;
+                  return;
+                }
+                if (ex && ex.status === 'inflight') { byAgent[a.key].skippedInFlight++; return; }
+                out.push({ key: key, kind: 'benchcase', status: 'pending', data: fresh });
+                byAgent[a.key].queued++;
+              });
+            });
+            if (!only && !partial) {
+              pUnits.forEach((r) => {
+                if (inSet[r.key] || r.status === 'cancelled' || r.status === 'inflight') return;
+                const d = obj(r.data);
+                if (!byAgent[d.agentKey]) return;
+                out.push({ key: r.key, kind: 'benchcase', status: 'cancelled', data: Object.assign({}, d, { cancelledAt: nowIso }) });
+                byAgent[d.agentKey].cancelled++;
+              });
+            }
+            return { units: out, byAgent: byAgent, count: out.filter((u) => u.status === 'pending').length, casesCount: selected.length, unknownIds: unknownIds, partial: partial, runner: rn };
+          }
+
+          /* shared: per-agent progress from the case rows */
+          const progressOf = (b, rows) => {
+            const batches = obj(b.batches);
+            const agentKeys = arr(b.agentKeys).map(String);
+            rows.forEach((r) => { const k = r.data && r.data.agentKey; if (k && agentKeys.indexOf(k) < 0) agentKeys.push(k); });
+            const totals = { total: 0, pending: 0, inFlight: 0, done: 0, passed: 0, failed: 0, errored: 0, cancelled: 0 };
+            const progress = {}; const pendingBy = {}; const scoresBy = {}; const orphans = [];
+            agentKeys.forEach((k) => { progress[k] = { total: 0, pending: 0, inFlight: 0, done: 0, passed: 0, failed: 0, errored: 0, cancelled: 0, batches: 0, batch: null }; pendingBy[k] = []; scoresBy[k] = []; });
+            rows.forEach((r) => {
+              const d = obj(r.data);
+              const p = progress[d.agentKey];
+              if (!p) return;
+              if (r.status === 'cancelled') { p.cancelled++; totals.cancelled++; return; }
+              p.total++; totals.total++;
+              if (r.status === 'pending') { p.pending++; totals.pending++; pendingBy[d.agentKey].push({ key: r.key, data: d }); }
+              else if (r.status === 'inflight') {
+                p.inFlight++; totals.inFlight++;
+                const bt = batches[d.agentKey];
+                if (!bt || !bt.runId || bt.runId !== d.runId) orphans.push({ key: r.key, data: Object.assign({}, d, { runId: null }) });
+              } else if (r.status === 'done') {
+                p.done++; totals.done++;
+                if (d.passed === true) { p.passed++; totals.passed++; } else { p.failed++; totals.failed++; }
+                scoresBy[d.agentKey].push(Number(d.score) || 0);
+              } else if (r.status === 'errored') { p.errored++; totals.errored++; }
+            });
+            const inFlightAgents = [];
+            agentKeys.forEach((k) => {
+              const bt = batches[k];
+              if (bt && bt.runId) {
+                inFlightAgents.push(k);
+                progress[k].batch = { runId: bt.runId, batchNo: nn(bt.batchNo), n: nn(bt.n), startedAt: nn(bt.startedAt), completed: bt.lastCompleted || 0 };
+              }
+            });
+            arr(b.batchLog).forEach((l) => { if (l && progress[l.agentKey]) progress[l.agentKey].batches++; });
+            const summary = {};
+            agentKeys.forEach((k) => {
+              const p = progress[k]; const s = mean(scoresBy[k]);
+              const prev = obj(obj(b.agents)[k]);
+              summary[k] = Object.assign({}, prev, {
+                id: agentIdOf(b, k), total: p.total, pending: p.pending, inFlight: p.inFlight, done: p.done, passed: p.passed,
+                failed: p.failed, errored: p.errored, completed: p.done + p.errored,
+                score: s === null ? null : round(s, 3), passRate: p.done ? round(p.passed / p.done, 3) : null,
+                status: (p.pending + p.inFlight) > 0 ? 'running' : (p.total ? 'completed' : 'pending')
+              });
+            });
+            return { agentKeys: agentKeys, totals: totals, progress: progress, pendingBy: pendingBy, orphans: orphans, inFlightAgents: inFlightAgents, summary: summary, batches: batches };
+          };
+
+          /* ---------------------------------------------------------------- plan */
+          if (opName === 'plan') {
+            const b = pBench;
+            const pr = progressOf(b, pUnits);
+            const batchSize = rn.batchSize; const mph = rn.messagesPerHour; const parallelAgents = rn.parallelAgents;
+            const starts = [];
+            arr(b.starts).concat(arr(opt.recentStarts)).forEach((s) => {
+              if (!s) return;
+              const t = Date.parse(s.at); const n = Number(s.n) || 0;
+              if (Number.isFinite(t) && t <= nowMs && nowMs - t < HOUR && n > 0) starts.push({ t: t, n: n });
+            });
+            starts.sort((x, y) => x.t - y.t);
+            const casesInWindow = starts.reduce((s, x) => s + x.n, 0);
+            const budgetLeft = Math.max(0, mph - casesInWindow);
+            let order = pr.agentKeys.slice();
+            const li = pr.agentKeys.indexOf(b.lastStartAgent);
+            if (li >= 0) order = pr.agentKeys.slice(li + 1).concat(pr.agentKeys.slice(0, li + 1));
+            let next = null; let blocked = null; let nextAt = null; let deferred = 0; let earliest = null;
+            const readyBy = {};
+            pr.agentKeys.forEach((k) => {
+              readyBy[k] = pr.pendingBy[k].filter((u) => {
+                const nb = Date.parse(u.data.notBefore);
+                if (Number.isFinite(nb) && nb > nowMs) {
+                  deferred++;
+                  if (!(pr.batches[k] && pr.batches[k].runId) && (earliest === null || nb < earliest)) earliest = nb;
+                  return false;
+                }
+                return true;
+              });
+            });
+            const parallelFull = pr.inFlightAgents.length >= parallelAgents;
+            for (let i = 0; i < order.length; i++) {
+              const k = order[i];
+              if (pr.batches[k] && pr.batches[k].runId) continue;
+              const pend = readyBy[k].slice().sort((x, y) => (Number(x.data.order) || 0) - (Number(y.data.order) || 0));
+              if (!pend.length) continue;
+              const agentId = agentIdOf(b, k) || pend[0].data.agentId || null;
+              if (!agentId) continue;
+              if (parallelFull) { blocked = { reason: 'parallelAgents', inFlightAgents: pr.inFlightAgents.slice(), parallelAgents: parallelAgents }; break; }
+              const batch = pend.slice(0, batchSize);
+              if (batch.length > budgetLeft) {
+                blocked = { reason: 'messagesPerHour', agentKey: k, need: batch.length, budgetLeft: budgetLeft };
+                let left = casesInWindow;
+                for (let j = 0; j < starts.length; j++) {
+                  left -= starts[j].n;
+                  if (left <= mph - batch.length) { nextAt = new Date(starts[j].t + HOUR).toISOString(); break; }
+                }
+                break;
+              }
+              next = { agentKey: k, agentId: agentId, n: batch.length, caseIds: batch.map((u) => u.data.caseId), cases: batch.map((u) => u.data.case), units: batch };
+              break;
+            }
+            if (!next && !blocked && !parallelFull && earliest !== null) nextAt = new Date(earliest).toISOString();
+            let caseMs = 0; let caseN = 0;
+            arr(b.batchLog).forEach((l) => {
+              const s = Date.parse(l && l.startedAt); const e = Date.parse(l && l.endedAt); const n = Number(l && l.n) || 0;
+              if (Number.isFinite(s) && Number.isFinite(e) && e > s && n > 0) { caseMs += e - s; caseN += n; }
+            });
+            const avgCaseMs = caseN ? Math.round(caseMs / caseN) : null;
+            const remaining = pr.totals.pending + pr.totals.inFlight;
+            let eta = null;
+            if (remaining === 0) eta = nowIso;
+            else if (avgCaseMs) {
+              let longest = 0;
+              pr.agentKeys.forEach((k) => { longest = Math.max(longest, pr.progress[k].pending + pr.progress[k].inFlight); });
+              let ms = Math.max(longest, remaining / parallelAgents) * avgCaseMs;
+              if (pr.totals.pending > budgetLeft) ms = Math.max(ms, (pr.totals.pending - budgetLeft) / mph * HOUR);
+              eta = new Date(nowMs + ms).toISOString();
+            }
+            return {
+              now: nowIso, runner: rn, progress: pr.progress, totals: pr.totals, agents: pr.summary, casesInWindow: casesInWindow,
+              budgetLeft: budgetLeft, next: next, blocked: blocked, nextAt: nextAt,
+              allDone: pr.totals.total > 0 && remaining === 0 && pr.inFlightAgents.length === 0,
+              eta: eta, avgCaseMs: avgCaseMs, inFlightAgents: pr.inFlightAgents, parallelAgents: parallelAgents,
+              deferred: deferred, orphans: pr.orphans
+            };
+          }
+
+          /* ---------------------------------------------------------------- collect */
+          if (opName === 'collect') {
+            const rid = str(typeof runId === 'undefined' ? '' : runId);
+            const why = ['completed', 'stalled', 'missing', 'interrupted'].indexOf(String(typeof reason === 'undefined' ? '' : reason)) >= 0 ? String(reason) : 'completed';
+            const batch = pUnits.filter((u) => u.status === 'inflight' && u.data && u.data.runId === rid);
+            const byCase = {};
+            batch.forEach((u) => { byCase[u.data.caseId] = u; });
+            const caseOfAe = {};
+            arr(typeof cases === 'undefined' ? null : cases).forEach((c) => { if (c && c.id) { const id = caseIdOf(c.tags); if (id) caseOfAe[c.id] = id; } });
+            const results = arr(obj(typeof run === 'undefined' ? null : run).results);
+            const matched = {}; let unmatched = 0;
+            results.forEach((r) => {
+              if (!r) return;
+              let u = byCase[caseOfAe[r.case_id]];
+              if (!u || matched[u.key]) u = batch.find((x) => !matched[x.key] && str(x.data.question) === str(r.input));
+              if (!u || matched[u.key]) { unmatched++; return; }
+              matched[u.key] = r;
+            });
+            const texts = (r) => [str(r.error), str(r.actual), str(r.judge_reasoning), str(r.error_kind)];
+            const errorOf = (r) => {
+              const actual = str(r.actual); const reasoning = str(r.judge_reasoning); const error = str(r.error);
+              if (error) return { code: error.split(':')[0].slice(0, 80), detail: error.slice(0, 300) };
+              if (r.errored === true) return { code: str(r.error_kind) || 'ERRORED', detail: (str(r.error_message) || reasoning).slice(0, 300) };
+              if (/^EXECUTION_ERROR:/.test(actual)) return { code: 'EXECUTION_ERROR', detail: actual.slice(0, 300) };
+              if (/^ERROR:/.test(actual)) return { code: 'AGENT_CALL_FAILED', detail: actual.slice(0, 300) };
+              if (actual.indexOf('Reached maximum number of nested calls') >= 0) return { code: 'NESTED_CALLS_LIMIT', detail: actual.slice(0, 300) };
+              if (/^RATE_LIMITED/.test(actual)) return { code: 'RATE_LIMITED', detail: actual.slice(0, 300) };
+              if (actual.indexOf('Quota exceeded:') >= 0) return { code: 'QUOTA_EXCEEDED', detail: actual.slice(0, 300) };
+              if (/^(RATE_LIMITED|JUDGE_ERROR)/.test(reasoning)) return { code: reasoning.indexOf('JUDGE_ERROR') === 0 ? 'JUDGE_ERROR' : 'RATE_LIMITED', detail: reasoning.slice(0, 300) };
+              return null;
+            };
+            const isFinal = (r) => texts(r).some((t) => /QUOTA_EXHAUSTED|MONTHLY_(TOKENS|COST)_EXCEEDED/.test(t));
+            const rateBackoffMs = (r) => {
+              const t = texts(r);
+              if (isFinal(r)) return null;
+              const isRate = r.rate_limited === true || t.some((x) => /^(AGENT_|JUDGE_)?RATE_LIMITED/.test(x) || /^(AGENT|JUDGE)_UNAVAILABLE/.test(x) || x.indexOf('Quota exceeded:') >= 0 || x.indexOf('TPM_EXCEEDED') >= 0 || x.indexOf('RPM_EXCEEDED') >= 0);
+              if (!isRate) return null;
+              let ms = 60000;
+              const ra = Number(r.retry_after);
+              if (Number.isFinite(ra) && ra > 0) ms = Math.max(ms, Math.ceil(ra * 1000));
+              t.forEach((x) => {
+                const m = /retry[-_ ]?after["']?\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\s*(ms)?/i.exec(x);
+                if (!m) return;
+                const v = Number(m[1]) * (m[2] ? 1 : 1000);
+                if (Number.isFinite(v)) ms = Math.max(ms, Math.ceil(v));
+              });
+              return ms;
+            };
+            const updates = [];
+            const summary = { done: 0, retried: 0, rateRetried: 0, errored: 0, unmatchedResults: unmatched };
+            if (why === 'interrupted') summary.interrupted = 0;
+            batch.forEach((u) => {
+              const d = Object.assign({}, u.data);
+              const r = matched[u.key] || null;
+              const history = arr(d.history).slice(-19);
+              if (!r && why === 'interrupted') {
+                d.lastRunId = rid; d.runId = null; d.notBefore = null;
+                d.lastError = { code: 'INTERRUPTED', detail: 'batch run cancelled by a bench stop before this case ran', runId: rid, at: nowIso };
+                history.push({ runId: rid, batchNo: nn(d.batchNo), outcome: 'pending', error: 'INTERRUPTED', at: nowIso });
+                d.history = history;
+                summary.interrupted++;
+                updates.push({ key: u.key, status: 'pending', data: d });
+                return;
+              }
+              const prevAttempts = Number(d.attempts) || 0;
+              const prevRate = Number(d.rateRetries) || 0;
+              let attempts = prevAttempts + 1;
+              const result = r ? Object.assign({}, r, {
+                aeResultId: r.id || null, aeCaseId: r.case_id || null,
+                actual: r.actual === undefined ? null : r.actual, score: Number(r.score) || 0,
+                passed: r.passed === true || r.passed === 'true', error: null,
+                tools_called: Array.isArray(r.tools_called) ? r.tools_called : [],
+                agent_duration_ms: typeof r.agent_duration_ms === 'number' ? r.agent_duration_ms : null,
+                agent_tokens: typeof r.agent_tokens === 'number' ? r.agent_tokens : null,
+                judge_reasoning: r.judge_reasoning === undefined ? (r.reasoning === undefined ? null : r.reasoning) : r.judge_reasoning,
+                criteria_results: r.criteria_results === undefined ? null : r.criteria_results,
+                runId: rid, attempt: attempts, collectedAt: nowIso
+              }) : null;
+              if (result) { delete result.id; delete result.case_id; delete result.run_id; }
+              const err = r ? errorOf(r) : { code: why === 'stalled' ? 'BATCH_STALLED' : (why === 'missing' ? 'RUN_NOT_FOUND' : 'NOT_EXECUTED'), detail: 'no result for this case in run ' + rid };
+              const backoff = (r && err) ? rateBackoffMs(r) : null;
+              const rateRetry = backoff !== null && prevRate < rn.maxRateRetries;
+              if (rateRetry) { attempts = prevAttempts; if (result) result.attempt = attempts; }
+              let status;
+              d.attempts = attempts; d.lastRunId = rid; d.runId = null; d.notBefore = null;
+              if (rateRetry) {
+                status = 'pending';
+                d.rateRetries = prevRate + 1;
+                d.notBefore = new Date(nowMs + backoff).toISOString();
+                d.lastError = { code: err.code, detail: err.detail, runId: rid, at: nowIso, rateLimited: true, notBefore: d.notBefore };
+                d.lastResult = result; d.result = null;
+                summary.rateRetried++;
+              } else if (!err) {
+                status = 'done';
+                d.result = result; d.lastError = null; d.lastResult = null;
+                summary.done++;
+              } else if (attempts < rn.maxAttempts && backoff === null && !(r && isFinal(r))) {
+                status = 'pending';
+                d.lastError = { code: err.code, detail: err.detail, runId: rid, at: nowIso };
+                d.lastResult = result; d.result = null;
+                summary.retried++;
+              } else {
+                status = 'errored';
+                const res = result || { aeCaseId: null, actual: null, score: 0, passed: false, tools_called: [], agent_duration_ms: null, agent_tokens: null, judge_reasoning: null, criteria_results: null, runId: rid, attempt: attempts, collectedAt: nowIso };
+                res.error = err.code + (err.detail ? ': ' + err.detail : '');
+                d.result = res;
+                d.lastError = { code: err.code, detail: err.detail, runId: rid, at: nowIso };
+                summary.errored++;
+              }
+              const fin = status === 'done' || status === 'errored' ? d.result : null;
+              d.answer = fin ? nn(fin.actual) : null;
+              d.score = status === 'done' ? fin.score : null;
+              d.passed = status === 'done' ? fin.passed : (status === 'errored' ? false : null);
+              d.reasons = fin ? nn(fin.judge_reasoning) : null;
+              d.tokens = fin ? nn(fin.agent_tokens) : null;
+              d.durationMs = fin ? nn(fin.agent_duration_ms) : null;
+              history.push({ runId: rid, batchNo: nn(d.batchNo), outcome: status, error: err ? err.code : null, rateRetry: rateRetry ? d.rateRetries : null, at: nowIso });
+              d.history = history;
+              updates.push({ key: u.key, status: status, data: d });
+            });
+            return { updates: updates, summary: summary };
+          }
+
+          /* ---------------------------------------------------------------- report */
+          if (opName === 'report') {
+            const b = pBench;
+            const pr = progressOf(b, pUnits);
+            const threshold = rn.erroredThreshold;
+            const manAgents = arr(pManifest.agents);
+            const defOf = (k) => manAgents.find((a) => a && a.key === k) || {};
+            const report = { benchId: nn(b.benchId), engine: 'batched', startedAt: nn(b.startedAt), finishedAt: nn(b.finishedAt), erroredThreshold: threshold,
+              contextSharedPerBatch: rn.batchSize, totals: pr.totals, agents: {}, summary: {}, cases: [], replay: [], notes: [] };
+            const byCase = {};
+            pr.agentKeys.forEach((k) => {
+              const rows = pUnits.filter((r) => r.status !== 'cancelled' && r.data && r.data.agentKey === k)
+                .sort((x, y) => (Number(x.data.order) || 0) - (Number(y.data.order) || 0));
+              const def = defOf(k);
+              const p = pr.progress[k];
+              const executed = rows.filter((r) => r.status === 'done' || r.status === 'errored');
+              const ok = rows.filter((r) => r.status === 'done');
+              const total = rows.length;
+              const notExecuted = total - executed.length;
+              const erroredRate = total ? round((p.errored + notExecuted) / total, 4) : 1;
+              const rejected = !total || erroredRate > threshold;
+              const scores = ok.map((r) => Number(r.data.score) || 0);
+              const s = mean(scores);
+              const durs = ok.map((r) => r.data.durationMs).filter((v) => typeof v === 'number');
+              const toks = ok.map((r) => r.data.tokens).filter((v) => typeof v === 'number');
+              const byTag = {};
+              ok.concat(rows.filter((r) => r.status === 'errored')).forEach((r) => {
+                arr(r.data.tags).forEach((t) => { (byTag[t] = byTag[t] || []).push(r); });
+              });
+              const tagStats = {};
+              Object.keys(byTag).sort().forEach((t) => {
+                const g = byTag[t]; const gok = g.filter((r) => r.status === 'done'); const gm = mean(gok.map((r) => Number(r.data.score) || 0));
+                tagStats[t] = { n: g.length, score: gm === null ? null : round(gm, 3), passRate: gok.length ? round(gok.filter((r) => r.data.passed === true).length / gok.length, 3) : null, errored: g.length - gok.length };
+              });
+              const status = !total ? 'not_started' : ((p.pending + p.inFlight) > 0 ? 'running' : (rejected ? 'rejected' : 'completed'));
+              report.agents[k] = {
+                id: agentIdOf(b, k), variantOf: nn(def.variantOf), optional: def.optional === true, status: status,
+                total: total, completed: executed.length, done: p.done, errored: p.errored, notExecuted: notExecuted,
+                erroredRate: erroredRate, rejected: rejected, comparable: !rejected,
+                score: s === null ? null : round(s, 3), passRate: ok.length ? round(ok.filter((r) => r.data.passed === true).length / ok.length, 3) : null,
+                byTag: tagStats, avgDurationMs: durs.length ? Math.round(mean(durs)) : null, avgTokens: toks.length ? Math.round(mean(toks)) : null
+              };
+              report.summary[k] = { id: report.agents[k].id, score: report.agents[k].score, passRate: report.agents[k].passRate, total: total,
+                completed: executed.length, errored: p.errored, status: status };
+              if (rejected && total) report.replay.push({ agent: k, reason: 'errored rate ' + erroredRate + ' > ' + threshold, request: { benchId: nn(b.benchId), agents: [k], onlyErrored: true } });
+              rows.forEach((r) => {
+                const d = r.data;
+                const c = byCase[d.caseId] || (byCase[d.caseId] = { caseId: d.caseId, question: nn(d.question), tags: arr(d.tags), order: Number(d.order) || 0 });
+                c[k] = { status: r.status, score: r.status === 'done' ? d.score : null, passed: r.status === 'done' ? d.passed : null,
+                  errored: r.status === 'errored', error: r.status === 'errored' && d.lastError ? d.lastError.code : null,
+                  durationMs: nn(d.durationMs), excluded: rejected };
+              });
+            });
+            report.cases = Object.keys(byCase).map((x) => byCase[x]).sort((x, y) => x.order - y.order);
+            report.rejected = report.replay.length > 0;
+            const keys = pr.agentKeys.filter((k) => report.agents[k] && report.agents[k].total > 0);
+            const notComparable = keys.filter((k) => report.agents[k].comparable === false);
+            if (notComparable.length) report.comparison = { valid: false, reason: notComparable.map((k) => k + ' is not comparable').join('; ') + ': replay it with runBenchmark (see replay[].request)' };
+            else if (keys.length < 2) report.comparison = { valid: false, reason: 'fewer than two evaluated agents' };
+            else report.comparison = { valid: true, reason: null };
+            report.comparison.table = keys.map((k) => {
+              const a = report.agents[k];
+              return { agent: k, variantOf: a.variantOf, status: a.status, comparable: a.comparable, score: a.score, passRate: a.passRate, erroredRate: a.erroredRate };
+            });
+            const side = (ra, rb) => {
+              const n = ra.length;
+              const ma = mean(ra.map((c) => Number(c.score) || 0)); const mb = mean(rb.map((c) => Number(c.score) || 0));
+              const pa = n ? ra.filter((c) => c.passed === true).length / n : null; const pb = n ? rb.filter((c) => c.passed === true).length / n : null;
+              return { n: n, scoreA: ma === null ? null : round(ma, 3), scoreB: mb === null ? null : round(mb, 3), scoreDelta: (ma === null || mb === null) ? null : round(mb - ma, 3),
+                passRateA: pa === null ? null : round(pa, 3), passRateB: pb === null ? null : round(pb, 3), passRateDelta: (pa === null || pb === null) ? null : round(pb - pa, 3) };
+            };
+            const pairs = [];
+            for (let i = 0; i < keys.length; i++) {
+              for (let j = i + 1; j < keys.length; j++) {
+                let ka = keys[i]; let kb = keys[j];
+                if (report.agents[ka].variantOf === kb) { const t = ka; ka = kb; kb = t; }
+                const common = report.cases.filter((c) => c[ka] && c[kb] && c[ka].status === 'done' && c[kb].status === 'done');
+                const wins = { a: 0, b: 0, ties: 0 };
+                common.forEach((c) => { const x = Number(c[ka].score) || 0; const y = Number(c[kb].score) || 0; if (y > x) wins.b++; else if (x > y) wins.a++; else wins.ties++; });
+                const tags = {};
+                common.forEach((c) => c.tags.forEach((t) => { (tags[t] = tags[t] || []).push(c); }));
+                const byTag = {};
+                Object.keys(tags).sort().forEach((t) => { byTag[t] = side(tags[t].map((c) => c[ka]), tags[t].map((c) => c[kb])); });
+                pairs.push(Object.assign({ a: ka, b: kb, variant: report.agents[kb].variantOf === ka,
+                  comparable: report.agents[ka].comparable && report.agents[kb].comparable },
+                  side(common.map((c) => c[ka]), common.map((c) => c[kb])), { wins: wins, byTag: byTag }));
+              }
+            }
+            report.comparison.pairs = pairs;
+            report.comparisons = pairs;
+            const worst = [];
+            pUnits.forEach((r) => { if (r.status === 'done' && r.data) worst.push({ caseId: r.data.caseId, agent: r.data.agentKey, score: Number(r.data.score) || 0, passed: r.data.passed === true, reasons: nn(r.data.reasons) }); });
+            worst.sort((x, y) => x.score - y.score || (x.passed === y.passed ? 0 : (x.passed ? 1 : -1)));
+            report.worst = worst.slice(0, Math.max(1, Number(opt.worst) || 10));
+            report.notes = [
+              'errored cases are excluded from score and passRate; erroredRate counts errored and not executed cases over the total',
+              'an agent whose erroredRate exceeds erroredThreshold is rejected: its numbers are kept, its cells are excluded and comparison.valid is false until replayed with replay[].request',
+              'pairs compare two agents on their common done cases, deltas are b - a, a is the baseline when b is its variantOf',
+              'contextSharedPerBatch = runner.batchSize: Agent Evaluations sends no conversation id, so the cases of one batch run share one agent conversation; set evaluation.runner.batchSize to 1 for fully isolated cases'
+            ];
+            return report;
+          }
+
+          /* ---------------------------------------------------------------- export */
+          if (opName === 'export') {
+            const LS = new RegExp(String.fromCharCode(0x2028), 'g'); const PS = new RegExp(String.fromCharCode(0x2029), 'g');
+            const line = (o) => JSON.stringify(o).replace(LS, '\\u2028').replace(PS, '\\u2029');
+            const FIELDS = ['type', 'benchId', 'agentKey', 'agentId', 'caseId', 'question', 'expected', 'criteria', 'tags', 'status', 'attempts',
+              'rateRetries', 'runId', 'batchNo', 'answer', 'score', 'passed', 'error', 'judge', 'tools', 'usage', 'contextId', 'collectedAt', 'lastError', 'history'];
+            if (opt.part === 'header') {
+              const d = obj(pBench.data);
+              const t0 = Date.parse(d.startedAt); const t1 = Date.parse(d.finishedAt || (d.interruption && d.interruption.at) || d.abandonedAt);
+              const exportedAt = str(opt.exportedAt) || nowIso;
+              const h = { type: 'header', format: 'agent-workspace-bench-export', formatVersion: 1, exportedAt: exportedAt, trigger: nn(opt.trigger),
+                benchId: nn(d.benchId), status: nn(pBench.status), startedAt: nn(d.startedAt), finishedAt: nn(d.finishedAt),
+                durationMs: (Number.isFinite(t0) && Number.isFinite(t1)) ? t1 - t0 : null, updatedAt: nn(pBench.updatedAt),
+                agentKeys: arr(d.agentKeys), agents: obj(d.agents), runner: nn(d.runner), caseFilter: nn(d.caseFilter), casesHash: nn(d.casesHash),
+                totals: nn(d.totals), batches: arr(d.batchLog), errors: nn(d.errors), lastError: nn(d.lastError), interruption: nn(d.interruption),
+                controlLog: arr(d.controlLog), counts: nn(opt.counts), report: nn(opt.report || d.report), recordFields: FIELDS };
+              const ex = new Date(Date.parse(exportedAt) || nowMs);
+              const pad = (n) => String(n).padStart(2, '0');
+              const stamp = ex.getUTCFullYear() + pad(ex.getUTCMonth() + 1) + pad(ex.getUTCDate()) + '-' + pad(ex.getUTCHours()) + pad(ex.getUTCMinutes());
+              return { line: line(h) + '\n', stamp: stamp, fileName: 'bench-' + safeId(d.benchId || 'unknown') + '-' + stamp + '.jsonl' };
+            }
+            const out = [];
+            pUnits.forEach((u) => {
+              const d = obj(u.data);
+              const res = isObj(d.result) ? d.result : null;
+              const r = res || {};
+              const called = arr(r.tools_called);
+              out.push(line({
+                type: 'case', benchId: nn(d.benchId), agentKey: nn(d.agentKey), agentId: nn(d.agentId), caseId: nn(d.caseId),
+                question: nn(d.question), expected: d.expected ? d.expected : null, criteria: arr(d.criteria), tags: arr(d.tags),
+                status: nn(u.status), attempts: nn(d.attempts), rateRetries: nn(d.rateRetries), runId: nn(r.runId || d.lastRunId || d.runId),
+                batchNo: nn(d.batchNo), answer: res ? nn(r.actual) : null, score: res ? nn(r.score) : null, passed: res ? nn(r.passed) : null,
+                error: res ? nn(r.error) : null,
+                judge: res ? { reasons: nn(r.judge_reasoning), criteria: nn(r.criteria_results), model: nn(r.judge_model), tokens: nn(r.tokens_used === undefined ? r.judge_tokens : r.tokens_used) } : null,
+                tools: res ? { called: called, names: called.map((x) => x && x.name).filter(Boolean), count: called.length, match: nn(r.tools_match) } : null,
+                usage: res ? { agentModel: nn(r.agent_model), agentTokens: nn(r.agent_tokens), agentCost: nn(r.agent_cost), durationMs: nn(r.agent_duration_ms),
+                  toolCalls: nn(r.agent_tool_calls), turns: nn(r.agent_turns) } : null,
+                contextId: nn(r.context_id), collectedAt: nn(r.collectedAt), lastError: nn(d.lastError), history: arr(d.history)
+              }));
+            });
+            return { lines: out.length ? out.join('\n') + '\n' : '', count: out.length };
+          }
+
+          return { error: 'InvalidOp', message: 'op must be cases | units | plan | collect | report | export' };
+        } catch (e) {
+          return { error: 'BenchEngineFailed', message: String((e && e.message) || e) };
+        }
+    consoleKit:
+      language: nodejs
+      parameters:
+        op:
+          type: string
+          description: hash | yaml | kbSettings
+        value:
+          type: object
+          description: 'hash: any value (object or list); yaml: the configuration entry to render'
+        manifest:
+          type: object
+          description: 'kbSettings: the manifest knowledgeBases[] entry'
+        live:
+          type: object
+          description: 'kbSettings: the Storage knowledge base (Storage.getVectorStore answer)'
+      code: |
+        /*
+          consoleKit(op, ...) - pure helpers of the operator console (no I/O).
+          hash {value} -> {hash}: sha256 (16 hex) of the value serialised with sorted keys, so the
+            same configuration entry always gives the same hash (overlay baseHash, DESIGN 7).
+          yaml {value} -> {yaml}: the entry rendered as one YAML list item, ready to paste under
+            config.value.sources in index.yml.
+          kbSettings {manifest, live} -> {fields: [{field, manifest, live, same, readable}], same}:
+            name, description, parser, chunking_strategy of the manifest next to Storage. They are
+            sent at creation only, so a difference is never corrected by a sync. A field the Storage
+            answer does not carry is reported readable false and counted as same.
+        */
+        const stable = (v) => {
+          if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+          if (v && typeof v === 'object') return '{' + Object.keys(v).sort().filter((k) => v[k] !== undefined).map((k) => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
+          return JSON.stringify(v === undefined ? null : v);
+        };
+        if (op === 'hash') {
+          const crypto = require('crypto');
+          return { hash: crypto.createHash('sha256').update(stable(value)).digest('hex').slice(0, 16) };
+        }
+        if (op === 'yaml') {
+          const SAFE = /^[A-Za-z_][A-Za-z0-9_.\/-]*$/;
+          const RESERVED = ['true', 'false', 'null', 'yes', 'no', 'on', 'off', 'y', 'n'];
+          const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+          const scalar = (v) => {
+            if (v === null || v === undefined) return 'null';
+            if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+            const s = String(v);
+            if (SAFE.test(s) && RESERVED.indexOf(s.toLowerCase()) < 0) return s;
+            return JSON.stringify(s);
+          };
+          const inline = (v) => {
+            if (Array.isArray(v)) return '[]';
+            if (isObj(v)) return '{}';
+            return scalar(v);
+          };
+          const keyOf = (k) => (SAFE.test(k) ? k : JSON.stringify(k));
+          const pad = (n) => ' '.repeat(n);
+          let seq = null;
+          const map = (obj, indent) => {
+            const out = [];
+            Object.keys(obj).filter((k) => obj[k] !== undefined).forEach((k) => {
+              const v = obj[k];
+              if (isObj(v) && Object.keys(v).length) {
+                out.push(pad(indent) + keyOf(k) + ':');
+                map(v, indent + 2).forEach((l) => out.push(l));
+              } else if (Array.isArray(v) && v.length) {
+                out.push(pad(indent) + keyOf(k) + ':');
+                seq(v, indent + 2).forEach((l) => out.push(l));
+              } else {
+                out.push(pad(indent) + keyOf(k) + ': ' + inline(v));
+              }
+            });
+            return out;
+          };
+          seq = (arr, indent) => {
+            const out = [];
+            arr.forEach((x) => {
+              if (isObj(x) && Object.keys(x).length) {
+                const sub = map(x, indent + 2);
+                out.push(pad(indent) + '- ' + sub[0].slice(indent + 2));
+                sub.slice(1).forEach((l) => out.push(l));
+              } else if (Array.isArray(x) && x.length) {
+                out.push(pad(indent) + '-');
+                seq(x, indent + 2).forEach((l) => out.push(l));
+              } else {
+                out.push(pad(indent) + '- ' + inline(x));
+              }
+            });
+            return out;
+          };
+          const entry = isObj(value) ? value : {};
+          return { yaml: seq([entry], 0).join('\n') + '\n' };
+        }
+        if (op === 'kbSettings') {
+          const m = manifest && typeof manifest === 'object' ? manifest : {};
+          const l = live && typeof live === 'object' ? (live.data && !live.name ? live.data : live) : {};
+          const fields = ['name', 'description', 'parser', 'chunking_strategy'].map((f) => {
+            const readable = Object.prototype.hasOwnProperty.call(l, f);
+            const same = !readable || m[f] === undefined || stable(m[f]) === stable(l[f]);
+            return { field: f, manifest: m[f] === undefined ? null : m[f], live: readable ? l[f] : null, same, readable };
+          });
+          return { fields, same: fields.every((x) => x.same) };
+        }
+        return { error: 'InvalidOp', message: 'consoleKit op must be hash, yaml or kbSettings' };
