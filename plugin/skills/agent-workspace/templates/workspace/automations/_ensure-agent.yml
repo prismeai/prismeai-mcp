@@ -1,0 +1,521 @@
+slug: _ensure-agent
+name: sync/Ensure agent
+description: 'Creates or updates one manifest agent in Agent Factory through the Agents app, with the body built by _agent-expected, then publishes it (DESIGN 4.3). Arguments {key, dryRun?, force?, plannedKbs?}. Resolution by _resolve-agent. Existing agent: its draft is read (Agents.getAgent with header x-draft-mode) and checked by Custom Code agentConfig check against the expected body + visibility and the fingerprint stored at the last apply (state res:agentHash:<key>): live = expected → unchanged (nothing written; a pending draft is published, a missing baseline stored); live = stored → the workspace changed, updated; otherwise drift (edited-outside-workspace with a stored fingerprint, no-baseline without), left untouched unless force (then updated with forced true and event sync.agent.driftOverwritten; without force event sync.agent.drift). Fails closed: an unreadable draft (AgentReadFailed) or an undeployed agentConfig (CustomCodeUnavailable) stops the update unless force. The dry run goes through the same code path and stops right before the first write (would-create | would-update | unchanged | drift). profile is sent at creation only. After each save: publish (visibility), state res:agent:<key> {id, name, createdAt}, draft read back and its fingerprint stored in res:agentHash:<key> {hash, snapshot, at, by}. Missing dependencies (missing from _agent-expected): dry run → would-create | would-update + missing, real run → failed MissingDependency. Returns the action {type: agent, key, action: would-create | would-update | created | updated | unchanged | drift | failed, id, forced, missing?, error?, message?, published?, drift? {reason, changes, summary}, plan?, skippedTools?, warning?}.'
+private: true
+arguments:
+  key:
+    type: string
+    description: agents[].key
+  dryRun:
+    type: boolean
+  force:
+    type: boolean
+    description: Update even when the drift guard finds edits made outside the workspace (or cannot check them).
+  plannedKbs:
+    type: array
+    description: Dry run only — keys of the knowledge bases the same sync would create (passed to _agent-expected).
+do:
+  - set:
+      name: _dry
+      value: false
+  - conditions:
+      '{{dryRun}}':
+        - set:
+            name: _dry
+            value: true
+  - set:
+      name: _force
+      value: false
+  - conditions:
+      '{{force}}':
+        - set:
+            name: _force
+            value: true
+  - set:
+      name: _result
+      value:
+        type: agent
+        key: '{{key}}'
+        action: failed
+        id: null
+        forced: false
+  - _manifest-get:
+      list: agents
+      key: '{{key}}'
+      output: _m
+  - conditions:
+      '!{{_m.found}}':
+        - set:
+            name: _result.error
+            value: UnknownManifestKey
+        - break:
+            scope: automation
+  - set:
+      name: _agent
+      value: '{{_m.item}}'
+  - _resolve-agent:
+      key: '{{key}}'
+      output: _resolved
+  - conditions:
+      '{{_resolved.error}}':
+        - set:
+            name: _result
+            value:
+              type: agent
+              key: '{{key}}'
+              action: failed
+              id: null
+              error: '{{_resolved.error}}'
+              status: '{{_resolved.status}}'
+              message: '{{_resolved.message}}'
+        - break:
+            scope: automation
+  - set:
+      name: _result.id
+      value: '{{_resolved.id}}'
+  - conditions:
+      '{{_resolved.warning}}':
+        - set:
+            name: _result.warning
+            value: '{{_resolved.warning}}'
+  - _agent-expected:
+      key: '{{key}}'
+      plannedKbs: '{{plannedKbs}}'
+      output: _expected
+  - conditions:
+      '{{_expected.skippedTools.length}} > 0':
+        - set:
+            name: _result.skippedTools
+            value: '{{_expected.skippedTools}}'
+  - conditions:
+      '{{_expected.missing.length}} > 0':
+        - set:
+            name: _result.missing
+            value: '{{_expected.missing}}'
+        - conditions:
+            '{{_dry}} and {{_resolved.found}}':
+              - set:
+                  name: _result.action
+                  value: would-update
+            '{{_dry}}':
+              - set:
+                  name: _result.action
+                  value: would-create
+            default:
+              - set:
+                  name: _result.error
+                  value: MissingDependency
+              - set:
+                  name: _result.message
+                  value: 'missing: {% join({{_expected.missing}}, ", ") %}'
+              - emit:
+                  event: error
+                  payload:
+                    error: MissingDependency
+                    message: Agent {{_agent.name}} cannot be synced, missing resources
+                    details:
+                      agentKey: '{{key}}'
+                      missing: '{{_expected.missing}}'
+        - break:
+            scope: automation
+  - set:
+      name: _body
+      value: '{{_expected.body}}'
+  - set:
+      name: _visibility
+      value: '{{_expected.visibility}}'
+  - comment: The managed configuration compared with the live agent = the body + the publish visibility.
+  - set:
+      name: _expectedConfig
+      value:
+        visibility: '{{_visibility}}'
+  - set:
+      name: _expectedConfig
+      type: merge
+      value: '{{_body}}'
+  - set:
+      name: _forced
+      value: false
+  - set:
+      name: _drift
+      value: null
+  - set:
+      name: _plan
+      value: null
+  - conditions:
+      '!{{_resolved.found}}':
+        - set:
+            name: _createConfig
+            value: '{{_expectedConfig}}'
+        - set:
+            name: _createConfig.profile
+            value: '{{_expected.profile}}'
+        - Custom Code.run:
+            function: agentConfig
+            parameters:
+              op: plan
+              live: null
+              expected: '{{_createConfig}}'
+              options:
+                skippedTools: '{{_expected.skippedTools}}'
+            output: _planRes
+        - set:
+            name: _plan
+            value: '{{_planRes.plan}}'
+        - conditions:
+            '{{_dry}}':
+              - set:
+                  name: _result.action
+                  value: would-create
+              - set:
+                  name: _result.plan
+                  value: '{{_plan}}'
+              - break:
+                  scope: automation
+  - comment: |
+      DRIFT GUARD (DESIGN 4.3). Same data in a dry run and in a real run: the dry run stops right
+      before the first write.
+  - conditions:
+      '{{_resolved.found}}':
+        - Agents.getAgent:
+            agent_id: '{{_resolved.id}}'
+            headers:
+              x-draft-mode: 'true'
+            output: _live
+        - _state-get:
+            key: res:agentHash:{{key}}
+            output: _stored
+        - set:
+            name: _check
+            value: null
+        - set:
+            name: _checkError
+            value: null
+        - conditions:
+            '!{{_live.id}}':
+              - set:
+                  name: _checkError
+                  value: AgentReadFailed
+            default:
+              - Custom Code.run:
+                  function: agentConfig
+                  parameters:
+                    op: check
+                    live: '{{_live}}'
+                    expected: '{{_expectedConfig}}'
+                    stored: '{{_stored.row.data}}'
+                    options:
+                      skippedTools: '{{_expected.skippedTools}}'
+                  output: _check
+              - set:
+                  name: _plan
+                  value: '{{_check.plan}}'
+              - conditions:
+                  '!{{_check.liveHash}}':
+                    - set:
+                        name: _checkError
+                        value: CustomCodeUnavailable
+        - conditions:
+            '{{_checkError}} and !{{_force}}':
+              - set:
+                  name: _result.error
+                  value: '{{_checkError}}'
+              - set:
+                  name: _result.message
+                  value: 'Agent {{_agent.name}} not updated: its live configuration could not be checked for edits made outside the workspace (deploy the Custom Code functions, or pass force).'
+              - emit:
+                  event: error
+                  payload:
+                    error: '{{_checkError}}'
+                    message: Agent {{_agent.name}} not updated, its live configuration could not be checked
+                    details:
+                      agentKey: '{{key}}'
+                      id: '{{_resolved.id}}'
+                      status: '{{_live.status}}'
+                      check: '{{_check.error}}'
+              - break:
+                  scope: automation
+            '{{_checkError}}':
+              - set:
+                  name: _forced
+                  value: true
+              - set:
+                  name: _drift
+                  value:
+                    reason: unverifiable
+                    changes: []
+                    summary: '{{_checkError}}'
+            '{{_check.reason}} = "in-sync"':
+              - set:
+                  name: _result.action
+                  value: unchanged
+              - set:
+                  name: _result.plan
+                  value: '{{_plan}}'
+              - conditions:
+                  '!{{_dry}}':
+                    - conditions:
+                        '{{_live.has_draft_changes}}':
+                          - Agents.publishAgent:
+                              agent_id: '{{_resolved.id}}'
+                              body:
+                                visibility: '{{_visibility}}'
+                              output: _pub0
+                          - set:
+                              name: _result.published
+                              value: true
+                          - conditions:
+                              '{{_pub0.error}}':
+                                - set:
+                                    name: _result.published
+                                    value: false
+              - conditions:
+                  '!{{_dry}} and !{{_stored.row.data.hash}}':
+                    - comment: In sync without a baseline yet (first sync of an agent created elsewhere) — the fingerprint is stored now.
+                    - _state-set:
+                        key: res:agentHash:{{key}}
+                        kind: resource
+                        status: applied
+                        data:
+                          hash: '{{_check.liveHash}}'
+                          snapshot: '{{_check.liveSnapshot}}'
+                          at: '{{run.date}}'
+                          by:
+                            id: '{{user.id}}'
+                            email: '{{user.email}}'
+              - break:
+                  scope: automation
+            '{{_check.drift}}':
+              - set:
+                  name: _drift
+                  value:
+                    reason: '{{_check.reason}}'
+                    changes: '{{_check.changes}}'
+                    summary: '{{_check.summary}}'
+              - conditions:
+                  '{{_force}}':
+                    - set:
+                        name: _forced
+                        value: true
+                  default:
+                    - set:
+                        name: _result.action
+                        value: drift
+                    - set:
+                        name: _result.drift
+                        value: '{{_drift}}'
+                    - set:
+                        name: _result.plan
+                        value: '{{_plan}}'
+                    - conditions:
+                        '!{{_dry}}':
+                          - emit:
+                              event: sync.agent.drift
+                              payload:
+                                agentKey: '{{key}}'
+                                id: '{{_resolved.id}}'
+                                drift: '{{_drift}}'
+                    - break:
+                        scope: automation
+        - conditions:
+            '{{_dry}}':
+              - set:
+                  name: _result.action
+                  value: would-update
+              - set:
+                  name: _result.plan
+                  value: '{{_plan}}'
+              - conditions:
+                  '{{_forced}}':
+                    - set:
+                        name: _result.forced
+                        value: true
+                    - set:
+                        name: _result.drift
+                        value: '{{_drift}}'
+              - break:
+                  scope: automation
+        - conditions:
+            '{{_check.keepDescription}}':
+              - comment: Live description localized with the expected text — sent back as is.
+              - set:
+                  name: _body.description
+                  value: '{{_check.keepDescription}}'
+        - conditions:
+            '{{_forced}}':
+              - emit:
+                  event: sync.agent.driftOverwritten
+                  payload:
+                    agentKey: '{{key}}'
+                    id: '{{_resolved.id}}'
+                    drift: '{{_drift}}'
+  - comment: |
+      WRITE. profile is sent at creation only: on a PATCH Agent Factory re-applies the profile and
+      rebuilds the profile-managed system tools, which would strip the delegation tool.
+  - conditions:
+      '{{_resolved.found}}':
+        - set:
+            name: _agentId
+            value: '{{_resolved.id}}'
+        - set:
+            name: _action
+            value: updated
+        - Agents.updateAgent:
+            agent_id: '{{_agentId}}'
+            updates: '{{_body}}'
+            output: _saved
+      default:
+        - set:
+            name: _action
+            value: created
+        - set:
+            name: _createBody
+            value: '{{_body}}'
+        - conditions:
+            '{{_expected.profile}}':
+              - set:
+                  name: _createBody.profile
+                  value: '{{_expected.profile}}'
+        - Agents.createAgent:
+            name: '{{_body.name}}'
+            instructions: '{{_body.instructions}}'
+            model: '{{_body.model}}'
+            profile: '{{_expected.profile}}'
+            extra: '{{_createBody}}'
+            output: _saved
+        - set:
+            name: _agentId
+            value: '{{_saved.id}}'
+        - conditions:
+            '{{_saved.id}}':
+              - comment: |
+                  Agent Factory ignores some fields at creation (max_tokens) and adds its default
+                  system tools (memory): the full body is applied once more, so a new agent matches
+                  the manifest after one sync instead of showing an update right away.
+              - Agents.updateAgent:
+                  agent_id: '{{_saved.id}}'
+                  updates: '{{_body}}'
+                  output: _patched
+  - conditions:
+      '!{{_saved.id}}':
+        - set:
+            name: _result.error
+            value: AgentSaveFailed
+        - set:
+            name: _result.message
+            value: Agent Factory refused the {{_action}} of {{_agent.name}} (status {{_saved.status}}).
+        - set:
+            name: _result.status
+            value: '{{_saved.status}}'
+        - emit:
+            event: error
+            payload:
+              error: AgentSaveFailed
+              message: Failed to save agent {{_agent.name}}
+              details:
+                agentKey: '{{key}}'
+                action: '{{_action}}'
+                status: '{{_saved.status}}'
+                response: '{{_saved.message}}'
+        - break:
+            scope: automation
+  - comment: Non-owners run the published configuration, so every save is published (visibility from the manifest, restricted by default).
+  - Agents.publishAgent:
+      agent_id: '{{_agentId}}'
+      body:
+        visibility: '{{_visibility}}'
+      output: _published
+  - set:
+      name: _publishedOk
+      value: true
+  - conditions:
+      '{{_published.error}}':
+        - set:
+            name: _publishedOk
+            value: false
+        - emit:
+            event: error
+            payload:
+              error: AgentPublishFailed
+              message: Failed to publish agent {{_agent.name}}
+              details:
+                agentKey: '{{key}}'
+                id: '{{_agentId}}'
+                status: '{{_published.status}}'
+  - _state-get:
+      key: res:agent:{{key}}
+      output: _cachedRow
+  - set:
+      name: _createdAt
+      value: '{{run.date}}'
+  - conditions:
+      '{{_cachedRow.row.data.createdAt}}':
+        - conditions:
+            '{{_cachedRow.row.data.id}} = {{_agentId}}':
+              - set:
+                  name: _createdAt
+                  value: '{{_cachedRow.row.data.createdAt}}'
+  - _state-set:
+      key: res:agent:{{key}}
+      kind: resource
+      status: created
+      data:
+        id: '{{_agentId}}'
+        name: '{{_agent.name}}'
+        createdAt: '{{_createdAt}}'
+  - comment: |
+      Baseline of the drift guard: fingerprint of the draft as Agent Factory stored it (read back
+      after the save and the publish). Without it (read or Custom Code failure) the next sync
+      compares the live agent with the expected configuration (no-baseline rule).
+  - Agents.getAgent:
+      agent_id: '{{_agentId}}'
+      headers:
+        x-draft-mode: 'true'
+      output: _readback
+  - set:
+      name: _fp
+      value: null
+  - conditions:
+      '{{_readback.id}}':
+        - Custom Code.run:
+            function: agentConfig
+            parameters:
+              op: check
+              live: '{{_readback}}'
+              expected: '{{_expectedConfig}}'
+            output: _fp
+  - conditions:
+      '{{_fp.liveHash}}':
+        - _state-set:
+            key: res:agentHash:{{key}}
+            kind: resource
+            status: applied
+            data:
+              hash: '{{_fp.liveHash}}'
+              snapshot: '{{_fp.liveSnapshot}}'
+              at: '{{run.date}}'
+              by:
+                id: '{{user.id}}'
+                email: '{{user.email}}'
+              forced: '{{_forced}}'
+  - set:
+      name: _result.action
+      value: '{{_action}}'
+  - set:
+      name: _result.id
+      value: '{{_agentId}}'
+  - set:
+      name: _result.published
+      value: '{{_publishedOk}}'
+  - set:
+      name: _result.plan
+      value: '{{_plan}}'
+  - conditions:
+      '{{_forced}}':
+        - set:
+            name: _result.forced
+            value: true
+        - set:
+            name: _result.drift
+            value: '{{_drift}}'
+output: '{{_result}}'

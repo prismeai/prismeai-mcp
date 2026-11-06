@@ -1,0 +1,86 @@
+slug: _lock
+name: helpers/Lock
+description: 'Named lock in the state row lock:<name> (DESIGN 3, 4.1) {correlationId, startedAt}, stale after 15 minutes. Arguments {name, op: take | release}. take: free, stale or already held by this run (same run.correlationId) → written held with this run and read back; taken is true only when the read-back holder is this run (a concurrent taker that wrote last wins). Otherwise taken false and holder = the current holder data. release: sets the row free when this run holds it (a lock held by another run is left as is). Returns {taken, holder}.'
+private: true
+arguments:
+  name:
+    type: string
+    description: Lock name, e.g. refresh:<source-key>.
+  op:
+    type: string
+    description: take | release
+do:
+  - set:
+      name: _taken
+      value: false
+  - _state-get:
+      key: lock:{{name}}
+      output: _cur
+  - set:
+      name: _holder
+      value: '{{_cur.row.data}}'
+  - set:
+      name: _mine
+      value: false
+  - conditions:
+      '{{_cur.row.data.correlationId}} = {{run.correlationId}}':
+        - set:
+            name: _mine
+            value: true
+  - conditions:
+      '{{op}} = "release"':
+        - conditions:
+            '{{_mine}} and {{_cur.row.status}} = "held"':
+              - _state-set:
+                  key: lock:{{name}}
+                  kind: lock
+                  status: free
+                  data:
+                    correlationId: '{{run.correlationId}}'
+                    startedAt: '{{_cur.row.data.startedAt}}'
+                    releasedAt: '{{run.date}}'
+              - set:
+                  name: _holder
+                  value: null
+        - break:
+            scope: automation
+  - set:
+      name: _free
+      value: true
+  - conditions:
+      '{{_cur.row.status}} = "held" and !{{_mine}}':
+        - set:
+            name: _free
+            value: false
+        - set:
+            name: _age
+            value: '{% date({{run.date}}).ts - date({{_cur.row.data.startedAt}}).ts %}'
+        - conditions:
+            '{{_age}} > 900000':
+              - comment: Stale lock (holder older than 15 minutes) — taken over.
+              - set:
+                  name: _free
+                  value: true
+  - conditions:
+      '{{_free}}':
+        - _state-set:
+            key: lock:{{name}}
+            kind: lock
+            status: held
+            data:
+              correlationId: '{{run.correlationId}}'
+              startedAt: '{{run.date}}'
+        - _state-get:
+            key: lock:{{name}}
+            output: _after
+        - set:
+            name: _holder
+            value: '{{_after.row.data}}'
+        - conditions:
+            '{{_after.row.data.correlationId}} = {{run.correlationId}}':
+              - set:
+                  name: _taken
+                  value: true
+output:
+  taken: '{{_taken}}'
+  holder: '{{_holder}}'

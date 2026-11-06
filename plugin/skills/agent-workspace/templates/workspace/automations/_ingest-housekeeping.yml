@@ -1,0 +1,266 @@
+slug: _ingest-housekeeping
+name: ingestion/helpers/Ingest housekeeping
+description: 'Recovers the ingestion queue without any external caller (called by every pumpIngest run and by refreshSource). (1) Stale items: rows in dispatched / processing whose updatedAt is older than config.ingestion.staleAfterMinutes (default 30) go back to queued, or to error (stage stale) once data.attempts reached config.ingestion.maxAttempts (default 3). (2) Documents that failed to index: for every target knowledge base, Storage.listVectorStoreFiles status failed then rejected (up to 3 pages of 100 each); a document tagged {ingestSource, ingestItem} whose row is ingested with the same documentId goes back to queued (re-attached on the same source_url, Storage upserts it) or to error (stage indexing, Storage last_error) past maxAttempts. Reads the control key fresh: while every source is suspended / stopped it touches nothing; a key limited to one source skips that source. Body {source?}. Returns {suspended, requeuedStale, requeuedFailed, exhausted, checkedKbs}.'
+private: true
+arguments:
+  source:
+    type: string
+    description: Optional source key; empty = every source.
+do:
+  - set:
+      name: _hk
+      value:
+        suspended: false
+        requeuedStale: 0
+        requeuedFailed: 0
+        exhausted: 0
+        checkedKbs: 0
+  - _ingest-control:
+      source: '{{source}}'
+      output: _hkCtl
+  - conditions:
+      '{{_hkCtl.global}} or {{_hkCtl.applies}}':
+        - set:
+            name: _hk.suspended
+            value: true
+        - break:
+            scope: automation
+  - comment: A sentinel, never empty, so the comparisons below always have two operands.
+  - set:
+      name: _hkSkip
+      value: __none__
+  - conditions:
+      '{{_hkCtl.scoped}}':
+        - set:
+            name: _hkSkip
+            value: '{{_hkCtl.source}}'
+  - set:
+      name: _hkStaleMs
+      value: 1800000
+  - conditions:
+      '{{config.ingestion.staleAfterMinutes}} > 0':
+        - set:
+            name: _hkStaleMs
+            value: '{% {{config.ingestion.staleAfterMinutes}} * 60000 %}'
+  - set:
+      name: _hkMax
+      value: 3
+  - conditions:
+      '{{config.ingestion.maxAttempts}} > 0':
+        - set:
+            name: _hkMax
+            value: '{{config.ingestion.maxAttempts}}'
+  - comment: (1) Stale in-flight items (handler lost). attempts was counted when the item was claimed.
+  - set:
+      name: _ingestList1
+      value:
+        - dispatched
+        - processing
+  - repeat:
+      'on': '{{_ingestList1}}'
+      do:
+        - _state-find:
+            query:
+              kind: item
+              status: '{{item}}'
+            limit: 5000
+            output: _hkRows
+        - repeat:
+            'on': '{{_hkRows.rows}}'
+            do:
+              - set:
+                  name: _hkRow
+                  value: '{{item}}'
+              - set:
+                  name: _hkIn
+                  value: true
+              - conditions:
+                  '{{source}}':
+                    - conditions:
+                        '{{_hkRow.data.source}} != {{source}}':
+                          - set:
+                              name: _hkIn
+                              value: false
+              - conditions:
+                  '{{_hkRow.data.source}} == {{_hkSkip}}':
+                    - set:
+                        name: _hkIn
+                        value: false
+              - set:
+                  name: _hkAge
+                  value: 0
+              - conditions:
+                  '{{_hkRow.updatedAt}}':
+                    - conditions:
+                        '{{_hkIn}}':
+                          - set:
+                              name: _hkAge
+                              value: '{% date({{run.date}}).ts - date({{_hkRow.updatedAt}}).ts %}'
+              - conditions:
+                  '{{_hkAge}} > {{_hkStaleMs}}':
+                    - _ingest-requeue:
+                        row: '{{_hkRow}}'
+                        maxAttempts: '{{_hkMax}}'
+                        stage: stale
+                        message: 'stuck in {{_hkRow.status}} for more than {{_hkStaleMs}} ms'
+                        output: _hkRq
+                    - conditions:
+                        '{{_hkRq.status}} = "queued"':
+                          - set:
+                              name: _hk.requeuedStale
+                              value: '{% {{_hk.requeuedStale}} + 1 %}'
+                        default:
+                          - set:
+                              name: _hk.exhausted
+                              value: '{% {{_hk.exhausted}} + 1 %}'
+  - comment: (2) Target knowledge bases of the effective sources (console overlay included).
+  - _sources-effective:
+      key: '{{source}}'
+      output: _hkSrc
+  - set:
+      name: _hkTargets
+      value: []
+  - repeat:
+      'on': '{{_hkSrc.sources}}'
+      do:
+        - conditions:
+            '!{{item.target}}':
+              - comment: source without target
+            '{{item.key}} == {{_hkSkip}}':
+              - comment: source suspended by the control key
+            '{{item.target}} in {{_hkTargets}}':
+              - comment: target already listed
+            default:
+              - set:
+                  name: _hkTargets
+                  type: push
+                  value: '{{item.target}}'
+  - repeat:
+      'on': '{{_hkTargets}}'
+      do:
+        - _resolve-kb:
+            key: '{{item}}'
+            output: _hkKb
+        - conditions:
+            '{{_hkKb.id}}':
+              - set:
+                  name: _hk.checkedKbs
+                  value: '{% {{_hk.checkedKbs}} + 1 %}'
+              - set:
+                  name: _hkDocs
+                  value: []
+              - set:
+                  name: _ingestList2
+                  value:
+                    - failed
+                    - rejected
+              - repeat:
+                  'on': '{{_ingestList2}}'
+                  do:
+                    - set:
+                        name: _hkDocStatus
+                        value: '{{item}}'
+                    - set:
+                        name: _ingestList3
+                        value:
+                          - 1
+                          - 2
+                          - 3
+                    - repeat:
+                        'on': '{{_ingestList3}}'
+                        do:
+                          - set:
+                              name: _hkPage
+                              value: null
+                          - try:
+                              do:
+                                - Storage.listVectorStoreFiles:
+                                    vector_store_id: '{{_hkKb.id}}'
+                                    status: '{{_hkDocStatus}}'
+                                    limit: 100
+                                    page: '{{item}}'
+                                    output: _hkPage
+                              catch:
+                                - set:
+                                    name: _hkPage
+                                    value: null
+                          - repeat:
+                              'on': '{{_hkPage.structuredData.data}}'
+                              do:
+                                - set:
+                                    name: _hkD
+                                    value: '{{item}}'
+                                - conditions:
+                                    '{{_hkD.tags.ingestItem}}':
+                                      - conditions:
+                                          '{{_hkD.tags.ingestSource}}':
+                                            - set:
+                                                name: _hkDocs
+                                                type: push
+                                                value: '{{_hkD}}'
+                          - conditions:
+                              '!{{_hkPage.structuredData.has_more}}':
+                                - break:
+                                    scope: repeat
+              - repeat:
+                  'on': '{{_hkDocs}}'
+                  do:
+                    - set:
+                        name: _hkDoc
+                        value: '{{item}}'
+                    - set:
+                        name: _hkDocIn
+                        value: true
+                    - conditions:
+                        '{{source}}':
+                          - conditions:
+                              '{{_hkDoc.tags.ingestSource}} != {{source}}':
+                                - set:
+                                    name: _hkDocIn
+                                    value: false
+                    - conditions:
+                        '{{_hkDoc.tags.ingestSource}} == {{_hkSkip}}':
+                          - set:
+                              name: _hkDocIn
+                              value: false
+                    - conditions:
+                        '{{_hkDocIn}}':
+                          - _state-get:
+                              key: item:{{_hkDoc.tags.ingestSource}}:{{_hkDoc.tags.ingestItem}}
+                              output: _hkItem
+                          - set:
+                              name: _hkMatch
+                              value: false
+                          - conditions:
+                              '{{_hkItem.row.data.documentId}}':
+                                - conditions:
+                                    '{{_hkItem.row.status}} = "ingested" and {{_hkItem.row.data.documentId}} == {{_hkDoc.id}}':
+                                      - set:
+                                          name: _hkMatch
+                                          value: true
+                          - conditions:
+                              '{{_hkMatch}}':
+                                - set:
+                                    name: _hkReason
+                                    value: '{{_hkDoc.last_error}}'
+                                - conditions:
+                                    '!{{_hkReason}}':
+                                      - set:
+                                          name: _hkReason
+                                          value: document {{_hkDoc.status}} in Storage
+                                - _ingest-requeue:
+                                    row: '{{_hkItem.row}}'
+                                    maxAttempts: '{{_hkMax}}'
+                                    stage: indexing
+                                    message: '{{_hkReason}}'
+                                    output: _hkRq
+                                - conditions:
+                                    '{{_hkRq.status}} = "queued"':
+                                      - set:
+                                          name: _hk.requeuedFailed
+                                          value: '{% {{_hk.requeuedFailed}} + 1 %}'
+                                    default:
+                                      - set:
+                                          name: _hk.exhausted
+                                          value: '{% {{_hk.exhausted}} + 1 %}'
+output: '{{_hk}}'

@@ -1,0 +1,275 @@
+slug: controlIngest
+name:
+  en: ingestion/Control ingestion
+  fr: ingestion/Piloter l'ingestion
+description: 'Control endpoint (guarded, 403 Forbidden): suspend, resume or stop the ingestion, for every source or for one. Writes setting:ingestControl (status = run | suspend | stop, data {action, reason, by, at, source (null = every source), previous}), read FRESH by every pumpIngest run, every _ingest-housekeeping pass and by onIngestItem before its claim. suspend → nothing is dispatched or re-queued; dispatched items not started yet go back to queued when their handler runs; an item already attaching finishes. resume → key run (the key is single: resuming clears a scoped key too) and ingest.pump is emitted once. stop (admin-only, 403 AdminRequired) → key stop, then every queued and dispatched item of the scope becomes cancelled (conditional update; refreshSource re-queues cancelled items, after a resume). Body {action: suspend | resume | stop, reason?, source?}. Errors: 400 InvalidAction, 404 SourceNotConfigured. Returns {action, status, control, previous, cancelled, counts (_ingest-counts of the scope)}.'
+when:
+  endpoint: true
+arguments:
+  action:
+    type: string
+    description: suspend | resume | stop
+  reason:
+    type: string
+  source:
+    type: string
+    description: Optional source key; empty = every source.
+  body:
+    type: object
+    description: Webhook body; same fields as the arguments, which only fill missing body fields.
+    properties:
+      action:
+        type: string
+      reason:
+        type: string
+      source:
+        type: string
+      by:
+        type: string
+        description: Author written in the key (set by consoleAction); defaults to the caller.
+do:
+  - conditions:
+      '!{{body}}':
+        - set:
+            name: body
+            value: {}
+  - conditions:
+      '{{action}} and !{{body.action}}':
+        - set:
+            name: body.action
+            value: '{{action}}'
+  - conditions:
+      '{{reason}} and !{{body.reason}}':
+        - set:
+            name: body.reason
+            value: '{{reason}}'
+  - conditions:
+      '{{source}} and !{{body.source}}':
+        - set:
+            name: body.source
+            value: '{{source}}'
+  - set:
+      name: _isStop
+      value: false
+  - conditions:
+      '{{body.action}} = "stop"':
+        - set:
+            name: _isStop
+            value: true
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - break:
+            scope: automation
+  - set:
+      name: _valid
+      value: false
+  - conditions:
+      '{{body.action}} = "suspend" or {{body.action}} = "resume" or {{body.action}} = "stop"':
+        - set:
+            name: _valid
+            value: true
+  - conditions:
+      '!{{_valid}}':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _result
+            value:
+              error: InvalidAction
+              message: action must be suspend, resume or stop
+        - break:
+            scope: automation
+  - conditions:
+      '{{_isStop}} and !{{_guard.admin}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: AdminRequired
+              message: stop cancels queued items and is reserved to admin roles
+        - break:
+            scope: automation
+  - set:
+      name: _scope
+      value: null
+  - conditions:
+      '{{body.source}}':
+        - _sources-effective:
+            key: '{{body.source}}'
+            output: _eff
+        - repeat:
+            'on': '{{_eff.sources}}'
+            do:
+              - conditions:
+                  '{{item.key}} == {{body.source}}':
+                    - set:
+                        name: _scope
+                        value: '{{item.key}}'
+        - conditions:
+            '!{{_scope}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 404
+              - set:
+                  name: _result
+                  value:
+                    error: SourceNotConfigured
+                    message: Source {{body.source}} is not declared (manifest or console overlay)
+              - break:
+                  scope: automation
+  - comment: Author of the key = the caller's session identity, never a body field (the console's child call sees the same user).
+  - set:
+      name: _by
+      value: '{{user.email}}'
+  - conditions:
+      '!{{_by}}':
+        - set:
+            name: _by
+            value: '{{user.id}}'
+  - _ingest-control:
+      output: _prev
+  - set:
+      name: _status
+      value: '{{body.action}}'
+  - conditions:
+      '{{body.action}} = "resume"':
+        - set:
+            name: _status
+            value: run
+        - set:
+            name: _scope
+            value: null
+  - set:
+      name: _control
+      value:
+        action: '{{_status}}'
+        reason: '{{body.reason}}'
+        by: '{{_by}}'
+        at: '{{run.date}}'
+        source: '{{_scope}}'
+        previous:
+          action: '{{_prev.action}}'
+          source: '{{_prev.source}}'
+  - _state-set:
+      key: setting:ingestControl
+      kind: setting
+      status: '{{_status}}'
+      data: '{{_control}}'
+  - set:
+      name: _cancelled
+      value: 0
+  - comment: |
+      Stop: cancel the queued and dispatched items of the scope (conditional on their status, so an
+      item claimed meanwhile is left to its handler, which re-reads the key before attaching).
+  - conditions:
+      '{{_isStop}}':
+        - set:
+            name: _scopeKey
+            value: __none__
+        - conditions:
+            '{{_scope}}':
+              - set:
+                  name: _scopeKey
+                  value: '{{_scope}}'
+        - set:
+            name: _controList1
+            value:
+              - queued
+              - dispatched
+        - repeat:
+            'on': '{{_controList1}}'
+            do:
+              - set:
+                  name: _cStatus
+                  value: '{{item}}'
+              - _state-find:
+                  query:
+                    kind: item
+                    status: '{{_cStatus}}'
+                  limit: 10000
+                  output: _cRows
+              - repeat:
+                  'on': '{{_cRows.rows}}'
+                  do:
+                    - set:
+                        name: _cRow
+                        value: '{{item}}'
+                    - set:
+                        name: _cIn
+                        value: true
+                    - conditions:
+                        '{{_scope}}':
+                          - conditions:
+                              '{{_cRow.data.source}} != {{_scopeKey}}':
+                                - set:
+                                    name: _cIn
+                                    value: false
+                    - conditions:
+                        '{{_cIn}}':
+                          - set:
+                              name: _cData
+                              value: '{{_cRow.data}}'
+                          - set:
+                              name: _cData.dispatchToken
+                              value: null
+                          - set:
+                              name: _cData.cancelledAt
+                              value: '{{run.date}}'
+                          - set:
+                              name: _cData.cancelledBy
+                              value: '{{_by}}'
+                          - set:
+                              name: _cData.previousStatus
+                              value: '{{_cStatus}}'
+                          - try:
+                              do:
+                                - state.updateOne:
+                                    query:
+                                      key: '{{_cRow.key}}'
+                                      status: '{{_cStatus}}'
+                                    data:
+                                      $set:
+                                        status: cancelled
+                                        data: '{{_cData}}'
+                                        updatedAt: '{{run.date}}'
+                                - set:
+                                    name: _cancelled
+                                    value: '{% {{_cancelled}} + 1 %}'
+                              catch:
+                                - comment: The row changed status meanwhile.
+  - conditions:
+      '{{body.action}} = "resume"':
+        - emit:
+            event: ingest.pump
+            payload:
+              hop: 0
+  - _ingest-counts:
+      source: '{{_scope}}'
+      output: _counts
+  - set:
+      name: _result
+      value:
+        action: '{{body.action}}'
+        status: '{{_status}}'
+        control: '{{_control}}'
+        previous: '{{_prev.key}}'
+        cancelled: '{{_cancelled}}'
+        counts: '{{_counts}}'
+output: '{{_result}}'

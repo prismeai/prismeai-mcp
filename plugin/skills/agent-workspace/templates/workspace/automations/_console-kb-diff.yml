@@ -1,0 +1,116 @@
+slug: _console-kb-diff
+name: console/KB differences
+description: 'Knowledge bases of the manifest next to what the instance has, without writing anything (consoleDiff part kbs, DESIGN 5.3). No arguments. Each config.knowledgeBases entry is resolved with _resolve-kb, read with Storage.getVectorStore, and its settings (name, description, parser, chunking_strategy: sent at creation only) compared with the manifest by the Custom Code function consoleKit. The documents come from a syncAll dry run on kbs and documents (kbdoc actions only). Returns {kbs: [{key, name, id, by, status, document_counts, settings {fields: [{field, manifest, live, same, readable}], same} | null, error?}], documents: [kbdoc actions]}.'
+private: true
+do:
+  - set:
+      name: _kbs
+      value: []
+  - repeat:
+      'on': '{{config.knowledgeBases}}'
+      do:
+        - set:
+            name: _m
+            value: '{{item}}'
+        - _resolve-kb:
+            key: '{{_m.key}}'
+            output: _res
+        - set:
+            name: _entry
+            value:
+              key: '{{_m.key}}'
+              name: '{{_m.name}}'
+              id: '{{_res.id}}'
+              by: '{{_res.by}}'
+              status: null
+              document_counts: null
+              settings: null
+        - conditions:
+            '{{_res.id}}':
+              - set:
+                  name: _live
+                  value: null
+              - try:
+                  do:
+                    - Storage.getVectorStore:
+                        vector_store_id: '{{_res.id}}'
+                        output: _live
+                  catch:
+                    - set:
+                        name: _entry.error
+                        value: KnowledgeBaseNotFound
+              - set:
+                  name: _lb
+                  value: null
+              - conditions:
+                  '{{_live.structuredData.id}}':
+                    - set:
+                        name: _lb
+                        value: '{{_live.structuredData}}'
+                  '{{_live.id}}':
+                    - set:
+                        name: _lb
+                        value: '{{_live}}'
+                  '{{_live.data.id}}':
+                    - set:
+                        name: _lb
+                        value: '{{_live.data}}'
+              - conditions:
+                  '{{_lb.id}}':
+                    - set:
+                        name: _entry.status
+                        value: '{{_lb.status}}'
+                    - set:
+                        name: _entry.document_counts
+                        value: '{{_lb.document_counts}}'
+                    - try:
+                        do:
+                          - Custom Code.run:
+                              function: consoleKit
+                              parameters:
+                                op: kbSettings
+                                manifest: '{{_m}}'
+                                live: '{{_lb}}'
+                              output: _settings
+                          - conditions:
+                              '{{_settings.fields}}':
+                                - set:
+                                    name: _entry.settings
+                                    value: '{{_settings}}'
+                              default:
+                                - set:
+                                    name: _entry.error
+                                    value: CustomCodeUnavailable
+                        catch:
+                          - set:
+                              name: _entry.error
+                              value: CustomCodeUnavailable
+                  default:
+                    - set:
+                        name: _entry.error
+                        value: KnowledgeBaseNotFound
+        - set:
+            name: _kbs[]
+            value: '{{_entry}}'
+  - comment: Reference documents as the next sync would see them (unchanged | would-upload | skipped).
+  - syncAll:
+      body:
+        dryRun: true
+        only:
+          - kbs
+          - documents
+      output: _dry
+  - set:
+      name: _docs
+      value: []
+  - repeat:
+      'on': '{{_dry.actions}}'
+      do:
+        - conditions:
+            '{{item.type}} = "kbdoc"':
+              - set:
+                  name: _docs[]
+                  value: '{{item}}'
+output:
+  kbs: '{{_kbs}}'
+  documents: '{{_docs}}'

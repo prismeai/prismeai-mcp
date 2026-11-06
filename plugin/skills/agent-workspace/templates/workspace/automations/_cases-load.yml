@@ -1,0 +1,91 @@
+slug: _cases-load
+name: evaluation/Load cases
+description: 'Loads the case set used by importCases and runBenchmark, so both always use the same cases. Source: the cases stored in setting:cases when they were imported from a body (data.source body), unless fromConfig is true; otherwise the test questions of the agent content _content-agent-tests, read fresh. Cases are normalised and validated by Custom Code benchEngine op cases (criteria default config.evaluation.criteria; invalid entries skipped and listed in warnings). Arguments {fromConfig?}. Output {ok: true, cases: [{id, question, expected, criteria, tags}], evalCases (Agent Evaluations case objects, the id carried as tag case:<id>), count, hash, source: body | content, warnings} or {ok: false, httpStatus, response {error, message}} with error NoCaseLoaded (no valid case) or CustomCodeUnavailable.'
+private: true
+arguments:
+  fromConfig:
+    type: boolean
+    description: true = ignore the cases stored from a body and read _content-agent-tests.
+do:
+  - set:
+      name: _raw
+      value: null
+  - set:
+      name: _source
+      value: content
+  - set:
+      name: _warnings
+      value: []
+  - conditions:
+      '!{{fromConfig}}':
+        - _state-get:
+            key: setting:cases
+            output: _stored
+        - conditions:
+            '{{_stored.row.data.source}} == "body" and {{_stored.row.data.cases.length}} > 0':
+              - set:
+                  name: _raw
+                  value: '{{_stored.row.data.cases}}'
+              - set:
+                  name: _source
+                  value: body
+  - conditions:
+      '{{_source}} == "content"':
+        - comment: The test questions of the agent content (_content-agent-tests).
+        - _content-agent-tests:
+            output: _fromContent
+        - set:
+            name: _raw
+            value: '{{_fromContent.tests}}'
+  - Custom Code.run:
+      function: benchEngine
+      parameters:
+        op: cases
+        cases: '{{_raw}}'
+        options:
+          defaultCriteria: '{{config.evaluation.criteria}}'
+      output: _norm
+  - conditions:
+      '{{_norm.error}}':
+        - set:
+            name: _result
+            value:
+              ok: false
+              httpStatus: 500
+              response:
+                error: CustomCodeUnavailable
+                message: 'benchEngine failed: {{_norm.message}}'
+        - break:
+            scope: automation
+  - repeat:
+      'on': '{{_norm.errors}}'
+      do:
+        - set:
+            name: _warnings
+            type: push
+            value: '{{item}}'
+  - conditions:
+      '{{_norm.count}} == 0':
+        - set:
+            name: _result
+            value:
+              ok: false
+              httpStatus: 400
+              response:
+                error: NoCaseLoaded
+                message: No valid case found (source {{_source}}); fill _content-agent-tests or call importCases with a cases list
+                source: '{{_source}}'
+                warnings: '{{_warnings}}'
+        - break:
+            scope: automation
+  - set:
+      name: _result
+      value:
+        ok: true
+        cases: '{{_norm.cases}}'
+        evalCases: '{{_norm.evalCases}}'
+        count: '{{_norm.count}}'
+        hash: '{{_norm.hash}}'
+        source: '{{_source}}'
+        warnings: '{{_warnings}}'
+output: '{{_result}}'

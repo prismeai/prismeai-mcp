@@ -1,0 +1,329 @@
+slug: refreshSource
+name:
+  en: ingestion/Refresh source
+  fr: ingestion/Rafraîchir une source
+description: 'Control endpoint (guarded, 403 Forbidden). Refreshes one source of the effective configuration (_sources-effective, console overlay included): discovers its items (_source-discover), queues new ones as state rows item:<source>:<itemId> (status queued, attempts 0), re-queues error / cancelled / removed ones and the ids listed in requeue (except items in flight), marks rows no longer listed `removed` (their Storage documents are deleted only with prune: true, admin-only, 403 AdminRequired; nothing is removed when discovery returned no item and some failures), records setting:lastRefresh:<source> and kicks the pump (event ingest.pump). Runs under a per-source lock (_lock source:<key>, 409 SourceRefreshRunning). dryRun writes nothing, takes no lock and returns the preview {discovered, toQueue, alreadyIngested, toRemove, items (50 at most, each {id, name, url, status, action: queue | requeue | ingested | queued | inFlight | remove})}; params replaces the effective params of the source in memory (console preview of an unsaved change). Body {source, dryRun?, requeue?: [itemId], prune?, params?}. Errors: 400 SourceTypeUnsupported, 404 SourceNotConfigured, 404 KnowledgeBaseNotFound, 409 SourceRefreshRunning, 500 SourceRefreshFailed. Returns {source, discovered, queued, requeued, alreadyIngested, skipped, removed, pruned, failed: [{ref, error}], warnings, control}.'
+when:
+  endpoint: true
+arguments:
+  source:
+    type: string
+    description: Source key (config.sources[].key or a console addition).
+  dryRun:
+    type: boolean
+    description: Preview only, nothing written.
+  requeue:
+    type: array
+    items:
+      type: string
+    description: Item ids re-queued whatever their status (except dispatched / processing).
+  prune:
+    type: boolean
+    description: Admin only. Also delete the Storage documents of removed items.
+  params:
+    type: object
+    description: Replaces the source params in memory (console preview of an unsaved change).
+  body:
+    type: object
+    description: Webhook body; same fields as the arguments, which only fill missing body fields.
+    properties:
+      source:
+        type: string
+      dryRun:
+        type: boolean
+      requeue:
+        type: array
+        items:
+          type: string
+      prune:
+        type: boolean
+      params:
+        type: object
+do:
+  - comment: Child calls pass top-level arguments, webhooks a body; arguments only fill missing body fields.
+  - conditions:
+      '!{{body}}':
+        - set:
+            name: body
+            value: {}
+  - conditions:
+      '{{source}} and !{{body.source}}':
+        - set:
+            name: body.source
+            value: '{{source}}'
+  - conditions:
+      '{{dryRun}} and !{{body.dryRun}}':
+        - set:
+            name: body.dryRun
+            value: true
+  - conditions:
+      '{{prune}} and !{{body.prune}}':
+        - set:
+            name: body.prune
+            value: true
+  - conditions:
+      '{{requeue.length}} > 0 and !{{body.requeue}}':
+        - set:
+            name: body.requeue
+            value: '{{requeue}}'
+  - conditions:
+      '{{params}} and !{{body.params}}':
+        - set:
+            name: body.params
+            value: '{{params}}'
+  - set:
+      name: _dry
+      value: false
+  - conditions:
+      '{{body.dryRun}} == true':
+        - set:
+            name: _dry
+            value: true
+  - set:
+      name: _prune
+      value: false
+  - conditions:
+      '{{body.prune}} == true':
+        - set:
+            name: _prune
+            value: true
+  - set:
+      name: _requeueIds
+      value: []
+  - conditions:
+      '{{body.requeue.length}} > 0':
+        - set:
+            name: _requeueIds
+            value: '{{body.requeue}}'
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - break:
+            scope: automation
+  - conditions:
+      '{{_prune}} and !{{_dry}} and !{{_guard.admin}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: AdminRequired
+              message: prune deletes documents and is reserved to admin roles
+        - break:
+            scope: automation
+  - set:
+      name: _src
+      value: null
+  - conditions:
+      '{{body.source}}':
+        - _sources-effective:
+            key: '{{body.source}}'
+            output: _eff
+        - repeat:
+            'on': '{{_eff.sources}}'
+            do:
+              - conditions:
+                  '{{item.key}} == {{body.source}}':
+                    - set:
+                        name: _src
+                        value: '{{item}}'
+  - conditions:
+      '!{{_src}}':
+        - set:
+            name: $http
+            value:
+              status: 404
+        - set:
+            name: _result
+            value:
+              error: SourceNotConfigured
+              message: Source {{body.source}} is not declared (manifest or console overlay)
+        - break:
+            scope: automation
+  - set:
+      name: _key
+      value: '{{_src.key}}'
+  - conditions:
+      '{{body.params}}':
+        - set:
+            name: _src.params
+            value: '{{body.params}}'
+  - _resolve-kb:
+      key: '{{_src.target}}'
+      output: _kb
+  - conditions:
+      '!{{_kb.id}} and !{{_dry}}':
+        - set:
+            name: $http
+            value:
+              status: 404
+        - set:
+            name: _result
+            value:
+              error: KnowledgeBaseNotFound
+              message: 'Knowledge base {{_src.target}} of source {{_key}} not found: run syncAll first'
+        - break:
+            scope: automation
+  - _source-discover:
+      source: '{{_src}}'
+      output: _disc
+  - conditions:
+      '{{_disc.error}} = "SourceTypeUnsupported"':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _result
+            value:
+              error: SourceTypeUnsupported
+              message: '{{_disc.message}}'
+              source: '{{_key}}'
+        - break:
+            scope: automation
+  - set:
+      name: _startedAt
+      value: '{{run.date}}'
+  - set:
+      name: _lockName
+      value: source:{{_key}}
+  - conditions:
+      '!{{_dry}}':
+        - _lock:
+            name: '{{_lockName}}'
+            op: take
+            output: _lk
+        - conditions:
+            '!{{_lk.taken}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 409
+              - set:
+                  name: _result
+                  value:
+                    error: SourceRefreshRunning
+                    message: A refresh of source {{_key}} is already running; retry later
+                    holder: '{{_lk.holder}}'
+              - break:
+                  scope: automation
+  - try:
+      do:
+        - _ingest-refresh-plan:
+            source: '{{_src}}'
+            discovered: '{{_disc}}'
+            requeue: '{{_requeueIds}}'
+            dryRun: '{{_dry}}'
+            prune: '{{_prune}}'
+            kbId: '{{_kb.id}}'
+            output: _plan
+        - conditions:
+            '{{_dry}}':
+              - set:
+                  name: _result
+                  value:
+                    dryRun: true
+                    source: '{{_key}}'
+                    discovered: '{{_plan.discovered}}'
+                    toQueue: '{{_plan.toQueue}}'
+                    alreadyIngested: '{{_plan.alreadyIngested}}'
+                    toRemove: '{{_plan.toRemove}}'
+                    toPrune: '{{_plan.toPrune}}'
+                    skipped: '{{_plan.skipped}}'
+                    items: '{{_plan.items}}'
+                    failed: '{{_disc.failed}}'
+                    warnings: '{{_plan.warnings}}'
+                    knowledgeBase:
+                      key: '{{_src.target}}'
+                      id: '{{_kb.id}}'
+            default:
+              - _state-set:
+                  key: setting:lastRefresh:{{_key}}
+                  kind: setting
+                  data:
+                    startedAt: '{{_startedAt}}'
+                    finishedAt: '{{run.date}}'
+                    discovered: '{{_plan.discovered}}'
+                    queued: '{{_plan.toQueue}}'
+                    requeued: '{{_plan.requeued}}'
+                    alreadyIngested: '{{_plan.alreadyIngested}}'
+                    skipped: '{{_plan.skipped}}'
+                    removed: '{{_plan.toRemove}}'
+                    pruned: '{{_plan.pruned}}'
+                    failed: '{{_disc.failed.length}}'
+                    failedRefs: '{% slice({{_disc.failed}}, 0, 20) %}'
+                    by: '{{user.email}}'
+              - emit:
+                  event: ingest.pump
+                  payload:
+                    source: '{{_key}}'
+                    hop: 0
+              - _ingest-control:
+                  source: '{{_key}}'
+                  output: _ctl
+              - set:
+                  name: _result
+                  value:
+                    source: '{{_key}}'
+                    discovered: '{{_plan.discovered}}'
+                    queued: '{{_plan.toQueue}}'
+                    requeued: '{{_plan.requeued}}'
+                    alreadyIngested: '{{_plan.alreadyIngested}}'
+                    skipped: '{{_plan.skipped}}'
+                    removed: '{{_plan.toRemove}}'
+                    pruned: '{{_plan.pruned}}'
+                    failed: '{{_disc.failed}}'
+                    warnings: '{{_plan.warnings}}'
+                    control:
+                      action: '{{_ctl.action}}'
+                      applies: '{{_ctl.applies}}'
+                      source: '{{_ctl.source}}'
+      catch:
+        - set:
+            name: _result
+            value:
+              error: SourceRefreshFailed
+              message: Refresh of source {{_key}} failed
+              source: '{{_key}}'
+              details: '{{$error}}'
+        - conditions:
+            '!{{_dry}}':
+              - _state-set:
+                  key: setting:lastRefresh:{{_key}}
+                  kind: setting
+                  data:
+                    startedAt: '{{_startedAt}}'
+                    finishedAt: '{{run.date}}'
+                    discovered: '{{_disc.items.length}}'
+                    queued: 0
+                    skipped: 0
+                    removed: 0
+                    failed: '{{_disc.failed.length}}'
+                  error:
+                    message: Refresh of source {{_key}} failed
+                    stage: refresh
+                    details: '{{$error}}'
+        - set:
+            name: $http
+            value:
+              status: 500
+  - comment: Release the per-source lock on success and failure (a dry run never took it).
+  - conditions:
+      '!{{_dry}}':
+        - _lock:
+            name: '{{_lockName}}'
+            op: release
+            output: _lkRel
+output: '{{_result}}'

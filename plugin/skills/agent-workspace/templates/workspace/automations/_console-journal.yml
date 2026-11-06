@@ -1,0 +1,80 @@
+slug: _console-journal
+name: console/Journal write
+description: 'Writes one line of the console journal (state row journal:<iso-date>:<correlationId>, kind journal, DESIGN 5.5). Arguments {op, key?, action?, args?, status?, result?}. op start writes the line with status running and data {action, args (a summary, never a secret), by {id, email, role}, startedAt, correlationId}; op finish sets the status (ok | error) and adds data.result (a short summary) and data.finishedAt on the given key. Never throws. Returns {key} (null when nothing was written).'
+private: true
+arguments:
+  op:
+    type: string
+    description: start | finish
+  key:
+    type: string
+    description: 'finish: the key returned by start.'
+  action:
+    type: string
+    description: 'start: action name (syncAll, refreshSource, sources.save, sources.markIntegrated...).'
+  args:
+    type: object
+    description: 'start: short summary of the arguments (never a secret, a token or a full document).'
+  status:
+    type: string
+    description: 'finish: ok | error.'
+  result:
+    type: object
+    description: 'finish: short summary of the result ({error, message} on failure).'
+do:
+  - set:
+      name: _key
+      value: null
+  - try:
+      do:
+        - conditions:
+            '{{op}} = "start"':
+              - set:
+                  name: _key
+                  value: journal:{{run.date}}:{{run.correlationId}}
+              - _state-set:
+                  key: '{{_key}}'
+                  kind: journal
+                  status: running
+                  data:
+                    action: '{{action}}'
+                    args: '{{args}}'
+                    by:
+                      id: '{{user.id}}'
+                      email: '{{user.email}}'
+                      role: '{{user.role}}'
+                    startedAt: '{{run.date}}'
+                    correlationId: '{{run.correlationId}}'
+            '{{op}} = "finish" and {{key}}':
+              - set:
+                  name: _key
+                  value: '{{key}}'
+              - _state-get:
+                  key: '{{key}}'
+                  output: _row
+              - conditions:
+                  '{{_row.found}}':
+                    - set:
+                        name: _data
+                        value: '{{_row.row.data}}'
+                    - set:
+                        name: _data.result
+                        value: '{{result}}'
+                    - set:
+                        name: _data.finishedAt
+                        value: '{{run.date}}'
+                    - set:
+                        name: _status
+                        value: '{% {{status}} || "ok" %}'
+                    - _state-set:
+                        key: '{{key}}'
+                        kind: journal
+                        status: '{{_status}}'
+                        data: '{{_data}}'
+      catch:
+        - comment: The journal is a trace, never a reason to fail the action it records.
+        - set:
+            name: _journalFailed
+            value: true
+output:
+  key: '{{_key}}'

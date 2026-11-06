@@ -1,0 +1,243 @@
+slug: _sources-effective
+name: sources/Effective sources
+description: 'The sources every module reads (DESIGN 5.2, 7): the delivered config.sources with the console overlay applied, removed items first, then added items not already present (item identity: the string itself, else item.url, item.id, item.name). The overlaid list of a source is params.<overlayParam> when the entry declares overlayParam, else params.files for type files, else params.urls. Arguments {key?, console?, pending?}. key limits the answer to one source; pending {key, added, removed} replaces the stored overlay of that source in memory (console preview, nothing written); console true adds, per source, delivered {param, items, hash} and overlay.baseChanged (the delivered entry changed since the overlay was first written; needs the Custom Code function consoleKit, null when it is unavailable). Returns {sources: [{key, type, target, label, params, overlay: {added, removed, by, at, baseHash, param} | null}]}.'
+private: true
+arguments:
+  key:
+    type: string
+  console:
+    type: boolean
+  pending:
+    type: object
+    properties:
+      key:
+        type: string
+      added:
+        type: array
+      removed:
+        type: array
+do:
+  - _overlay-get:
+      list: sources
+      output: _ov
+  - set:
+      name: _sources
+      value: []
+  - repeat:
+      'on': '{{config.sources}}'
+      do:
+        - set:
+            name: _s
+            value: '{{item}}'
+        - set:
+            name: _keep
+            value: true
+        - conditions:
+            '{{key}} and {{_s.key}} != {{key}}':
+              - set:
+                  name: _keep
+                  value: false
+        - conditions:
+            '{{_keep}}':
+              - set:
+                  name: _param
+                  value: '{{_s.overlayParam}}'
+              - conditions:
+                  '!{{_param}}':
+                    - set:
+                        name: _param
+                        value: urls
+                    - conditions:
+                        '{{_s.type}} = "files"':
+                          - set:
+                              name: _param
+                              value: files
+              - set:
+                  name: _delivered
+                  value: '{{_s.params[{{_param}}]}}'
+              - comment: A copy (merged into a fresh object), so the configuration object of this run is never changed.
+              - set:
+                  name: _params
+                  value: {}
+              - conditions:
+                  '{{_s.params}}':
+                    - set:
+                        name: _blank
+                        value: {}
+                    - set:
+                        name: _params
+                        value: '{% deepmerge({{_blank}}, {{_s.params}}) %}'
+              - set:
+                  name: _o
+                  value: null
+              - repeat:
+                  'on': '{{_ov.overlays}}'
+                  do:
+                    - conditions:
+                        '{{item.key}} = {{_s.key}}':
+                          - set:
+                              name: _o
+                              value: '{{item}}'
+              - conditions:
+                  '{{pending}} and {{pending.key}} = {{_s.key}}':
+                    - set:
+                        name: _o
+                        value:
+                          key: '{{_s.key}}'
+                          added: '{{pending.added}}'
+                          removed: '{{pending.removed}}'
+                          by: '{{_o.by}}'
+                          at: '{{_o.at}}'
+                          baseHash: '{{_o.baseHash}}'
+              - set:
+                  name: _overlay
+                  value: null
+              - conditions:
+                  '{{_o}}':
+                    - set:
+                        name: _removedIds
+                        value: []
+                    - repeat:
+                        'on': '{{_o.removed}}'
+                        do:
+                          - set:
+                              name: _id
+                              value: '{{item}}'
+                          - conditions:
+                              '{{item.url}}':
+                                - set:
+                                    name: _id
+                                    value: '{{item.url}}'
+                              '{{item.id}}':
+                                - set:
+                                    name: _id
+                                    value: '{{item.id}}'
+                              '{{item.name}}':
+                                - set:
+                                    name: _id
+                                    value: '{{item.name}}'
+                          - set:
+                              name: _removedIds[]
+                              value: '{{_id}}'
+                    - set:
+                        name: _eff
+                        value: []
+                    - set:
+                        name: _effIds
+                        value: []
+                    - repeat:
+                        'on': '{{_delivered}}'
+                        do:
+                          - set:
+                              name: _id
+                              value: '{{item}}'
+                          - conditions:
+                              '{{item.url}}':
+                                - set:
+                                    name: _id
+                                    value: '{{item.url}}'
+                              '{{item.id}}':
+                                - set:
+                                    name: _id
+                                    value: '{{item.id}}'
+                              '{{item.name}}':
+                                - set:
+                                    name: _id
+                                    value: '{{item.name}}'
+                          - conditions:
+                              '{{_id}} not in {{_removedIds}}':
+                                - set:
+                                    name: _eff[]
+                                    value: '{{item}}'
+                                - set:
+                                    name: _effIds[]
+                                    value: '{{_id}}'
+                    - repeat:
+                        'on': '{{_o.added}}'
+                        do:
+                          - set:
+                              name: _id
+                              value: '{{item}}'
+                          - conditions:
+                              '{{item.url}}':
+                                - set:
+                                    name: _id
+                                    value: '{{item.url}}'
+                              '{{item.id}}':
+                                - set:
+                                    name: _id
+                                    value: '{{item.id}}'
+                              '{{item.name}}':
+                                - set:
+                                    name: _id
+                                    value: '{{item.name}}'
+                          - conditions:
+                              '{{_id}} not in {{_effIds}}':
+                                - set:
+                                    name: _eff[]
+                                    value: '{{item}}'
+                                - set:
+                                    name: _effIds[]
+                                    value: '{{_id}}'
+                    - set:
+                        name: _params[{{_param}}]
+                        value: '{{_eff}}'
+                    - set:
+                        name: _overlay
+                        value:
+                          added: '{{_o.added}}'
+                          removed: '{{_o.removed}}'
+                          by: '{{_o.by}}'
+                          at: '{{_o.at}}'
+                          baseHash: '{{_o.baseHash}}'
+                          param: '{{_param}}'
+              - set:
+                  name: _entry
+                  value:
+                    key: '{{_s.key}}'
+                    type: '{{_s.type}}'
+                    target: '{{_s.target}}'
+                    label: '{{_s.label}}'
+                    params: '{{_params}}'
+                    overlay: '{{_overlay}}'
+              - conditions:
+                  '{{console}}':
+                    - set:
+                        name: _hash
+                        value: null
+                    - try:
+                        do:
+                          - Custom Code.run:
+                              function: consoleKit
+                              parameters:
+                                op: hash
+                                value: '{{_s}}'
+                              output: _h
+                          - set:
+                              name: _hash
+                              value: '{{_h.hash}}'
+                        catch:
+                          - set:
+                              name: _hash
+                              value: null
+                    - set:
+                        name: _entry.delivered
+                        value:
+                          param: '{{_param}}'
+                          items: '{{_delivered}}'
+                          hash: '{{_hash}}'
+                    - conditions:
+                        '{{_overlay}} and {{_hash}} and {{_overlay.baseHash}}':
+                          - set:
+                              name: _entry.overlay.baseChanged
+                              value: false
+                          - conditions:
+                              '{{_overlay.baseHash}} != {{_hash}}':
+                                - set:
+                                    name: _entry.overlay.baseChanged
+                                    value: true
+              - set:
+                  name: _sources[]
+                  value: '{{_entry}}'
+output:
+  sources: '{{_sources}}'

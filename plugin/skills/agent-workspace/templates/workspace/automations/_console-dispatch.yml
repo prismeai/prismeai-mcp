@@ -1,0 +1,102 @@
+slug: _console-dispatch
+name: console/Dispatch
+description: 'Allow-list of the console actions (DESIGN 5.3). Arguments {action, args, checkOnly?}. With checkOnly true, answers {known: bool, actions: [allowed action names]} without running anything. Otherwise calls the control automation named by action with args as its body (that automation keeps its own guard and contract) and returns its output as is; an action outside the allow-list returns {error: InvalidAction, message}.'
+private: true
+arguments:
+  action:
+    type: string
+  args:
+    type: object
+  checkOnly:
+    type: boolean
+do:
+  - set:
+      name: _actions
+      value:
+        - syncAll
+        - describeInstance
+        - refreshSource
+        - controlIngest
+        - pumpIngest
+        - importCases
+        - runBenchmark
+        - advanceBenchmark
+        - controlBenchmark
+        - benchmarkReport
+        - exportBenchmark
+  - set:
+      name: _known
+      value: false
+  - conditions:
+      '{{action}} and {{action}} in {{_actions}}':
+        - set:
+            name: _known
+            value: true
+  - conditions:
+      '{{checkOnly}}':
+        - set:
+            name: _res
+            value:
+              known: '{{_known}}'
+              actions: '{{_actions}}'
+        - break:
+            scope: automation
+  - set:
+      name: _res
+      value:
+        error: InvalidAction
+        message: action must be one of {% join({{_actions}}, ", ") %}
+  - set:
+      name: _body
+      value: '{{args}}'
+  - conditions:
+      '!{{_body}}':
+        - set:
+            name: _body
+            value: {}
+  - conditions:
+      '{{action}} = "syncAll"':
+        - syncAll:
+            body: '{{_body}}'
+            output: _res
+      '{{action}} = "describeInstance"':
+        - describeInstance:
+            body: '{{_body}}'
+            output: _res
+      '{{action}} = "refreshSource"':
+        - refreshSource:
+            body: '{{_body}}'
+            output: _res
+      '{{action}} = "controlIngest"':
+        - controlIngest:
+            body: '{{_body}}'
+            output: _res
+      '{{action}} = "pumpIngest"':
+        - pumpIngest:
+            body: '{{_body}}'
+            output: _res
+      '{{action}} = "importCases"':
+        - importCases:
+            body: '{{_body}}'
+            output: _res
+      '{{action}} = "runBenchmark"':
+        - runBenchmark:
+            body: '{{_body}}'
+            output: _res
+      '{{action}} = "advanceBenchmark"':
+        - advanceBenchmark:
+            body: '{{_body}}'
+            output: _res
+      '{{action}} = "controlBenchmark"':
+        - controlBenchmark:
+            body: '{{_body}}'
+            output: _res
+      '{{action}} = "benchmarkReport"':
+        - benchmarkReport:
+            body: '{{_body}}'
+            output: _res
+      '{{action}} = "exportBenchmark"':
+        - exportBenchmark:
+            body: '{{_body}}'
+            output: _res
+output: '{{_res}}'

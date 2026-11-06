@@ -1,0 +1,76 @@
+slug: _ingest-control
+name: ingestion/helpers/Ingest control
+description: 'Reads the ingestion control key (state row setting:ingestControl, written by controlIngest) FRESH, never cached. Called at the start of every pumpIngest run and every _ingest-housekeeping pass, and by onIngestItem before it claims and before it attaches an item. data {action: run | suspend | stop, reason, by, at, source (null = every source)}. A missing key or any other action means run. applies = the action is suspend / stop and the key has no source or its source equals the given source; without source it applies only to a global key. Body {source?}. Returns {found, action, applies, global, scoped, stopped, source, key (row data or null), updatedAt}.'
+private: true
+arguments:
+  source:
+    type: string
+    description: Source key the decision is asked for (optional).
+do:
+  - _state-get:
+      key: setting:ingestControl
+      output: _ctlRow
+  - set:
+      name: _ctl
+      value:
+        found: false
+        action: run
+        applies: false
+        global: false
+        scoped: false
+        stopped: false
+        source: null
+        key: null
+        updatedAt: null
+  - conditions:
+      '{{_ctlRow.found}}':
+        - set:
+            name: _ctl.found
+            value: true
+        - set:
+            name: _ctl.key
+            value: '{{_ctlRow.row.data}}'
+        - set:
+            name: _ctl.updatedAt
+            value: '{{_ctlRow.row.updatedAt}}'
+        - conditions:
+            '{{_ctlRow.row.data.action}} = "suspend"':
+              - set:
+                  name: _ctl.action
+                  value: suspend
+            '{{_ctlRow.row.data.action}} = "stop"':
+              - set:
+                  name: _ctl.action
+                  value: stop
+        - conditions:
+            '{{_ctlRow.row.data.source}}':
+              - set:
+                  name: _ctl.source
+                  value: '{{_ctlRow.row.data.source}}'
+  - conditions:
+      '{{_ctl.action}} != "run"':
+        - conditions:
+            '!{{_ctl.source}}':
+              - set:
+                  name: _ctl.global
+                  value: true
+              - set:
+                  name: _ctl.applies
+                  value: true
+            default:
+              - set:
+                  name: _ctl.scoped
+                  value: true
+              - conditions:
+                  '{{source}}':
+                    - conditions:
+                        '{{_ctl.source}} == {{source}}':
+                          - set:
+                              name: _ctl.applies
+                              value: true
+  - conditions:
+      '{{_ctl.applies}} and {{_ctl.action}} = "stop"':
+        - set:
+            name: _ctl.stopped
+            value: true
+output: '{{_ctl}}'

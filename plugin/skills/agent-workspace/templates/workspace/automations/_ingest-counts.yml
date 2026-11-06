@@ -1,0 +1,129 @@
+slug: _ingest-counts
+name: ingestion/helpers/Ingest counts
+description: 'Read-only view of the ingestion queue (state rows kind item), in the exact shape of statusReport.ingest. One indexed query per status (kind + status), the source filter is applied in the loop (no nested json query on the Collection app). Body {source?, failedLimit? (default 50)}. Returns {queued, dispatched, processing, ingested, error, cancelled, removed, inFlight (dispatched + processing), phase: idle | running | suspended | stopped, control {action, reason, by, at, source}, failed: [{source, id, name, url, error {message, stage}, attempts}] (error rows, newest first)}.'
+private: true
+arguments:
+  source:
+    type: string
+    description: Optional source key; empty = every source.
+  failedLimit:
+    type: number
+    description: Max entries of failed (default 50).
+do:
+  - set:
+      name: _cLimit
+      value: 50
+  - conditions:
+      '{{failedLimit}} > 0':
+        - set:
+            name: _cLimit
+            value: '{{failedLimit}}'
+  - set:
+      name: _counts
+      value:
+        queued: 0
+        dispatched: 0
+        processing: 0
+        ingested: 0
+        error: 0
+        cancelled: 0
+        removed: 0
+        inFlight: 0
+        phase: idle
+        control:
+          action: run
+        failed: []
+  - set:
+      name: _ingestList1
+      value:
+        - queued
+        - dispatched
+        - processing
+        - ingested
+        - error
+        - cancelled
+        - removed
+  - repeat:
+      'on': '{{_ingestList1}}'
+      do:
+        - set:
+            name: _cStatus
+            value: '{{item}}'
+        - _state-find:
+            query:
+              kind: item
+              status: '{{_cStatus}}'
+            limit: 10000
+            output: _cRows
+        - set:
+            name: _cN
+            value: 0
+        - repeat:
+            'on': '{{_cRows.rows}}'
+            do:
+              - set:
+                  name: _cRow
+                  value: '{{item}}'
+              - set:
+                  name: _cIn
+                  value: true
+              - conditions:
+                  '{{source}}':
+                    - conditions:
+                        '{{_cRow.data.source}} != {{source}}':
+                          - set:
+                              name: _cIn
+                              value: false
+              - conditions:
+                  '{{_cIn}}':
+                    - set:
+                        name: _cN
+                        value: '{% {{_cN}} + 1 %}'
+                    - conditions:
+                        '{{_cStatus}} = "error" and {{_counts.failed.length}} < {{_cLimit}}':
+                          - set:
+                              name: _counts.failed
+                              type: push
+                              value:
+                                source: '{{_cRow.data.source}}'
+                                id: '{{_cRow.data.id}}'
+                                name: '{{_cRow.data.name}}'
+                                url: '{{_cRow.data.url}}'
+                                error:
+                                  message: '{{_cRow.error.message}}'
+                                  stage: '{{_cRow.error.stage}}'
+                                attempts: '{{_cRow.data.attempts}}'
+        - set:
+            name: _counts[{{_cStatus}}]
+            value: '{{_cN}}'
+  - set:
+      name: _counts.inFlight
+      value: '{% {{_counts.dispatched}} + {{_counts.processing}} %}'
+  - _ingest-control:
+      source: '{{source}}'
+      output: _cCtl
+  - set:
+      name: _counts.control
+      value:
+        action: '{{_cCtl.action}}'
+        reason: '{{_cCtl.key.reason}}'
+        by: '{{_cCtl.key.by}}'
+        at: '{{_cCtl.key.at}}'
+        source: '{{_cCtl.source}}'
+  - comment: |
+      Phase. A key limited to one source only changes the phase of that source's view (or of the
+      global view when it is a global key).
+  - conditions:
+      '{{_cCtl.applies}} and {{_cCtl.action}} = "stop"':
+        - set:
+            name: _counts.phase
+            value: stopped
+      '{{_cCtl.applies}} and {{_cCtl.action}} = "suspend"':
+        - set:
+            name: _counts.phase
+            value: suspended
+      '{{_counts.queued}} > 0 or {{_counts.inFlight}} > 0':
+        - set:
+            name: _counts.phase
+            value: running
+output: '{{_counts}}'

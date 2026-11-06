@@ -1,0 +1,26 @@
+slug: _state-get
+name: helpers/State get
+description: 'Reads one state row by key (DESIGN 3). Arguments {key}. Returns {found, row} (row = {key, kind, status, data, error, updatedAt} or undefined).'
+private: true
+arguments:
+  key:
+    type: string
+    description: Row key, e.g. res:agent:<agent-key>.
+do:
+  - state.find:
+      query:
+        key: '{{key}}'
+      options:
+        limit: 1
+      output: _rows
+  - set:
+      name: _found
+      value: false
+  - conditions:
+      '{{_rows[0].key}}':
+        - set:
+            name: _found
+            value: true
+output:
+  found: '{{_found}}'
+  row: '{{_rows[0]}}'

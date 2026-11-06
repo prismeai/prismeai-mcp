@@ -1,0 +1,171 @@
+slug: benchmarkReport
+name: evaluation/Benchmark report
+description: 'Control endpoint (guarded, 403 Forbidden), read-only: never starts, collects or finalises anything. Body {benchId?} (default the most recently updated bench). Answers from the bench row and its case rows: a completed bench returns its stored report; any other status gets a live report computed now by Custom Code benchEngine op report (pending and in-flight cases count as not executed). Output {benchId, status, totals {total, pending, inFlight, done, passed, failed, errored, cancelled}, agents {<agent-key>: {id, status, score, passRate, total, completed, errored, notExecuted, erroredRate, rejected, comparable, byTag, avgDurationMs, avgTokens, variantOf}}, comparisons (pairs of agents compared on their common done cases: a, b, n, scoreA, scoreB, scoreDelta, passRateA, passRateB, passRateDelta, wins, byTag, variant), comparison {valid, reason, table}, worst: [{caseId, agent, score, passed, reasons}], replay, rejected, live (not completed: {batches in flight, nextAt, eta, blocked, deferred, casesInWindow, progressAt} as of the last tick), startedAt, finishedAt, updatedAt, interruption, control, export, report (full)}; no bench yet → {benchId: null, status: null}; unknown benchId → 404 BenchmarkNotFound.'
+when:
+  endpoint: true
+arguments:
+  body:
+    type: object
+    properties:
+      benchId:
+        type: string
+        description: Bench id. Default the most recently updated bench.
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: Forbidden
+              message: This endpoint requires a control role
+        - break:
+            scope: automation
+  - set:
+      name: _benchId
+      value: '{{body.benchId}}'
+  - conditions:
+      '!{{_benchId}}':
+        - _state-find:
+            query:
+              kind: bench
+            limit: 1
+            output: _latest
+        - set:
+            name: _benchId
+            value: '{{_latest.rows[0].data.benchId}}'
+        - conditions:
+            '!{{_benchId}}':
+              - set:
+                  name: _result
+                  value:
+                    benchId: null
+                    status: null
+                    totals: null
+                    agents: {}
+                    comparisons: []
+                    worst: []
+              - break:
+                  scope: automation
+  - _state-get:
+      key: bench:{{_benchId}}
+      output: _bench
+  - conditions:
+      '!{{_bench.found}}':
+        - set:
+            name: $http
+            value:
+              status: 404
+        - set:
+            name: _result
+            value:
+              error: BenchmarkNotFound
+              message: Unknown bench {{_benchId}}
+              benchId: '{{_benchId}}'
+        - break:
+            scope: automation
+  - set:
+      name: _data
+      value: '{{_bench.row.data}}'
+  - set:
+      name: _report
+      value: '{{_data.report}}'
+  - set:
+      name: _live
+      value: null
+  - set:
+      name: _needLive
+      value: false
+  - conditions:
+      '{{_bench.row.status}} != "completed"':
+        - set:
+            name: _needLive
+            value: true
+  - conditions:
+      '!{{_report.agents}}':
+        - set:
+            name: _needLive
+            value: true
+  - conditions:
+      '{{_needLive}}':
+        - _state-find:
+            query:
+              kind: benchcase
+              key:
+                $regex: '^benchcase:{{_benchId}}:'
+            limit: 5000
+            output: _units
+        - Custom Code.run:
+            function: benchEngine
+            parameters:
+              op: report
+              bench: '{{_data}}'
+              units: '{{_units.rows}}'
+              runner: '{{_data.runner}}'
+              manifest:
+                agents: '{{config.agents}}'
+                evaluation: '{{config.evaluation}}'
+            output: _report
+        - conditions:
+            '{{_report.error}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 500
+              - set:
+                  name: _result
+                  value:
+                    error: CustomCodeUnavailable
+                    message: 'benchEngine failed: {{_report.message}}'
+              - break:
+                  scope: automation
+        - set:
+            name: _live
+            value:
+              batches: '{{_data.batches}}'
+              nextAt: '{{_data.nextAt}}'
+              eta: '{{_data.eta}}'
+              blocked: '{{_data.blocked}}'
+              deferred: '{{_data.deferred}}'
+              casesInWindow: '{{_data.casesInWindow}}'
+              progressAt: '{{_data.progressAt}}'
+  - _state-get:
+      key: setting:benchControl
+      output: _ctl
+  - _state-get:
+      key: setting:benchExport:{{_benchId}}
+      output: _export
+  - set:
+      name: _result
+      value:
+        benchId: '{{_benchId}}'
+        status: '{{_bench.row.status}}'
+        totals: '{{_report.totals}}'
+        agents: '{{_report.agents}}'
+        comparisons: '{{_report.comparisons}}'
+        comparison:
+          valid: '{{_report.comparison.valid}}'
+          reason: '{{_report.comparison.reason}}'
+          table: '{{_report.comparison.table}}'
+        worst: '{{_report.worst}}'
+        replay: '{{_report.replay}}'
+        rejected: '{{_report.rejected}}'
+        live: '{{_live}}'
+        startedAt: '{{_data.startedAt}}'
+        finishedAt: '{{_data.finishedAt}}'
+        updatedAt: '{{_bench.row.updatedAt}}'
+        interruption: '{{_data.interruption}}'
+        interrupting: '{{_data.interrupting}}'
+        errors: '{{_data.errors}}'
+        lastError: '{{_data.lastError}}'
+        control:
+          status: '{{_ctl.row.status}}'
+          data: '{{_ctl.row.data}}'
+        export: '{{_export.row.data}}'
+        report: '{{_report}}'
+output: '{{_result}}'

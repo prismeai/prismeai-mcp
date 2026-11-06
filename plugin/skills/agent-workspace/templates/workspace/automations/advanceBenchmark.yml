@@ -1,0 +1,78 @@
+slug: advanceBenchmark
+name: evaluation/Advance benchmark
+description: 'Control endpoint (guarded, 403 Forbidden), one tick on demand: does exactly what the pollBenchmark schedule does (runs _bench-advance for every running bench; lock-protected, safe alongside the schedule). Each HTTP call is a new execution, so an external caller may call it as often as every minute to pace a bench faster than the schedule. Body {}. Output {checked, benchId, status, started, collected, benches: [{benchId, status, started, collected, totals, nextAt, lastError}]} (benchId / status / started / collected of the first bench, null when no bench is running).'
+when:
+  endpoint: true
+arguments:
+  body:
+    type: object
+    properties: {}
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: Forbidden
+              message: This endpoint requires a control role
+        - break:
+            scope: automation
+  - _state-find:
+      query:
+        kind: bench
+        status: running
+      limit: 10
+      output: _running
+  - set:
+      name: _benches
+      value: []
+  - set:
+      name: _first
+      value: {}
+  - set:
+      name: _startedOne
+      value: false
+  - repeat:
+      'on': '{{_running.rows}}'
+      do:
+        - _bench-advance:
+            benchId: '{{item.data.benchId}}'
+            noStart: '{{_startedOne}}'
+            output: _adv
+        - conditions:
+            '{{_adv.started.length}} > 0':
+              - set:
+                  name: _startedOne
+                  value: true
+        - conditions:
+            '!{{_first.benchId}}':
+              - set:
+                  name: _first
+                  value: '{{_adv}}'
+        - set:
+            name: _benches
+            type: push
+            value:
+              benchId: '{{_adv.benchId}}'
+              status: '{{_adv.status}}'
+              started: '{{_adv.started}}'
+              collected: '{{_adv.collected}}'
+              totals: '{{_adv.totals}}'
+              nextAt: '{{_adv.nextAt}}'
+              lastError: '{{_adv.lastError}}'
+  - set:
+      name: _result
+      value:
+        checked: '{{_benches.length}}'
+        benchId: '{{_first.benchId}}'
+        status: '{{_first.status}}'
+        started: '{{_first.started}}'
+        collected: '{{_first.collected}}'
+        benches: '{{_benches}}'
+output: '{{_result}}'

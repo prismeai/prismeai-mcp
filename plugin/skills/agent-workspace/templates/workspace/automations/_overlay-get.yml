@@ -1,0 +1,66 @@
+slug: _overlay-get
+name: console/Overlay get
+description: 'Reads the console overlays of a configuration list (DESIGN 7). State rows overlay:<list>:<key>, kind overlay, status open (an integrated or cleared row is history and is ignored). Arguments {list, key?}. With key: {found, overlay: {list, key, added, removed, by, at, baseHash} | null, overlays: [that overlay]}. Without key: every open overlay of the list in overlays, found true when there is at least one. Never throws.'
+private: true
+arguments:
+  list:
+    type: string
+    description: Configuration list the overlay layers over (sources).
+  key:
+    type: string
+    description: Manifest key of the entry; omitted = every open overlay of the list.
+do:
+  - set:
+      name: _found
+      value: false
+  - set:
+      name: _overlay
+      value: null
+  - set:
+      name: _overlays
+      value: []
+  - try:
+      do:
+        - conditions:
+            '{{key}}':
+              - _state-get:
+                  key: overlay:{{list}}:{{key}}
+                  output: _row
+              - conditions:
+                  '{{_row.found}} and {{_row.row.status}} = "open"':
+                    - set:
+                        name: _found
+                        value: true
+                    - set:
+                        name: _overlay
+                        value: '{{_row.row.data}}'
+                    - set:
+                        name: _overlays[]
+                        value: '{{_row.row.data}}'
+            default:
+              - _state-find:
+                  query:
+                    kind: overlay
+                    status: open
+                  output: _rows
+              - repeat:
+                  'on': '{{_rows.rows}}'
+                  do:
+                    - conditions:
+                        '{{item.data.list}} = {{list}}':
+                          - set:
+                              name: _overlays[]
+                              value: '{{item.data}}'
+              - conditions:
+                  '{{_overlays.length}} > 0':
+                    - set:
+                        name: _found
+                        value: true
+      catch:
+        - set:
+            name: _found
+            value: false
+output:
+  found: '{{_found}}'
+  overlay: '{{_overlay}}'
+  overlays: '{{_overlays}}'

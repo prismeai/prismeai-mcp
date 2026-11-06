@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :where(:root) {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    --radius: 0.5rem;
+  }
+
+}
+
+/* Dark palette OUTSIDE @layer base so Tailwind never PURGES it — the `.dark` class isn't
+   referenced in src/ (the Studio adds it on <html> at runtime per its theme), so a base-layer
+   `.dark{}` rule gets tree-shaken. Gating the dark vars on `.dark` (class) makes the app follow
+   the STUDIO theme; `@media (prefers-color-scheme)` would follow the OS and force dark in a
+   light studio . :where() keeps it at zero specificity: these are fallbacks for
+   local dev, the platform's own .dark palette always wins. */
+:where(.dark) {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 240 5.9% 10%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 240 4.9% 83.9%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply text-foreground;
+  }
+}
+
+/* Scoped to the app root (.console): the Studio defines its own --accent (orange) on :root and
+   .dark, and a global `h4, label, button { font-size: 1rem; font-weight: 500 }` rule. Both leak
+   into the app; these rules win by specificity. Outside @layer so Tailwind never purges them. */
+.console {
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+}
+.dark .console {
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+}
+/* Specificity (0,0,1): beats the Studio rule (same weight, this sheet loads later) but not the
+   Tailwind utilities (text-sm…, weight 0,1,0) used on these elements. */
+:where(.console) :is(label, button, h4, summary) {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+/* Appearance of the platform's own operator pages, built on the platform theme variables only (no
+   hard-coded brand colour): the « ink » sidebar is the theme foreground tinted with the theme
+   primary in light mode, the card colour tinted with it in dark mode. */
+.console {
+  --con-ink: color-mix(in hsl, hsl(var(--foreground)) 86%, hsl(var(--primary)));
+  --con-ink-fg: hsl(var(--background));
+  --con-ink-border: transparent;
+}
+.dark .console {
+  --con-ink: color-mix(in hsl, hsl(var(--card)) 88%, hsl(var(--primary)));
+  --con-ink-fg: hsl(var(--foreground));
+  --con-ink-border: hsl(var(--border));
+}
+.con-sidebar {
+  background-color: var(--con-ink);
+  color: var(--con-ink-fg);
+  border-right: 1px solid var(--con-ink-border);
+}

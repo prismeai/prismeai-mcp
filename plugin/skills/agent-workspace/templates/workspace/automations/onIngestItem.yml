@@ -1,0 +1,271 @@
+slug: onIngestItem
+name:
+  en: ingestion/On ingest item
+  fr: ingestion/Ingérer un élément
+description: 'Ingests ONE queued item in its own short run (event ingest.item, emitted by pumpIngest). Only a row in dispatched status carrying the payload token is processed (a duplicate or forged event is ignored). Reads setting:ingestControl fresh: a stopped source cancels the row, a suspended one sends it back to queued. Claims the row with a conditional update (dispatched → processing, data.attempts + 1, per-run claimToken) and reads it back, then attaches the item to the target knowledge base with Storage.addFileToVectorStore (native_file_id for a workspace file, otherwise source_url = the stable item url, fetch_url when given), tags {ingestSource, ingestItem}. Success → status ingested with data.documentId, ingestedAt, documentStatus. Failure → _ingest-requeue (queued again while attempts < config.ingestion.maxAttempts, else error {message, stage: attach | kb}). Indexing is followed later by _ingest-housekeeping. Finally emits ingest.pump {hop + 1} while hop + 1 <= config.ingestion.maxHops (default 4) so the queue drains itself; the schedule takes over past it. Returns {key, status, documentId?, skipped?, error?}.'
+when:
+  events:
+    - ingest.item
+arguments:
+  payload:
+    type: object
+    properties:
+      key:
+        type: string
+        description: item:<source>:<itemId> row key.
+      token:
+        type: string
+        description: dispatchToken written by the pump claim.
+      hop:
+        type: number
+do:
+  - set:
+      name: _key
+      value: '{{payload.key}}'
+  - set:
+      name: _hop
+      value: 0
+  - conditions:
+      isNumber({{payload.hop}}):
+        - set:
+            name: _hop
+            value: '{{payload.hop}}'
+  - set:
+      name: _maxHops
+      value: 4
+  - conditions:
+      '{{config.ingestion.maxHops}} > 0':
+        - set:
+            name: _maxHops
+            value: '{{config.ingestion.maxHops}}'
+  - set:
+      name: _maxAttempts
+      value: 3
+  - conditions:
+      '{{config.ingestion.maxAttempts}} > 0':
+        - set:
+            name: _maxAttempts
+            value: '{{config.ingestion.maxAttempts}}'
+  - set:
+      name: _result
+      value:
+        key: '{{_key}}'
+        status: null
+  - set:
+      name: _go
+      value: false
+  - conditions:
+      '{{_key}}':
+        - _state-get:
+            key: '{{_key}}'
+            output: _row
+        - conditions:
+            '{{_row.row.data.dispatchToken}}':
+              - conditions:
+                  '{{_row.row.status}} = "dispatched" and {{_row.row.data.dispatchToken}} == {{payload.token}}':
+                    - set:
+                        name: _go
+                        value: true
+  - conditions:
+      '!{{_go}}':
+        - set:
+            name: _result.skipped
+            value: NotDispatched
+        - set:
+            name: _result.status
+            value: '{{_row.row.status}}'
+        - break:
+            scope: automation
+  - set:
+      name: _source
+      value: '{{_row.row.data.source}}'
+  - comment: Operator control, read fresh before the claim.
+  - _ingest-control:
+      source: '{{_source}}'
+      output: _ctl
+  - conditions:
+      '{{_ctl.applies}}':
+        - set:
+            name: _back
+            value: queued
+        - conditions:
+            '{{_ctl.stopped}}':
+              - set:
+                  name: _back
+                  value: cancelled
+        - set:
+            name: _backData
+            value: '{{_row.row.data}}'
+        - set:
+            name: _backData.dispatchToken
+            value: null
+        - try:
+            do:
+              - state.updateOne:
+                  query:
+                    key: '{{_key}}'
+                    status: dispatched
+                  data:
+                    $set:
+                      status: '{{_back}}'
+                      data: '{{_backData}}'
+                      updatedAt: '{{run.date}}'
+            catch:
+              - comment: The row left dispatched meanwhile.
+        - set:
+            name: _result.status
+            value: '{{_back}}'
+        - set:
+            name: _result.skipped
+            value: '{{_ctl.action}}'
+        - break:
+            scope: automation
+  - comment: Claim dispatched → processing (conditional), attempts counted here, then read back.
+  - set:
+      name: _claimToken
+      value: '{% uuid() %}'
+  - set:
+      name: _attempts
+      value: 1
+  - conditions:
+      '{{_row.row.data.attempts}} > 0':
+        - set:
+            name: _attempts
+            value: '{% {{_row.row.data.attempts}} + 1 %}'
+  - set:
+      name: _data
+      value: '{{_row.row.data}}'
+  - set:
+      name: _data.claimToken
+      value: '{{_claimToken}}'
+  - set:
+      name: _data.attempts
+      value: '{{_attempts}}'
+  - set:
+      name: _data.processingAt
+      value: '{{run.date}}'
+  - try:
+      do:
+        - state.updateOne:
+            query:
+              key: '{{_key}}'
+              status: dispatched
+            data:
+              $set:
+                status: processing
+                data: '{{_data}}'
+                updatedAt: '{{run.date}}'
+      catch:
+        - comment: Claimed elsewhere — checked below.
+  - _state-get:
+      key: '{{_key}}'
+      output: _mine
+  - set:
+      name: _won
+      value: false
+  - conditions:
+      '{{_mine.row.data.claimToken}}':
+        - conditions:
+            '{{_mine.row.status}} = "processing" and {{_mine.row.data.claimToken}} == {{_claimToken}}':
+              - set:
+                  name: _won
+                  value: true
+  - conditions:
+      '!{{_won}}':
+        - set:
+            name: _result.skipped
+            value: ClaimLost
+        - break:
+            scope: automation
+  - _ingest-attach:
+      row: '{{_mine.row}}'
+      output: _att
+  - comment: Checkpoint after the attach — a stop that cancelled the row meanwhile keeps it cancelled.
+  - _state-get:
+      key: '{{_key}}'
+      output: _now
+  - conditions:
+      '{{_now.row.status}} != "processing"':
+        - set:
+            name: _result.status
+            value: '{{_now.row.status}}'
+        - conditions:
+            '{{_att.ok}}':
+              - comment: The document exists in Storage — recorded on the row so a later prune can delete it.
+              - set:
+                  name: _kept
+                  value: '{{_now.row.data}}'
+              - set:
+                  name: _kept.documentId
+                  value: '{{_att.documentId}}'
+              - _state-set:
+                  key: '{{_key}}'
+                  kind: item
+                  status: '{{_now.row.status}}'
+                  data: '{{_kept}}'
+                  error: '{{_now.row.error}}'
+              - set:
+                  name: _result.documentId
+                  value: '{{_att.documentId}}'
+      '{{_att.ok}}':
+        - set:
+            name: _done
+            value: '{{_mine.row.data}}'
+        - set:
+            name: _done.documentId
+            value: '{{_att.documentId}}'
+        - set:
+            name: _done.documentStatus
+            value: '{{_att.documentStatus}}'
+        - set:
+            name: _done.ingestedAt
+            value: '{{run.date}}'
+        - set:
+            name: _done.dispatchToken
+            value: null
+        - set:
+            name: _done.claimToken
+            value: null
+        - _state-set:
+            key: '{{_key}}'
+            kind: item
+            status: ingested
+            data: '{{_done}}'
+            error: {}
+        - set:
+            name: _result.status
+            value: ingested
+        - set:
+            name: _result.documentId
+            value: '{{_att.documentId}}'
+      default:
+        - _ingest-requeue:
+            row: '{{_mine.row}}'
+            maxAttempts: '{{_maxAttempts}}'
+            stage: '{{_att.stage}}'
+            message: '{{_att.message}}'
+            identity: '{{_att.identity}}'
+            output: _rq
+        - set:
+            name: _result.status
+            value: '{{_rq.status}}'
+        - set:
+            name: _result.error
+            value:
+              message: '{{_att.message}}'
+              stage: '{{_att.stage}}'
+  - comment: |
+      Self-draining queue: nudge the pump. Every event hop carries the emitter's nesting depth and
+      the runtime stops nested calls past a fixed depth, so past maxHops the nudge is not emitted
+      and the schedule (depth 0) continues.
+  - set:
+      name: _nextHop
+      value: '{% {{_hop}} + 1 %}'
+  - conditions:
+      '{{_nextHop}} <= {{_maxHops}}':
+        - emit:
+            event: ingest.pump
+            payload:
+              source: '{{_source}}'
+              hop: '{{_nextHop}}'
+output: '{{_result}}'

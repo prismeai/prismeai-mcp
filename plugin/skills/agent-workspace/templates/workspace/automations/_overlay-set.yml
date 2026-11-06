@@ -1,0 +1,378 @@
+slug: _overlay-set
+name: console/Overlay set
+description: 'Changes the console overlay of one configuration entry (DESIGN 7), state row overlay:<list>:<key> {list, key, added, removed, by, at, baseHash}. Arguments {list, key, op?, add?, remove?, delivered?, baseHash?, dryRun?}. op merge (default) folds a change into the open overlay against the delivered list: an added item cancels its own removal, is ignored when already delivered or already added; a removed item cancels its own addition, is recorded only when delivered. Item identity: the string itself, else item.url, item.id, item.name. baseHash is kept from the open overlay, else taken from the argument. An overlay left empty is closed (status cleared). op integrate closes the open overlay (status integrated) only when the delivered list contains every added item and none of the removed ones, else answers error NotIntegrated with missing (added items not delivered) and stillDelivered (removed items still delivered). dryRun computes without writing. Returns {changed, overlay {list, key, added, removed, by, at, baseHash}, status: open | cleared | integrated | none, missing?, stillDelivered?, error?, message?}.'
+private: true
+arguments:
+  list:
+    type: string
+  key:
+    type: string
+  op:
+    type: string
+    description: merge (default) | integrate
+  add:
+    type: array
+  remove:
+    type: array
+  delivered:
+    type: array
+    description: The list as delivered by the configuration (before any overlay).
+  baseHash:
+    type: string
+    description: Hash of the delivered entry, stored when the overlay is first written.
+  dryRun:
+    type: boolean
+do:
+  - _overlay-get:
+      list: '{{list}}'
+      key: '{{key}}'
+      output: _cur
+  - set:
+      name: _by
+      value: '{% {{user.email}} || {{user.id}} %}'
+  - set:
+      name: _curAdded
+      value: []
+  - set:
+      name: _curRemoved
+      value: []
+  - set:
+      name: _baseHash
+      value: '{{baseHash}}'
+  - conditions:
+      '{{_cur.found}}':
+        - set:
+            name: _curAdded
+            value: '{{_cur.overlay.added}}'
+        - set:
+            name: _curRemoved
+            value: '{{_cur.overlay.removed}}'
+        - set:
+            name: _baseHash
+            value: '{{_cur.overlay.baseHash}}'
+  - comment: Identity lists of the delivered items and of the requested change.
+  - set:
+      name: _deliveredIds
+      value: []
+  - repeat:
+      'on': '{{delivered}}'
+      do:
+        - set:
+            name: _id
+            value: '{{item}}'
+        - conditions:
+            '{{item.url}}':
+              - set:
+                  name: _id
+                  value: '{{item.url}}'
+            '{{item.id}}':
+              - set:
+                  name: _id
+                  value: '{{item.id}}'
+            '{{item.name}}':
+              - set:
+                  name: _id
+                  value: '{{item.name}}'
+        - set:
+            name: _deliveredIds[]
+            value: '{{_id}}'
+  - comment: op integrate closes the overlay only once the delivered list carries it (DESIGN 7).
+  - conditions:
+      '{{op}} = "integrate"':
+        - set:
+            name: _missing
+            value: []
+        - set:
+            name: _stillDelivered
+            value: []
+        - repeat:
+            'on': '{{_curAdded}}'
+            do:
+              - set:
+                  name: _id
+                  value: '{{item}}'
+              - conditions:
+                  '{{item.url}}':
+                    - set:
+                        name: _id
+                        value: '{{item.url}}'
+                  '{{item.id}}':
+                    - set:
+                        name: _id
+                        value: '{{item.id}}'
+                  '{{item.name}}':
+                    - set:
+                        name: _id
+                        value: '{{item.name}}'
+              - conditions:
+                  '{{_id}} not in {{_deliveredIds}}':
+                    - set:
+                        name: _missing[]
+                        value: '{{item}}'
+        - repeat:
+            'on': '{{_curRemoved}}'
+            do:
+              - set:
+                  name: _id
+                  value: '{{item}}'
+              - conditions:
+                  '{{item.url}}':
+                    - set:
+                        name: _id
+                        value: '{{item.url}}'
+                  '{{item.id}}':
+                    - set:
+                        name: _id
+                        value: '{{item.id}}'
+                  '{{item.name}}':
+                    - set:
+                        name: _id
+                        value: '{{item.name}}'
+              - conditions:
+                  '{{_id}} in {{_deliveredIds}}':
+                    - set:
+                        name: _stillDelivered[]
+                        value: '{{item}}'
+        - set:
+            name: _result
+            value:
+              changed: false
+              overlay: '{{_cur.overlay}}'
+              status: none
+              missing: '{{_missing}}'
+              stillDelivered: '{{_stillDelivered}}'
+        - conditions:
+            '{{_cur.found}} and ({{_missing.length}} > 0 or {{_stillDelivered.length}} > 0)':
+              - set:
+                  name: _result.error
+                  value: NotIntegrated
+              - set:
+                  name: _result.message
+                  value: the delivered configuration does not carry every change of the overlay yet
+              - set:
+                  name: _result.status
+                  value: open
+            '{{_cur.found}}':
+              - set:
+                  name: _final
+                  value: '{{_cur.overlay}}'
+              - set:
+                  name: _final.integratedAt
+                  value: '{{run.date}}'
+              - set:
+                  name: _final.integratedBy
+                  value: '{{_by}}'
+              - conditions:
+                  '!{{dryRun}}':
+                    - _state-set:
+                        key: overlay:{{list}}:{{key}}
+                        kind: overlay
+                        status: integrated
+                        data: '{{_final}}'
+              - set:
+                  name: _result.changed
+                  value: true
+              - set:
+                  name: _result.status
+                  value: integrated
+              - set:
+                  name: _result.overlay
+                  value: '{{_final}}'
+        - break:
+            scope: automation
+  - set:
+      name: _addIds
+      value: []
+  - repeat:
+      'on': '{{add}}'
+      do:
+        - set:
+            name: _id
+            value: '{{item}}'
+        - conditions:
+            '{{item.url}}':
+              - set:
+                  name: _id
+                  value: '{{item.url}}'
+            '{{item.id}}':
+              - set:
+                  name: _id
+                  value: '{{item.id}}'
+            '{{item.name}}':
+              - set:
+                  name: _id
+                  value: '{{item.name}}'
+        - set:
+            name: _addIds[]
+            value: '{{_id}}'
+  - set:
+      name: _removeIds
+      value: []
+  - repeat:
+      'on': '{{remove}}'
+      do:
+        - set:
+            name: _id
+            value: '{{item}}'
+        - conditions:
+            '{{item.url}}':
+              - set:
+                  name: _id
+                  value: '{{item.url}}'
+            '{{item.id}}':
+              - set:
+                  name: _id
+                  value: '{{item.id}}'
+            '{{item.name}}':
+              - set:
+                  name: _id
+                  value: '{{item.name}}'
+        - set:
+            name: _removeIds[]
+            value: '{{_id}}'
+  - set:
+      name: _changed
+      value: false
+  - comment: Current additions, minus the ones this change removes.
+  - set:
+      name: _added
+      value: []
+  - set:
+      name: _addedIds
+      value: []
+  - repeat:
+      'on': '{{_curAdded}}'
+      do:
+        - set:
+            name: _id
+            value: '{{item}}'
+        - conditions:
+            '{{item.url}}':
+              - set:
+                  name: _id
+                  value: '{{item.url}}'
+            '{{item.id}}':
+              - set:
+                  name: _id
+                  value: '{{item.id}}'
+            '{{item.name}}':
+              - set:
+                  name: _id
+                  value: '{{item.name}}'
+        - conditions:
+            '{{_id}} in {{_removeIds}}':
+              - set:
+                  name: _changed
+                  value: true
+            default:
+              - set:
+                  name: _added[]
+                  value: '{{item}}'
+              - set:
+                  name: _addedIds[]
+                  value: '{{_id}}'
+  - comment: Current removals, minus the ones this change adds back.
+  - set:
+      name: _removed
+      value: []
+  - set:
+      name: _removedIds
+      value: []
+  - repeat:
+      'on': '{{_curRemoved}}'
+      do:
+        - set:
+            name: _id
+            value: '{{item}}'
+        - conditions:
+            '{{item.url}}':
+              - set:
+                  name: _id
+                  value: '{{item.url}}'
+            '{{item.id}}':
+              - set:
+                  name: _id
+                  value: '{{item.id}}'
+            '{{item.name}}':
+              - set:
+                  name: _id
+                  value: '{{item.name}}'
+        - conditions:
+            '{{_id}} in {{_addIds}}':
+              - set:
+                  name: _changed
+                  value: true
+            default:
+              - set:
+                  name: _removed[]
+                  value: '{{item}}'
+              - set:
+                  name: _removedIds[]
+                  value: '{{_id}}'
+  - comment: New additions (not delivered, not added yet) and new removals (delivered only).
+  - repeat:
+      'on': '{{add}}'
+      do:
+        - set:
+            name: _id
+            value: '{{_addIds[{{$index}}]}}'
+        - conditions:
+            '{{_id}} not in {{_deliveredIds}} and {{_id}} not in {{_addedIds}}':
+              - set:
+                  name: _added[]
+                  value: '{{item}}'
+              - set:
+                  name: _addedIds[]
+                  value: '{{_id}}'
+              - set:
+                  name: _changed
+                  value: true
+  - repeat:
+      'on': '{{remove}}'
+      do:
+        - set:
+            name: _id
+            value: '{{_removeIds[{{$index}}]}}'
+        - conditions:
+            '{{_id}} in {{_deliveredIds}} and {{_id}} not in {{_removedIds}}':
+              - set:
+                  name: _removed[]
+                  value: '{{item}}'
+              - set:
+                  name: _removedIds[]
+                  value: '{{_id}}'
+              - set:
+                  name: _changed
+                  value: true
+  - set:
+      name: _final
+      value:
+        list: '{{list}}'
+        key: '{{key}}'
+        added: '{{_added}}'
+        removed: '{{_removed}}'
+        by: '{{_by}}'
+        at: '{{run.date}}'
+        baseHash: '{{_baseHash}}'
+  - set:
+      name: _status
+      value: open
+  - conditions:
+      '{{_added.length}} = 0 and {{_removed.length}} = 0':
+        - set:
+            name: _status
+            value: cleared
+  - set:
+      name: _result
+      value:
+        changed: '{{_changed}}'
+        overlay: '{{_final}}'
+        status: '{{_status}}'
+  - conditions:
+      '{{_changed}} and !{{dryRun}}':
+        - _state-set:
+            key: overlay:{{list}}:{{key}}
+            kind: overlay
+            status: '{{_status}}'
+            data: '{{_final}}'
+output: '{{_result}}'

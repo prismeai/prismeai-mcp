@@ -1,0 +1,348 @@
+slug: _ingest-refresh-plan
+name: ingestion/helpers/Ingest refresh plan
+description: 'Core of refreshSource (called under its per-source lock, or without lock in dry run). Compares the discovered items with the item:<source>:<itemId> rows of the source and decides, per item: queue (new row), requeue (error / cancelled / removed, or listed in requeue; attempts reset to 0), ingested (kept), queued (already waiting) or inFlight (dispatched / processing, never touched); rows of the source no longer discovered become removed (in-flight ones are left for the next refresh) and, with prune, their Storage document is deleted (Storage.deleteVectorStoreFile) and data.documentId cleared. No removal at all when discovery returned no item but some failures (listing outage). dryRun computes the same plan and writes nothing. Body {source, discovered {items, failed}, requeue, dryRun, prune, kbId}. Returns {discovered, toQueue, requeued, alreadyIngested, skipped, toRemove, toPrune, pruned, items (50 at most: {id, name, url, status, action}), warnings}.'
+private: true
+arguments:
+  source:
+    type: object
+    description: Effective source entry {key, type, target, params}.
+  discovered:
+    type: object
+    description: Output of _source-discover {items, failed}.
+  requeue:
+    type: object
+    description: Item ids to re-queue whatever their status (list).
+  dryRun:
+    type: boolean
+  prune:
+    type: boolean
+  kbId:
+    type: string
+    description: Resolved id of the target knowledge base (needed to prune).
+do:
+  - set:
+      name: _p
+      value:
+        discovered: 0
+        toQueue: 0
+        requeued: 0
+        alreadyIngested: 0
+        skipped: 0
+        toRemove: 0
+        toPrune: 0
+        pruned: 0
+        items: []
+        warnings: []
+  - set:
+      name: _pKey
+      value: '{{source.key}}'
+  - set:
+      name: _pRequeue
+      value: []
+  - conditions:
+      '{{requeue.length}} > 0':
+        - set:
+            name: _pRequeue
+            value: '{{requeue}}'
+  - comment: Existing rows of the source, indexed by item id (source filter in the loop, no nested json query).
+  - _state-find:
+      query:
+        kind: item
+      limit: 10000
+      output: _pAll
+  - set:
+      name: _pById
+      value: {}
+  - set:
+      name: _pRows
+      value: []
+  - repeat:
+      'on': '{{_pAll.rows}}'
+      do:
+        - set:
+            name: _pAllRow
+            value: '{{item}}'
+        - conditions:
+            '{{_pAllRow.data.id}}':
+              - conditions:
+                  '{{_pAllRow.data.source}} == {{_pKey}}':
+                    - set:
+                        name: _pById[{{_pAllRow.data.id}}]
+                        value: '{{_pAllRow}}'
+                    - set:
+                        name: _pRows
+                        type: push
+                        value: '{{_pAllRow}}'
+  - set:
+      name: _pIds
+      value: []
+  - repeat:
+      'on': '{{discovered.items}}'
+      do:
+        - set:
+            name: _pIt
+            value: '{{item}}'
+        - set:
+            name: _pIds
+            type: push
+            value: '{{_pIt.id}}'
+        - set:
+            name: _p.discovered
+            value: '{% {{_p.discovered}} + 1 %}'
+        - set:
+            name: _pEx
+            value: '{{_pById[{{_pIt.id}}]}}'
+        - set:
+            name: _pStatus
+            value: new
+        - conditions:
+            '{{_pEx.status}}':
+              - set:
+                  name: _pStatus
+                  value: '{{_pEx.status}}'
+        - set:
+            name: _pAct
+            value: queue
+        - conditions:
+            '{{_pStatus}} = "new"':
+              - set:
+                  name: _pAct
+                  value: queue
+            '{{_pStatus}} = "dispatched" or {{_pStatus}} = "processing"':
+              - set:
+                  name: _pAct
+                  value: inFlight
+            '{{_pIt.id}} in {{_pRequeue}}':
+              - set:
+                  name: _pAct
+                  value: requeue
+            '{{_pStatus}} = "ingested"':
+              - set:
+                  name: _pAct
+                  value: ingested
+            '{{_pStatus}} = "queued"':
+              - set:
+                  name: _pAct
+                  value: queued
+            default:
+              - set:
+                  name: _pAct
+                  value: requeue
+        - conditions:
+            '{{_pAct}} = "queue" or {{_pAct}} = "requeue"':
+              - set:
+                  name: _p.toQueue
+                  value: '{% {{_p.toQueue}} + 1 %}'
+            '{{_pAct}} = "ingested"':
+              - set:
+                  name: _p.alreadyIngested
+                  value: '{% {{_p.alreadyIngested}} + 1 %}'
+            default:
+              - set:
+                  name: _p.skipped
+                  value: '{% {{_p.skipped}} + 1 %}'
+        - conditions:
+            '{{_pAct}} = "requeue"':
+              - set:
+                  name: _p.requeued
+                  value: '{% {{_p.requeued}} + 1 %}'
+        - conditions:
+            '{{_p.items.length}} < 50':
+              - set:
+                  name: _p.items
+                  type: push
+                  value:
+                    id: '{{_pIt.id}}'
+                    name: '{{_pIt.name}}'
+                    url: '{{_pIt.url}}'
+                    status: '{{_pStatus}}'
+                    action: '{{_pAct}}'
+        - conditions:
+            '!{{dryRun}} and ({{_pAct}} = "queue" or {{_pAct}} = "requeue")':
+              - set:
+                  name: _pData
+                  value:
+                    id: '{{_pIt.id}}'
+                    source: '{{_pKey}}'
+                    target: '{{source.target}}'
+                    url: '{{_pIt.url}}'
+                    name: '{{_pIt.name}}'
+                    mime: '{{_pIt.mime}}'
+                    fileId: '{{_pIt.fileId}}'
+                    fetchUrl: '{{_pIt.fetchUrl}}'
+                    metadata: '{{_pIt.metadata}}'
+                    documentId: '{{_pEx.data.documentId}}'
+                    attempts: 0
+                    queuedAt: '{{run.date}}'
+                    dispatchedAt: null
+                    ingestedAt: '{{_pEx.data.ingestedAt}}'
+              - set:
+                  name: _pInserted
+                  value: false
+              - conditions:
+                  '{{_pAct}} = "queue"':
+                    - comment: New row — one direct insert (unique key); a concurrent insert falls back to the upsert below.
+                    - try:
+                        do:
+                          - state.insert:
+                              data:
+                                key: item:{{_pKey}}:{{_pIt.id}}
+                                kind: item
+                                status: queued
+                                data: '{{_pData}}'
+                                error: null
+                                updatedAt: '{{run.date}}'
+                          - set:
+                              name: _pInserted
+                              value: true
+                        catch:
+                          - set:
+                              name: _pInserted
+                              value: false
+              - conditions:
+                  '!{{_pInserted}}':
+                    - _state-set:
+                        key: item:{{_pKey}}:{{_pIt.id}}
+                        kind: item
+                        status: queued
+                        data: '{{_pData}}'
+                        error: {}
+  - comment: Removal of the rows no longer discovered.
+  - set:
+      name: _pRemoveOk
+      value: true
+  - conditions:
+      '{{discovered.items.length}} == 0 and {{discovered.failed.length}} > 0':
+        - set:
+            name: _pRemoveOk
+            value: false
+        - set:
+            name: _p.warnings
+            type: push
+            value: Discovery returned no item and some failures — nothing was marked removed
+  - conditions:
+      '{{_pRemoveOk}}':
+        - repeat:
+            'on': '{{_pRows}}'
+            do:
+              - set:
+                  name: _pRow
+                  value: '{{item}}'
+              - set:
+                  name: _pGone
+                  value: false
+              - set:
+                  name: _pListed
+                  value: false
+              - conditions:
+                  '{{_pRow.data.id}} in {{_pIds}}':
+                    - set:
+                        name: _pListed
+                        value: true
+                  '{{_pRow.status}} = "dispatched" or {{_pRow.status}} = "processing"':
+                    - comment: in flight — left for the next refresh
+                  '{{_pRow.status}} = "removed"':
+                    - comment: already removed — only its document may still be pruned
+                  default:
+                    - set:
+                        name: _pGone
+                        value: true
+              - set:
+                  name: _pPrunable
+                  value: false
+              - conditions:
+                  '{{_pRow.data.documentId}}':
+                    - conditions:
+                        '!{{_pListed}} and ({{_pGone}} or {{_pRow.status}} = "removed")':
+                          - set:
+                              name: _pPrunable
+                              value: true
+              - conditions:
+                  '{{_pGone}}':
+                    - set:
+                        name: _p.toRemove
+                        value: '{% {{_p.toRemove}} + 1 %}'
+                    - conditions:
+                        '{{_p.items.length}} < 50':
+                          - set:
+                              name: _p.items
+                              type: push
+                              value:
+                                id: '{{_pRow.data.id}}'
+                                name: '{{_pRow.data.name}}'
+                                url: '{{_pRow.data.url}}'
+                                status: '{{_pRow.status}}'
+                                action: remove
+              - conditions:
+                  '{{_pPrunable}}':
+                    - set:
+                        name: _p.toPrune
+                        value: '{% {{_p.toPrune}} + 1 %}'
+              - conditions:
+                  '!{{dryRun}} and ({{_pGone}} or {{_pPrunable}})':
+                    - set:
+                        name: _pRData
+                        value: '{{_pRow.data}}'
+                    - conditions:
+                        '{{_pGone}}':
+                          - set:
+                              name: _pRData.removedAt
+                              value: '{{run.date}}'
+                          - set:
+                              name: _pRData.previousStatus
+                              value: '{{_pRow.status}}'
+                    - set:
+                        name: _pDoPrune
+                        value: false
+                    - conditions:
+                        '{{kbId}}':
+                          - conditions:
+                              '{{prune}} == true and {{_pPrunable}}':
+                                - set:
+                                    name: _pDoPrune
+                                    value: true
+                    - set:
+                        name: _pWrite
+                        value: '{{_pGone}}'
+                    - conditions:
+                        '{{_pDoPrune}}':
+                          - set:
+                              name: _pDel
+                              value: false
+                          - try:
+                              do:
+                                - Storage.deleteVectorStoreFile:
+                                    vector_store_id: '{{kbId}}'
+                                    document_id: '{{_pRow.data.documentId}}'
+                                    output: _pDelRes
+                                - set:
+                                    name: _pDel
+                                    value: true
+                              catch:
+                                - set:
+                                    name: _p.warnings
+                                    type: push
+                                    value: Could not delete document {{_pRow.data.documentId}} of item {{_pRow.data.id}}
+                          - conditions:
+                              '{{_pDel}}':
+                                - set:
+                                    name: _pRData.documentId
+                                    value: null
+                                - set:
+                                    name: _pRData.prunedAt
+                                    value: '{{run.date}}'
+                                - set:
+                                    name: _p.pruned
+                                    value: '{% {{_p.pruned}} + 1 %}'
+                                - set:
+                                    name: _pWrite
+                                    value: true
+                    - conditions:
+                        '{{_pWrite}}':
+                          - _state-set:
+                              key: '{{_pRow.key}}'
+                              kind: item
+                              status: removed
+                              data: '{{_pRData}}'
+                              error: {}
+output: '{{_p}}'

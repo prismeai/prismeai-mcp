@@ -1,0 +1,140 @@
+slug: _ensure-kb
+name: sync/Ensure knowledge base
+description: 'Ensures one manifest knowledge base exists in Storage (DESIGN 4.4), through the Storage app (authenticates as the caller). Arguments {key, dryRun?}. Resolution by _resolve-kb: bound (existingIdFrom secret holds a plain id) → bound, never created nor deleted; found (cached id still there, or exact name among the caller''s own bases) → exists; not found and create false → unbound (the agents leave its tools out, skippedTools); not found → would-create in a dry run, otherwise Storage.createVectorStore {name, description, parser, chunking_strategy} → created, or failed KnowledgeBaseCreateFailed. Outside a dry run the state row res:kb:<key> is written: status bound or created, data {id, name, createdAt}. Returns {type: kb, key, action: exists | bound | unbound | would-create | created | failed, id, error?, message?, missing?}.'
+private: true
+arguments:
+  key:
+    type: string
+    description: knowledgeBases[].key
+  dryRun:
+    type: boolean
+do:
+  - set:
+      name: _result
+      value:
+        type: kb
+        key: '{{key}}'
+        action: failed
+        id: null
+  - _manifest-get:
+      list: knowledgeBases
+      key: '{{key}}'
+      output: _m
+  - conditions:
+      '!{{_m.found}}':
+        - set:
+            name: _result.error
+            value: UnknownManifestKey
+        - break:
+            scope: automation
+  - set:
+      name: _kb
+      value: '{{_m.item}}'
+  - _resolve-kb:
+      key: '{{key}}'
+      output: _resolved
+  - set:
+      name: _rowStatus
+      value: null
+  - conditions:
+      '{{_resolved.by}} = "bound"':
+        - set:
+            name: _result.action
+            value: bound
+        - set:
+            name: _result.id
+            value: '{{_resolved.id}}'
+        - set:
+            name: _rowStatus
+            value: bound
+      '{{_resolved.found}}':
+        - set:
+            name: _result.action
+            value: exists
+        - set:
+            name: _result.id
+            value: '{{_resolved.id}}'
+        - set:
+            name: _rowStatus
+            value: created
+      '{{_kb.create}} == false':
+        - set:
+            name: _result.action
+            value: unbound
+        - set:
+            name: _result.missing
+            value: knowledge base {{_kb.name}} not found among the caller's own knowledge bases and not created by the workspace (create false)
+        - conditions:
+            '{{_kb.existingIdFrom}}':
+              - set:
+                  name: _result.missing
+                  value: knowledge base {{_kb.name}} not bound (set the secret {{_kb.existingIdFrom}} to its id) and not found by name
+      '{{dryRun}}':
+        - set:
+            name: _result.action
+            value: would-create
+  - conditions:
+      '{{_rowStatus}}':
+        - conditions:
+            '!{{dryRun}}':
+              - set:
+                  name: _createdAt
+                  value: '{{_resolved.createdAt}}'
+              - conditions:
+                  '!{{_createdAt}}':
+                    - set:
+                        name: _createdAt
+                        value: '{{run.date}}'
+              - _state-set:
+                  key: res:kb:{{key}}
+                  kind: resource
+                  status: '{{_rowStatus}}'
+                  data:
+                    id: '{{_result.id}}'
+                    name: '{{_kb.name}}'
+                    createdAt: '{{_createdAt}}'
+        - break:
+            scope: automation
+  - conditions:
+      '{{_result.action}} != "failed"':
+        - break:
+            scope: automation
+  - Storage.createVectorStore:
+      name: '{{_kb.name}}'
+      description: '{{_kb.description}}'
+      parser: '{{_kb.parser}}'
+      chunking_strategy: '{{_kb.chunking_strategy}}'
+      output: _created
+  - conditions:
+      '!{{_created.structuredData.id}}':
+        - set:
+            name: _result.error
+            value: KnowledgeBaseCreateFailed
+        - set:
+            name: _result.message
+            value: Storage refused to create the knowledge base {{_kb.name}}
+        - emit:
+            event: error
+            payload:
+              error: KnowledgeBaseCreateFailed
+              message: Failed to create knowledge base {{_kb.name}}
+              details:
+                key: '{{key}}'
+                response: '{{_created.error}}'
+        - break:
+            scope: automation
+  - set:
+      name: _result.action
+      value: created
+  - set:
+      name: _result.id
+      value: '{{_created.structuredData.id}}'
+  - _state-set:
+      key: res:kb:{{key}}
+      kind: resource
+      status: created
+      data:
+        id: '{{_created.structuredData.id}}'
+        name: '{{_kb.name}}'
+        createdAt: '{{run.date}}'
+output: '{{_result}}'

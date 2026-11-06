@@ -1,0 +1,254 @@
+slug: importCases
+name: evaluation/Import cases
+description: 'Control endpoint (guarded, 403 Forbidden). Loads the evaluation cases and records them in setting:cases {count, hash, loadedAt, by, source, cases (body source only), warnings}. Body {cases?: [{id, question, expected, criteria, tags}], agents?: [<agent-key>]}. With body.cases the list is validated and stored (it becomes the case set of the next benches, until importCases is called without cases); without it the cases are read fresh from config.evaluation._content-agent-tests (_cases-load fromConfig) and the stored list is dropped. The cases are then imported into Agent Evaluations (Evaluation.importCases, which replaces the case set of each agent) for body.agents or config.evaluation.agents, so they show in the product; skipped while a bench is running (each batch replaces the case set of its agent). Output {count, hash, source, imported: {<agent-key>: {ok, count | error}}, warnings}; errors 400 NoCaseLoaded, 400 UnknownManifestKey, 500 CustomCodeUnavailable.'
+when:
+  endpoint: true
+arguments:
+  body:
+    type: object
+    properties:
+      cases:
+        type: array
+        description: Cases to store [{id, question, expected, criteria, tags}]. Absent = read _content-agent-tests.
+      agents:
+        type: array
+        description: Agent keys whose Agent Evaluations case set receives the cases. Default config.evaluation.agents.
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: Forbidden
+              message: This endpoint requires a control role
+        - break:
+            scope: automation
+  - set:
+      name: _by
+      value: '{{_guard.role}}'
+  - conditions:
+      '{{user.email}}':
+        - set:
+            name: _by
+            value: '{{user.email}}'
+      '{{user.id}}':
+        - set:
+            name: _by
+            value: '{{user.id}}'
+  - comment: Target agents for the Agent Evaluations import, validated against config.agents.
+  - set:
+      name: _declared
+      value: []
+  - repeat:
+      'on': '{{config.agents}}'
+      do:
+        - set:
+            name: _declared
+            type: push
+            value: '{{item.key}}'
+  - set:
+      name: _agentKeys
+      value: '{{config.evaluation.agents}}'
+  - conditions:
+      '{{body.agents}} in {{_declared}}':
+        - set:
+            name: _agentKeys
+            value:
+              - '{{body.agents}}'
+      '{{body.agents.length}} > 0':
+        - set:
+            name: _agentKeys
+            value: '{{body.agents}}'
+  - set:
+      name: _unknown
+      value: []
+  - repeat:
+      'on': '{{_agentKeys}}'
+      do:
+        - set:
+            name: _known
+            value: false
+        - conditions:
+            '{{item}} in {{_declared}}':
+              - set:
+                  name: _known
+                  value: true
+        - conditions:
+            '!{{_known}}':
+              - set:
+                  name: _unknown
+                  type: push
+                  value: '{{item}}'
+  - conditions:
+      '{{_unknown.length}} > 0':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _result
+            value:
+              error: UnknownManifestKey
+              message: body.agents must name agents declared in config.agents
+              keys: '{{_unknown}}'
+        - break:
+            scope: automation
+  - comment: Cases from the body, else from the agent content (_content-agent-tests).
+  - set:
+      name: _source
+      value: content
+  - conditions:
+      '{{body.cases.length}} > 0':
+        - set:
+            name: _source
+            value: body
+        - Custom Code.run:
+            function: benchEngine
+            parameters:
+              op: cases
+              cases: '{{body.cases}}'
+              options:
+                defaultCriteria: '{{config.evaluation.criteria}}'
+            output: _norm
+        - conditions:
+            '{{_norm.error}}':
+              - set:
+                  name: $http
+                  value:
+                    status: 500
+              - set:
+                  name: _result
+                  value:
+                    error: CustomCodeUnavailable
+                    message: 'benchEngine failed: {{_norm.message}}'
+              - break:
+                  scope: automation
+            '{{_norm.count}} == 0':
+              - set:
+                  name: $http
+                  value:
+                    status: 400
+              - set:
+                  name: _result
+                  value:
+                    error: NoCaseLoaded
+                    message: body.cases holds no valid case
+                    warnings: '{{_norm.errors}}'
+              - break:
+                  scope: automation
+        - set:
+            name: _load
+            value:
+              ok: true
+              cases: '{{_norm.cases}}'
+              evalCases: '{{_norm.evalCases}}'
+              count: '{{_norm.count}}'
+              hash: '{{_norm.hash}}'
+              source: body
+              warnings: '{{_norm.errors}}'
+      default:
+        - _cases-load:
+            fromConfig: true
+            output: _load
+        - conditions:
+            '!{{_load.ok}}':
+              - set:
+                  name: $http
+                  value:
+                    status: '{{_load.httpStatus}}'
+              - set:
+                  name: _result
+                  value: '{{_load.response}}'
+              - break:
+                  scope: automation
+  - set:
+      name: _settingData
+      value:
+        count: '{{_load.count}}'
+        hash: '{{_load.hash}}'
+        loadedAt: '{{run.date}}'
+        by: '{{_by}}'
+        source: '{{_source}}'
+        warnings: '{{_load.warnings}}'
+  - conditions:
+      '{{_source}} == "body"':
+        - set:
+            name: _settingData
+            type: merge
+            value:
+              cases: '{{_load.cases}}'
+  - _state-set:
+      key: setting:cases
+      kind: setting
+      data: '{{_settingData}}'
+  - comment: Agent Evaluations import, skipped while a bench runs (each batch owns the case set of its agent).
+  - set:
+      name: _warnings
+      value: '{{_load.warnings}}'
+  - set:
+      name: _imported
+      value: {}
+  - _state-find:
+      query:
+        kind: bench
+        status: running
+      limit: 1
+      output: _running
+  - conditions:
+      '{{_running.rows.length}} > 0':
+        - set:
+            name: _warnings
+            type: push
+            value: 'BenchmarkRunning: bench {{_running.rows[0].data.benchId}} is running, the Agent Evaluations case sets were left untouched'
+      default:
+        - repeat:
+            'on': '{{_agentKeys}}'
+            do:
+              - set:
+                  name: _key
+                  value: '{{item}}'
+              - _resolve-agent:
+                  key: '{{_key}}'
+                  output: _agent
+              - conditions:
+                  '!{{_agent.id}}':
+                    - set:
+                        name: _imported[{{_key}}]
+                        value:
+                          ok: false
+                          error: MissingDependency
+                          message: agent not deployed, run syncAll first
+                  default:
+                    - Evaluation.importCases:
+                        agent_id: '{{_agent.id}}'
+                        cases: '{{_load.evalCases}}'
+                        output: _imp
+                    - conditions:
+                        '{{_imp.error}} == true':
+                          - set:
+                              name: _imported[{{_key}}]
+                              value:
+                                ok: false
+                                error: '{{_imp.code}}'
+                                message: '{{_imp.message}}'
+                        default:
+                          - set:
+                              name: _imported[{{_key}}]
+                              value:
+                                ok: true
+                                count: '{{_load.count}}'
+  - set:
+      name: _result
+      value:
+        count: '{{_load.count}}'
+        hash: '{{_load.hash}}'
+        source: '{{_source}}'
+        imported: '{{_imported}}'
+        warnings: '{{_warnings}}'
+output: '{{_result}}'

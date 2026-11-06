@@ -1,11 +1,26 @@
 ---
 name: agent-workspace
-description: Create a Prisme.ai bootstrap workspace that provisions an Agent Factory agent, attaches Storage-backed file or URL sources, seeds Agent Evaluations cases, runs evaluation, and validates the setup through the supported product apps Agents, Storage, and Evaluation.
+description: Create or maintain a Prisme.ai agent workspace from the standard template — an Agent Factory agent, its Storage knowledge bases, sources and Agent Evaluations bench declared in index.yml and applied by an idempotent syncAll with dry run and drift guard — plus its operator console (React page pages/SLUG-console) with the agent-specific maintenance screens. Uses the product apps Agents, Storage and Evaluation.
 ---
 
-# Agent Workspace Bootstrap
+# Agent Workspace
 
-Use this skill to build a consumer/bootstrap DSUL workspace whose purpose is to create and validate an Agent Factory agent with Storage sources and Evaluation test cases.
+Use this skill to build a DSUL workspace that is the source of truth for an Agent Factory agent: its
+prompt, settings, tools, knowledge bases, sources and evaluation cases are declared in the workspace
+and applied safely, and the people who maintain it get an operator console.
+
+## Templates and guides
+
+| Need | Read / copy |
+|---|---|
+| The engine (sync, describe, status, ingestion, bench, console endpoints) | `templates/workspace/` → `workspaces/<slug>/`; its `DESIGN.md` is the contract |
+| The operator console | `templates/console/` overlaid on a starter-spa page → `pages/<slug>-console/` |
+| Sync, drift, adoption, app gaps, identity limits, engine upgrades | `guides/sync.md` |
+| Ingestion queue, custom data sources | `guides/ingestion.md` |
+| Bench method | `guides/evaluation.md` |
+| Console: plug-in steps, backend, overlay, security, UX and style rules, **agent-specific screens** | `guides/console.md` |
+
+Read a guide when the plan touches its topic; do not load them all up front.
 
 ## Bundled API Reference
 
@@ -56,14 +71,16 @@ Notes:
 
 ## Non-Negotiables
 
-- Use the product apps, never raw product HTTP calls:
+- Use the product apps:
   - `Agents` for agent creation, configuration, tools, messages, and cleanup.
   - `Storage` for file or URL sources, vector stores, indexing, listing, and cleanup.
   - `Evaluation` for test cases, evaluation runs, run polling, exports/results, and cleanup.
+  - `Collection` (import `state`) for workspace state and `Custom Code` for pure functions, as in the template.
+  - Import any other app the agent needs (structured data collections…).
 - Every model call goes through an agent. Create or reuse an Agent Factory agent and call `Agents.sendMessage` — including for one-shot work such as classification, extraction, translation, summarization, or LLM-as-judge scoring. Do not call an LLM gateway or any provider API directly.
-- Never use `fetch` to Agent Factory, Storage, or Agent Evaluations. For this bootstrap workspace, avoid `fetch:` entirely unless the user explicitly adds an unrelated external integration.
-- If an action is not exposed by the app, check `reference/` before reporting: an endpoint present in the spec but absent from the app means a missing wrapper method, while an endpoint absent from the spec means the product does not support it. Either way, stop and report it in chat with which of the two it is. Ask how to proceed and suggest updating the relevant app wrapper.
-- Generated workspaces may import only `Agents`, `Storage`, and `Evaluation` among Prisme product apps.
+- A direct call is allowed only for an operation the app does not expose, only through `_product-call` (the one automation allowed to `fetch`), signed with the app's own credential and never a personal token, and listed in `guides/sync.md` « App gaps ». Check `reference/` first: an endpoint present in the spec but absent from the app is a missing wrapper method; an endpoint absent from the spec is not supported by the product. Report every new gap in chat and suggest updating the app.
+- Every change to an existing environment starts with `syncAll {dryRun: true}`, read before applying. Never overwrite a hand edit: drift stops the sync unless an admin forces it after `describeInstance`.
+- No client data in git (cases, real questions, reference text stay empty stubs); no secret, token or customer hostname in the page bundle or the journal.
 - Do not add a `one-product` label to the generated workspace.
 - First pass is discovery/spec only. Ask for end-user confirmation before creating workspace files.
 - After confirmation and local validation, attempt the required test/push workflow for the target environment. Let Codex or Claude surface normal permission prompts for push or remote execution.
@@ -72,7 +89,7 @@ Notes:
 
 Before editing files:
 
-1. Identify the desired workspace slug, agent name, agent instructions, source files/URLs, and evaluation questions.
+1. Identify the desired workspace slug, agent name, agent instructions, source files/URLs, and evaluation questions. If the agent already exists on the target environment, plan the adoption first (`guides/sync.md` § 4).
 2. Read the bundled `reference/` index for each product you will call — it is the authoritative list of what the app methods map to. For product concepts you are unsure about, read the matching page on <https://docs.prisme.ai/get-started/home> or search it with `get_prisme_documentation`.
 3. Read the local docs in the `prismeai-workspaces` repo when you need implementation detail beyond the REST contract:
    - `docs/agent-factory/automations.md`
@@ -88,100 +105,56 @@ Before editing files:
    - source ingestion plan
    - which agent handles each model call in the flow
    - evaluation cases to seed
+   - the operator console: whether it is needed (`guides/console.md` § 1), the generic views it gets (Dashboard, Agent, Journal, and Ingestion / Sources / Bench when the workspace has them), and the **agent-specific screens**: what changes over the agent's life, each recurring maintenance job with every side effect it implies, which side effects become automatic, and the wizard each job gets (`guides/console.md` § 9)
    - test suite behavior
    - test/push target environment
 6. Ask for confirmation before creating the workspace. Do not continue until the user confirms.
 
 ## Workspace Shape
 
-After confirmation, create a local workspace under `workspaces/{slug}/`:
+After confirmation, copy `templates/workspace/` to `workspaces/{slug}/`, replace the placeholders listed at the top of its `index.yml`, and write the agent-specific parts only in the content files (`automations/content/`: prompts, reference documents, test questions, custom source types; DESIGN §1.1), never in engine files, so later template versions can be applied (`guides/sync.md` § 9). Then, when the plan includes a console, create `pages/{slug}-console/` (`guides/console.md` § 2):
 
 ```text
 workspaces/{slug}/
-├── index.yml
-├── security.yml
-├── imports/
-│   ├── Agents.yml
-│   ├── Storage.yml
-│   └── Evaluation.yml
+├── DESIGN.md                 the contract, extended with the agent-specific parts
+├── index.yml                 manifest: agents, knowledgeBases, documents, sources, evaluation, console
+├── security.yml              control (API key) and files roles
+├── imports/                  Agents, Storage, Evaluation, state (Collection), Custom Code
 ├── automations/
-│   ├── createBootstrap.yml
-│   ├── createAgent.yml
-│   ├── createStorageSources.yml
-│   ├── createEvaluationCases.yml
-│   ├── runEvaluation.yml
-│   └── tests/
-│       └── bootstrap.yml
+│   ├── helpers, sync         _state-*, _guard-control, _product-call, _ensure-*, syncAll, describeInstance, statusReport
+│   ├── content/              AGENT CONTENT: _content-prompts, _content-documents, _content-agent-tests, _content-sources
+│   ├── ingestion             refreshSource, pumpIngest, onIngestItem, controlIngest, _source-discover
+│   ├── evaluation            importCases, runBenchmark, pollBenchmark, benchmarkReport, exportBenchmark
+│   ├── console               consoleState, consoleAction, consoleDiff, consoleSources, _sources-effective
+│   └── tests/                engine.yml (+ bootstrap.yml)
 └── tests/
     └── README.md
+pages/{slug}-console/         starter-spa + templates/console overlay + agent-specific views
 ```
 
-`tests/` is required for fixtures, status notes, and a human-readable test contract. Executable DSUL tests live under `automations/tests/` so the workspace loader can run them.
+Drop a module the agent does not need (no sources → no ingestion; no cases → no bench) together with its `_console-dispatch` entries and console view. `tests/` is required for fixtures, status notes, and a human-readable test contract. Executable DSUL tests live under `automations/tests/` so the workspace loader can run them.
 
-## Required Imports
+## Imports, Config And Automations
 
-Use these import slugs exactly unless the user explicitly asks for a different local alias.
+The imports, the manifest (`config.value`) and every automation's arguments and output are fixed by
+`templates/workspace/DESIGN.md` (§2 manifest, §3 state, §4 sync, §5 ingestion, evaluation and console
+endpoints). Keep the import slugs `Agents`, `Storage`, `Evaluation` (appSlug `agentEvaluations`),
+`state` and `Custom Code`. When the workspace needs something the template does not have, extend
+`DESIGN.md` in the same change.
 
-```yaml
-# imports/Agents.yml
-slug: Agents
-appSlug: Agents
-config:
-  apiKey: '{{secret.agentFactoryApiKey}}'
-```
-
-```yaml
-# imports/Storage.yml
-slug: Storage
-appSlug: Storage
-config: {}
-```
-
-```yaml
-# imports/Evaluation.yml
-slug: Evaluation
-appSlug: agentEvaluations
-config:
-  apiKey: '{{secret.agentEvaluationsApiKey}}'
-```
-
-## Workspace Config
-
-Keep `index.yml` focused on bootstrap state and secrets:
-
-- Labels: include project/domain labels such as `agent-bootstrap`, `rag`, or the customer/domain name. Do not include `one-product`.
-- Secrets: define `agentFactoryApiKey` and `agentEvaluationsApiKey`.
-- Config value:
-  - `agent`: `id`, `name`, `model`, `instructions`, optional `temperature`.
-  - `storage`: `vectorStoreId`, `provider`, chunking/embedding defaults when needed.
-- `bootstrap.sources`: source list classified as `url`, `file_id`, or `local_file`, with names, filenames, MIME types, source values, and tags.
-- `bootstrap.evaluationCases`: question, expected answer, and criteria list.
-
-## Automation Contract
-
-Create small automations with one responsibility each:
-
-- `createAgent.yml`: calls `Agents.createAgent` with `config.agent.name`, `config.agent.instructions`, `config.agent.model`, and `config.agent.temperature`, stores `config.agent.id`, returns the created agent.
-- `createStorageSources.yml`: calls `Storage.createVectorStore`, `Agents.addTool` with `type: file_search`, then attaches each source with `Storage.addFileToVectorStore`.
-  - URL sources pass `url`, `file_name`, `mime_type`, `tags`, `metadata`, optional `headers`, optional `force_recrawl`, and `agent_id` directly to `Storage.addFileToVectorStore`.
-  - Existing files pass `file_id` to `Storage.addFileToVectorStore`.
-  - Local files require a Storage app upload method before attach. Use `Storage.uploadFile` when the local file can be represented by the app's supported arguments. If the needed upload shape is not exposed by the app, stop and report the missing method.
-  - Poll attached files with `Storage.listVectorStoreFiles` or `Storage.getVectorStoreFile` until each file reaches a terminal indexed or failed state before sending messages or starting evaluation.
-- `createEvaluationCases.yml`: calls `Evaluation.importCases` or `Evaluation.createCase`, then `Evaluation.listCases`.
-- `runEvaluation.yml`: calls `Evaluation.startRun`, polls `Evaluation.getRun` until `completed`, `failed`, `cancelled`, or timeout, then returns the run and result summary.
-- `createBootstrap.yml`: endpoint automation that runs the full flow in order and returns IDs plus next steps.
-
-Use `comment:` instructions for explanations inside DSUL. Do not use YAML comments in automation files.
+- Labels: project/domain labels such as `agent-workspace`, `rag`, or the domain name. Do not include `one-product`.
+- Secrets: none by default (the apps act with the caller's identity); an organization API key only for runs without a user (`guides/sync.md` § 8), plus one per bound resource id.
+- One responsibility per automation; `comment:` instructions for explanations inside DSUL, never YAML comments in automation files.
 
 ## Endpoint And Security Rules
 
 - Helper automations are `private: true`.
 - Test automation file `automations/tests/bootstrap.yml` must set `slug: tests/bootstrap`, a matching name such as `/tests/bootstrap`, and `when.endpoint: true`.
-- `security.yml` must define the intended authorization posture. Default to manual/admin bootstrap endpoints; do not expose bootstrap or test endpoints as unauthenticated public endpoints unless the user explicitly requests it.
+- `security.yml` must define the intended authorization posture: the `control` role only through a workspace API key, never `prismeai` auth. Every control endpoint is guarded by `_guard-control` (`config.controlRoles`, admin-only actions on `config.adminRoles`). Do not expose bootstrap, test or console endpoints as unauthenticated public endpoints unless the user explicitly requests it.
 
 ## Bootstrap Test Suite
 
-The first implementation must include a runnable bootstrap test. It must create temporary resources, verify them, run evaluation, and clean up.
+Two tests. `automations/tests/engine.yml` (from the template) checks the engine read-only: syncAll dry run, describeInstance, statusReport, consoleState, consoleAction. The first implementation must also include a runnable bootstrap test that creates temporary resources, verifies them, runs evaluation, and cleans up.
 
 Executable automation: `automations/tests/bootstrap.yml`.
 
@@ -217,14 +190,16 @@ Before reporting completion:
 2. Run a local guardrail scan:
 
 ```bash
-rg -ni "Knowledge[[:space:]-]*Client|KnowledgeClient|AI[[:space:]-]*Knowledge|AI[[:space:]-]*Store|ai-knowledge|ai-store|appSlug:\\s*Knowledge|one-product|fetch:" workspaces/{slug}
+rg -ni "Knowledge[[:space:]-]*Client|KnowledgeClient|AI[[:space:]-]*Knowledge|AI[[:space:]-]*Store|ai-knowledge|ai-store|appSlug:\\s*Knowledge|one-product|installToken" workspaces/{slug}
+rg -n "fetch:" workspaces/{slug}/automations | rg -v "_product-call.yml"
 ```
 
-There should be no matches in generated files. If the user explicitly requested an unrelated external integration and a legitimate unrelated `fetch:` exists, explain why it is outside Agent Factory, Storage, and Evaluation.
+There should be no matches, except a `fetch:` in a custom `_source-discover` branch that reads an external source (explain it). Any other direct product call belongs in `_product-call` and in the app gaps list.
 
 3. Run local automation testing through the project `/test-automation` workflow when available.
-4. Attempt the required push/test path for the target environment so the bootstrap test can execute against real product apps. Let Codex or Claude request permissions when the toolchain needs them.
-5. Rerun validation and tests after each fix until the suite passes or a missing product app method blocks progress.
+4. Console: `npm run typecheck` and `npm run build` in `pages/{slug}-console/`, then the mock check of `guides/console.md` § 8 in light and dark.
+5. Attempt the required push/test path for the target environment so the bootstrap test can execute against real product apps. Let Codex or Claude request permissions when the toolchain needs them.
+6. Rerun validation and tests after each fix until the suite passes or a missing product app method blocks progress.
 
 ## Response Shape
 
@@ -235,3 +210,4 @@ When the workspace is ready locally, report:
 - validation/test status
 - any missing app methods or product limitations
 - whether a push/test attempt happened and the resulting environment/status
+- the console preview URL, `https://<studio-host>/apps/{slug}?view=dashboard` (the page is served under the workspace slug), and the agent-specific screens it has

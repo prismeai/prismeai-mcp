@@ -1,0 +1,160 @@
+slug: _product-call
+name: helpers/Product call
+description: 'The ONLY automation allowed to use fetch (DESIGN 4.1, 6.2): a REST call for an operation the app imports (Agents, Storage, Evaluation) do not expose. Arguments {service, method?, path, query?, body?, headers?, multipart?}. service agent-factory | agent-evaluations | storage → {global.apiUrl}/workspaces/slug:<service>/webhooks/<path>; service platform → {global.apiUrl}/<path> (platform API, e.g. workspaces/<id>/files). Signing, always the credential of the matching app import and never a personal token: agent-factory = header x-prismeai-api-key config.agentFactoryApiKey (secret agentFactoryApiKey, as the Agents import), agent-evaluations = x-prismeai-api-key config.agentEvaluationsApiKey (as the Evaluation import), storage = no credential, the runtime forwards the caller identity (as the Storage app does), platform = the workspace API key of the role files (security.yml, prismeaiApiKey). An unset secret (left as a placeholder) is never sent. multipart (platform uploads only) is sent instead of body. Never throws, emits no error event (the caller emits its own domain error). Returns {ok (2xx/3xx), status (0 = network failure), body}.'
+private: true
+arguments:
+  service:
+    type: string
+    description: agent-factory | agent-evaluations | storage | platform
+  method:
+    type: string
+    description: HTTP method. Default GET.
+  path:
+    type: string
+    description: Path without leading slash, e.g. v1/agents/<id>.
+  query:
+    type: object
+    description: Optional query parameters (scalar values).
+  body:
+    type: object
+    description: Optional JSON body (ignored for GET).
+  headers:
+    type: object
+    description: Optional extra headers merged over the defaults (never a credential).
+  multipart:
+    type: array
+    description: 'Optional multipart parts [{fieldname, value, filename?, contentType?}] (service platform); value of a file part is base64.'
+do:
+  - set:
+      name: _method
+      value: '{{method}}'
+  - conditions:
+      '!{{_method}}':
+        - set:
+            name: _method
+            value: GET
+  - set:
+      name: _headers
+      value: {}
+  - conditions:
+      '!{{multipart}}':
+        - set:
+            name: _headers
+            value:
+              Content-Type: application/json
+  - comment: |
+      Credential of the app import of the product. An unset secret interpolates to its literal
+      placeholder: the key is sent only when it looks like a plain token (positive match nested
+      under a presence check; a matches is never negated).
+  - set:
+      name: _key
+      value: ''
+  - conditions:
+      '{{service}} = "agent-factory"':
+        - set:
+            name: _key
+            value: '{{config.agentFactoryApiKey}}'
+      '{{service}} = "agent-evaluations"':
+        - set:
+            name: _key
+            value: '{{config.agentEvaluationsApiKey}}'
+  - set:
+      name: _keyOk
+      value: false
+  - conditions:
+      '{{_key}}':
+        - conditions:
+            '{{_key}} matches regex("^[A-Za-z0-9_.:=+/-]+$")':
+              - set:
+                  name: _keyOk
+                  value: true
+  - conditions:
+      '{{_keyOk}}':
+        - set:
+            name: _headers
+            type: merge
+            value:
+              x-prismeai-api-key: '{{_key}}'
+  - conditions:
+      '{{headers}}':
+        - set:
+            name: _headers
+            type: merge
+            value: '{{headers}}'
+  - set:
+      name: _url
+      value: '{{global.apiUrl}}/workspaces/slug:{{service}}/webhooks/{{path}}'
+  - conditions:
+      '{{service}} = "platform"':
+        - set:
+            name: _url
+            value: '{{global.apiUrl}}/{{path}}'
+  - set:
+      name: _response
+      value: null
+  - comment: |
+      emitErrors false + detailed_response: an HTTP error is returned, never thrown; a network
+      failure returns an object without status (status 0 below).
+  - conditions:
+      '{{service}} = "platform" and {{multipart}}':
+        - fetch:
+            url: '{{_url}}'
+            method: '{{_method}}'
+            headers: '{{_headers}}'
+            prismeaiApiKey:
+              name: files
+            multipart: '{{multipart}}'
+            outputMode: detailed_response
+            emitErrors: false
+            output: _response
+      '{{service}} = "platform"':
+        - fetch:
+            url: '{{_url}}'
+            method: '{{_method}}'
+            headers: '{{_headers}}'
+            prismeaiApiKey:
+              name: files
+            query: '{{query}}'
+            body: '{{body}}'
+            outputMode: detailed_response
+            emitErrors: false
+            output: _response
+      default:
+        - fetch:
+            url: '{{_url}}'
+            method: '{{_method}}'
+            headers: '{{_headers}}'
+            query: '{{query}}'
+            body: '{{body}}'
+            outputMode: detailed_response
+            emitErrors: false
+            output: _response
+  - set:
+      name: _status
+      value: '{{_response.status}}'
+  - set:
+      name: _body
+      value: '{{_response.body}}'
+  - conditions:
+      '!{{_status}}':
+        - set:
+            name: _status
+            value: 0
+        - set:
+            name: _body
+            value: '{{_response}}'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_status}} >= 200 and {{_status}} < 400':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _key
+      value: ''
+output:
+  ok: '{{_ok}}'
+  status: '{{_status}}'
+  body: '{{_body}}'

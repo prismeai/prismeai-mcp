@@ -1,0 +1,256 @@
+slug: _ensure-kb-document
+name: sync/Ensure knowledge base document
+description: 'Publishes one manifest reference document (documents[], DESIGN 4.4) into its knowledge base. Arguments {key, dryRun?}. The text is _content-documents .documents[<key>] (agent content). Empty text → skipped, reason EmptyText (never a failure; nothing uploaded, an existing document is left as it is; syncAll adds a warning). Otherwise Custom Code sha256 hashes it and compares with the state row res:kbdoc:<key>: same hash, same knowledge base and the Storage document still there and not failed → unchanged; else (reason new | changed | missing | failed) would-upload in a dry run or when the knowledge base does not exist yet; else the text is uploaded as a private workspace file with a share token (_product-call platform, files API) and attached with Storage.addFileToVectorStore {source_type remote_file, source_url = a stable token-free URL (the upsert key: a new version refreshes the same document, never a duplicate), fetch_url = the share link, filename = documents[].fileName}; the workspace file of the previous upload is then deleted (best effort). The state row is written {hash, lines, documentId, uploadedAt, kbId, fileId, fileName}. Returns {type: kbdoc, key, action: unchanged | would-upload | uploaded | skipped | failed, reason, lines, hash?, documentId?, error?, message?}.'
+private: true
+arguments:
+  key:
+    type: string
+    description: documents[].key
+  dryRun:
+    type: boolean
+do:
+  - set:
+      name: _result
+      value:
+        type: kbdoc
+        key: '{{key}}'
+        action: failed
+        reason: null
+        lines: 0
+  - _manifest-get:
+      list: documents
+      key: '{{key}}'
+      output: _m
+  - conditions:
+      '!{{_m.found}}':
+        - set:
+            name: _result.error
+            value: UnknownManifestKey
+        - break:
+            scope: automation
+  - set:
+      name: _doc
+      value: '{{_m.item}}'
+  - comment: The text comes from the agent content (_content-documents), by document key; absent = empty.
+  - _content-documents:
+      output: _docs
+  - set:
+      name: _text
+      value: '{{_docs.documents[{{key}}]}}'
+  - conditions:
+      '!{{_text}}':
+        - set:
+            name: _result.action
+            value: skipped
+        - set:
+            name: _result.reason
+            value: EmptyText
+        - break:
+            scope: automation
+  - Custom Code.run:
+      function: sha256
+      parameters:
+        text: '{{_text}}'
+      output: _sha
+  - conditions:
+      '!{{_sha.hash}}':
+        - set:
+            name: _result.error
+            value: CustomCodeUnavailable
+        - set:
+            name: _result.message
+            value: The Custom Code function sha256 is not deployed
+        - break:
+            scope: automation
+  - set:
+      name: _result.hash
+      value: '{{_sha.hash}}'
+  - set:
+      name: _result.lines
+      value: '{{_sha.lines}}'
+  - _resolve-kb:
+      key: '{{_doc.kb}}'
+      output: _kbRes
+  - set:
+      name: _kbId
+      value: '{{_kbRes.id}}'
+  - _state-get:
+      key: res:kbdoc:{{key}}
+      output: _stored
+  - set:
+      name: _reason
+      value: new
+  - conditions:
+      '!{{_kbId}}':
+        - set:
+            name: _reason
+            value: new
+      '!{{_stored.row.data.documentId}}':
+        - set:
+            name: _reason
+            value: new
+      '{{_stored.row.data.kbId}} != {{_kbId}}':
+        - set:
+            name: _reason
+            value: new
+      '{{_stored.row.data.hash}} != {{_sha.hash}}':
+        - set:
+            name: _reason
+            value: changed
+      default:
+        - comment: Same text — still check that the Storage document exists and did not fail.
+        - Storage.getVectorStoreFile:
+            vector_store_id: '{{_kbId}}'
+            document_id: '{{_stored.row.data.documentId}}'
+            output: _docGet
+        - conditions:
+            '!{{_docGet.structuredData.id}}':
+              - set:
+                  name: _reason
+                  value: missing
+            '{{_docGet.structuredData.status}} = "failed"':
+              - set:
+                  name: _reason
+                  value: failed
+            default:
+              - set:
+                  name: _reason
+                  value: null
+              - set:
+                  name: _result.action
+                  value: unchanged
+              - set:
+                  name: _result.documentId
+                  value: '{{_stored.row.data.documentId}}'
+  - conditions:
+      '{{_result.action}} = "unchanged"':
+        - break:
+            scope: automation
+  - set:
+      name: _result.reason
+      value: '{{_reason}}'
+  - conditions:
+      '{{dryRun}}':
+        - set:
+            name: _result.action
+            value: would-upload
+        - break:
+            scope: automation
+      '!{{_kbId}}':
+        - set:
+            name: _result.action
+            value: would-upload
+        - break:
+            scope: automation
+  - set:
+      name: _fileName
+      value: '{{_doc.fileName}}'
+  - conditions:
+      '!{{_fileName}}':
+        - set:
+            name: _fileName
+            value: '{{key}}.txt'
+  - _product-call:
+      service: platform
+      method: POST
+      path: workspaces/{{global.workspaceId}}/files
+      multipart:
+        - fieldname: file
+          value: '{{_sha.base64}}'
+          filename: '{{_fileName}}'
+          contentType: text/plain
+        - fieldname: shareToken
+          value: 'true'
+        - fieldname: public
+          value: 'false'
+      output: _up
+  - set:
+      name: _file
+      value: '{{_up.body[0]}}'
+  - conditions:
+      '!{{_file.url}}':
+        - set:
+            name: _result.error
+            value: KbDocumentUploadFailed
+        - set:
+            name: _result.message
+            value: The workspace file upload of {{_fileName}} failed (status {{_up.status}})
+        - emit:
+            event: error
+            payload:
+              error: KbDocumentUploadFailed
+              message: Failed to upload {{_fileName}} for document {{key}}
+              details:
+                key: '{{key}}'
+                status: '{{_up.status}}'
+        - break:
+            scope: automation
+  - comment: |
+      source_url is the stable upsert key (token-free, never fetched): a platform files path, the
+      URL shape Storage accepts for platform files; fetch_url is the share link Storage downloads.
+  - Storage.addFileToVectorStore:
+      vector_store_id: '{{_kbId}}'
+      source_type: remote_file
+      source_url: '{{global.apiUrl}}/files/{{global.workspaceId}}/kbdoc-{{key}}.{{_fileName}}'
+      fetch_url: '{{_file.url}}?token={{_file.shareToken}}'
+      filename: '{{_fileName}}'
+      mime_type: text/plain
+      tags:
+        kind: reference
+        document: '{{key}}'
+        hash: '{{_sha.hash}}'
+      output: _post
+  - conditions:
+      '!{{_post.structuredData.id}}':
+        - set:
+            name: _result.error
+            value: KbDocumentUploadFailed
+        - set:
+            name: _result.message
+            value: Storage refused to attach {{_fileName}} to the knowledge base {{_doc.kb}}
+        - emit:
+            event: error
+            payload:
+              error: KbDocumentUploadFailed
+              message: Failed to attach {{_fileName}} to knowledge base {{_doc.kb}}
+              details:
+                key: '{{key}}'
+                knowledgeBaseId: '{{_kbId}}'
+                response: '{{_post.error}}'
+        - comment: The file just uploaded is referenced by no document — removed (best effort).
+        - _product-call:
+            service: platform
+            method: DELETE
+            path: workspaces/{{global.workspaceId}}/files/{{_file.id}}
+            output: _del
+        - break:
+            scope: automation
+  - _state-set:
+      key: res:kbdoc:{{key}}
+      kind: resource
+      status: uploaded
+      data:
+        hash: '{{_sha.hash}}'
+        lines: '{{_sha.lines}}'
+        documentId: '{{_post.structuredData.id}}'
+        uploadedAt: '{{run.date}}'
+        kbId: '{{_kbId}}'
+        fileId: '{{_file.id}}'
+        fileName: '{{_fileName}}'
+  - comment: The workspace file of the previous upload is no longer referenced (best effort; a failure leaves an orphan file, nothing else).
+  - conditions:
+      '{{_stored.row.data.fileId}}':
+        - conditions:
+            '{{_stored.row.data.fileId}} != {{_file.id}}':
+              - _product-call:
+                  service: platform
+                  method: DELETE
+                  path: workspaces/{{global.workspaceId}}/files/{{_stored.row.data.fileId}}
+                  output: _del
+  - set:
+      name: _result.action
+      value: uploaded
+  - set:
+      name: _result.documentId
+      value: '{{_post.structuredData.id}}'
+output: '{{_result}}'

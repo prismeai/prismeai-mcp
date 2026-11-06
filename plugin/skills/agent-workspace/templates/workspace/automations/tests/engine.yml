@@ -1,0 +1,680 @@
+slug: tests/engine
+name: /tests/engine
+description: 'Smoke test of the engine (DESIGN 9), guarded (403 Forbidden). Writes nothing: checks the drift guard on three fixed configurations (agentConfig check: in sync, workspace changed, hand edit) and that consoleAction refuses an action outside its allow-list; runs syncAll {dryRun: true}, describeInstance {includeInstructions: false}, statusReport {}, consoleState {} and consoleAction {action: describeInstance} and checks their output shapes against DESIGN 4.5, 4.6, 4.7 and 5.3. Returns {ok, passed, failed: [check names], checks: [{name, ok}], errors: {syncAll, describeInstance, statusReport, consoleState, consoleAction}}.'
+when:
+  endpoint: true
+arguments:
+  body:
+    type: object
+    description: '{} (no option)'
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _output
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - break:
+            scope: automation
+  - syncAll:
+      body:
+        dryRun: true
+      output: _sync
+  - describeInstance:
+      body:
+        includeInstructions: false
+      output: _desc
+  - statusReport:
+      body: {}
+      output: _status
+  - consoleState:
+      body: {}
+      output: _cstate
+  - consoleAction:
+      body:
+        action: describeInstance
+        args:
+          includeInstructions: false
+      output: _caction
+  - comment: The sub calls set $http on a refusal; the test answers 200 with its own verdict.
+  - set:
+      name: $http
+      value:
+        status: 200
+  - set:
+      name: _actionsOk
+      value: true
+  - set:
+      name: _noWrite
+      value: true
+  - repeat:
+      'on': '{{_sync.actions}}'
+      do:
+        - conditions:
+            '!{{item.type}} or !{{item.key}} or !{{item.action}}':
+              - set:
+                  name: _actionsOk
+                  value: false
+        - conditions:
+            '{{item.action}} = "created" or {{item.action}} = "updated" or {{item.action}} = "uploaded" or {{item.action}} = "refreshed"':
+              - set:
+                  name: _noWrite
+                  value: false
+  - set:
+      name: _descOk
+      value: true
+  - repeat:
+      'on': '{{_desc.agents}}'
+      do:
+        - conditions:
+            '!{{item.key}} or !{{item.resolution.by}} or !{{item.syncAll.wouldDo}}':
+              - set:
+                  name: _descOk
+                  value: false
+  - set:
+      name: _checks
+      value: []
+  - set:
+      name: _failed
+      value: []
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_sync.dryRun}} = true':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'syncAll.dryRun'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'syncAll.dryRun'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_sync.actions}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'syncAll.actions is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'syncAll.actions is an array'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_sync.warnings}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'syncAll.warnings is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'syncAll.warnings is an array'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_sync.drifted}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'syncAll.drifted is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'syncAll.drifted is an array'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_sync.summary}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'syncAll.summary is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'syncAll.summary is an array'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_actionsOk}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'syncAll actions carry type, key, action'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'syncAll actions carry type, key, action'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_noWrite}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'syncAll wrote nothing (no created / updated / uploaded / refreshed action)'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'syncAll wrote nothing (no created / updated / uploaded / refreshed action)'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_desc.instance.date}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'describeInstance.instance.date'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'describeInstance.instance.date'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_desc.agents}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'describeInstance.agents is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'describeInstance.agents is an array'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_desc.knowledgeBases}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'describeInstance.knowledgeBases is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'describeInstance.knowledgeBases is an array'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_descOk}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'describeInstance agents carry key, resolution.by, syncAll.wouldDo'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'describeInstance agents carry key, resolution.by, syncAll.wouldDo'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_status.knowledgeBases}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'statusReport.knowledgeBases is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'statusReport.knowledgeBases is an array'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_status.agents}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'statusReport.agents is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'statusReport.agents is an array'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_status.documents}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'statusReport.documents is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'statusReport.documents is an array'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_status.sources}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'statusReport.sources is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'statusReport.sources is an array'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_status.ingest.phase}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'statusReport.ingest.phase'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'statusReport.ingest.phase'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_cstate.generatedAt}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'consoleState.generatedAt'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'consoleState.generatedAt'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_cstate.me}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'consoleState.me'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'consoleState.me'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_cstate.status}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'consoleState.status'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'consoleState.status'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_caction.ok}} = true':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'consoleAction describeInstance ok'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'consoleAction describeInstance ok'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{% isArray({{_caction.result.agents}}) %}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'consoleAction describeInstance result.agents is an array'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'consoleAction describeInstance result.agents is an array'
+  - comment: |
+      Behaviour checks, still writing nothing: the drift guard on three fixed configurations
+      (agentConfig check, the function _ensure-agent relies on) and the allow-list of consoleAction.
+  - set:
+      name: _fxBody
+      value:
+        name: tests-engine-fixture
+        description: fixture
+        instructions: |-
+          # Role
+          fixture
+        model: model-a
+        temperature: 0.2
+        tool_call_budget: 40
+        tools: []
+        sub_agents: []
+        visibility: restricted
+  - set:
+      name: _fxLive
+      value: '{{_fxBody}}'
+  - set:
+      name: _fxLive.id
+      value: agent_fixture
+  - Custom Code.run:
+      function: agentConfig
+      parameters:
+        op: check
+        live: '{{_fxLive}}'
+        expected: '{{_fxBody}}'
+      output: _dg1
+  - set:
+      name: _fxStored
+      value:
+        hash: '{{_dg1.liveHash}}'
+        snapshot: '{{_dg1.liveSnapshot}}'
+  - set:
+      name: _fxChanged
+      value: '{{_fxBody}}'
+  - set:
+      name: _fxChanged.model
+      value: model-b
+  - Custom Code.run:
+      function: agentConfig
+      parameters:
+        op: check
+        live: '{{_fxLive}}'
+        expected: '{{_fxChanged}}'
+        stored: '{{_fxStored}}'
+      output: _dg2
+  - set:
+      name: _fxEdited
+      value: '{{_fxLive}}'
+  - set:
+      name: _fxEdited.instructions
+      value: edited by hand
+  - Custom Code.run:
+      function: agentConfig
+      parameters:
+        op: check
+        live: '{{_fxEdited}}'
+        expected: '{{_fxChanged}}'
+        stored: '{{_fxStored}}'
+      output: _dg3
+  - consoleAction:
+      body:
+        action: tests-engine-unknown-action
+        args: {}
+      output: _cunknown
+  - set:
+      name: $http
+      value:
+        status: 200
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_dg1.reason}} == "in-sync" and !{{_dg1.drift}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'drift guard: live = expected is in sync'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'drift guard: live = expected is in sync'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_dg2.reason}} == "workspace-changed" and !{{_dg2.drift}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'drift guard: workspace changed is an update, not drift'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'drift guard: workspace changed is an update, not drift'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_dg3.reason}} == "edited-outside-workspace" and {{_dg3.drift}}':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'drift guard: a hand edit is drift'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'drift guard: a hand edit is drift'
+  - set:
+      name: _ok
+      value: false
+  - conditions:
+      '{{_cunknown.error}} == "InvalidAction"':
+        - set:
+            name: _ok
+            value: true
+  - set:
+      name: _checks
+      type: push
+      value:
+        name: 'consoleAction refuses an action outside the allow-list'
+        ok: '{{_ok}}'
+  - conditions:
+      '!{{_ok}}':
+        - set:
+            name: _failed
+            type: push
+            value: 'consoleAction refuses an action outside the allow-list'
+  - set:
+      name: _allOk
+      value: false
+  - conditions:
+      '{{_failed.length}} == 0':
+        - set:
+            name: _allOk
+            value: true
+  - set:
+      name: _output
+      value:
+        ok: '{{_allOk}}'
+        passed: '{% {{_checks.length}} - {{_failed.length}} %}'
+        failed: '{{_failed}}'
+        checks: '{{_checks}}'
+        errors:
+          syncAll: '{{_sync.error}}'
+          describeInstance: '{{_desc.error}}'
+          statusReport: '{{_status.error}}'
+          consoleState: '{{_cstate.error}}'
+          consoleAction: '{{_caction.error}}'
+output: '{{_output}}'

@@ -1,0 +1,19 @@
+slug: _content-sources
+name: content/Sources
+description: 'AGENT CONTENT — owned by the agent, never overwritten by a template upgrade (DESIGN 1). Discovery of the custom source types of this agent (any type other than the built-in urls and files): called by _source-discover with the effective source entry. Returns {handled: true, refs: [{url (required, stable: hashed into the item id and sent to Storage as source_url), name?, mime?, fetchUrl? (what Storage downloads when it differs, e.g. a share link), fileId? (workspace file attached by native_file_id), metadata?}], failed: [{ref, error {error, message}}]} for a type it knows, {handled: false} otherwise (the source then fails with SourceTypeUnsupported). Read-only: never write state nor call Storage; on a total listing failure return no ref and one failed entry, so nothing gets removed. Design rules: guides/ingestion.md section 3. PLACEHOLDER: no custom type.'
+private: true
+arguments:
+  source:
+    type: object
+    description: One entry of _sources-effective.sources {key, type, target, label, params}.
+do:
+  - set:
+      name: _cs
+      value:
+        handled: false
+        refs: []
+        failed: []
+  - comment: |
+      One branch per custom type, e.g. a condition source.type = "mytype" that reads source.params,
+      pushes refs and failed, and sets handled true.
+output: '{{_cs}}'

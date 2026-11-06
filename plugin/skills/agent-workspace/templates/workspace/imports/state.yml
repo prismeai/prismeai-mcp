@@ -1,0 +1,36 @@
+slug: state
+appSlug: Collection
+config:
+  collectionName: myAgentWorkspaceState_v1
+  properties:
+    key:
+      type: text
+      nullable: false
+      description: 'Row key (DESIGN 3): res:kb:<kb-key> | res:agent:<agent-key> | res:agentHash:<agent-key> | res:kbdoc:<doc-key> | item:<source-key>:<itemId> | setting:<name> | lock:<name> | bench:<benchId> | benchcase:<benchId>:<agent-key>:<caseId> | journal:<iso-date>:<correlationId> | overlay:<list>'
+    kind:
+      type: text
+      nullable: false
+      description: resource | item | setting | lock | bench | benchcase | journal | overlay
+    status:
+      type: text
+      nullable: true
+    data:
+      type: json
+      nullable: true
+    error:
+      type: json
+      nullable: true
+    updatedAt:
+      type: datetime
+      nullable: true
+  indexes:
+    - properties:
+        - kind
+    - properties:
+        - status
+    - properties:
+        - kind
+        - status
+  uniques:
+    - properties:
+        - key

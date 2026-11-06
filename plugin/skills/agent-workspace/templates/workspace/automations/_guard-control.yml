@@ -1,0 +1,63 @@
+slug: _guard-control
+name: helpers/Guard control
+description: 'Role gate of every control endpoint (DESIGN 4.1, 8). Arguments {admin?}. allowed = the caller workspace role (user.role) is in config.controlRoles, or the run is a schedule (run.trigger.type schedule, only seen when the scheduled automation itself calls the guard); admin = the role is in config.adminRoles or the caller is a platform admin (user.platformRole superadmin | root). With admin true, allowed also requires admin (the caller answers 403 AdminRequired). Returns {allowed, role, admin, platformAdmin}. The caller answers 403 {error: Forbidden} when allowed is false.'
+private: true
+arguments:
+  admin:
+    type: boolean
+    description: Also require an admin role (force, stop, prune, abandon).
+do:
+  - set:
+      name: _allowed
+      value: false
+  - set:
+      name: _admin
+      value: false
+  - set:
+      name: _platformAdmin
+      value: false
+  - set:
+      name: _role
+      value: ''
+  - conditions:
+      '{{run.trigger.type}} = "schedule"':
+        - comment: A schedule has no user and cannot be forged by a webhook caller.
+        - set:
+            name: _allowed
+            value: true
+        - set:
+            name: _role
+            value: schedule
+      default:
+        - comment: The control role is granted only through a workspace API key (security.yml), never through prismeai auth.
+        - set:
+            name: _role
+            value: '{{user.role}}'
+        - conditions:
+            '{{user.role}} and {{user.role}} in {{config.controlRoles}}':
+              - set:
+                  name: _allowed
+                  value: true
+        - conditions:
+            '{{user.role}} and {{user.role}} in {{config.adminRoles}}':
+              - set:
+                  name: _admin
+                  value: true
+        - conditions:
+            '{{user.platformRole}} = "superadmin" or {{user.platformRole}} = "root"':
+              - set:
+                  name: _platformAdmin
+                  value: true
+              - set:
+                  name: _admin
+                  value: true
+  - conditions:
+      '{{admin}} and !{{_admin}}':
+        - set:
+            name: _allowed
+            value: false
+output:
+  allowed: '{{_allowed}}'
+  role: '{{_role}}'
+  admin: '{{_admin}}'
+  platformAdmin: '{{_platformAdmin}}'

@@ -1,0 +1,424 @@
+slug: syncAll
+name: control/Sync all
+description: 'One-click setup and idempotent sync of the manifest with the products (DESIGN 4.5). Guarded (403 Forbidden; force needs an admin role, 403 AdminRequired). Body {dryRun?, force?, only?: [kbs | documents | agents | sources], agents?: [<agent-key>], allAgents?, skipIngest?} (the same names are accepted as direct arguments when body does not set them). Order: knowledge bases (_ensure-kb) → documents (_ensure-kb-document) → sub agents → other agents (_ensure-agent) → refreshSource of every source listed by _sources-effective (skipped in a dry run and with skipIngest). Agents: by default the entries without optional true; an optional agent is synced only when named in agents or with allAgents (a selected agent pulls its sub agents in), otherwise reported with action optional and left untouched. The dry run shares the code path of the write (every helper stops right before its first write); the knowledge bases a dry run would create are passed as plannedKbs so the agents plan their tools as added. A drifted agent is left untouched unless force (describeInstance first). 400 InvalidOnly / UnknownManifestKey on an unknown part or agent key. HTTP 200 even when an action failed (actions[].action = failed). Returns {dryRun, force, actions: [{type: kb | kbdoc | agent | source, key, action, …}], warnings: [string], drifted: [<agent-key>], summary: [string]}.'
+when:
+  endpoint: true
+arguments:
+  body:
+    type: object
+    description: '{dryRun?, force?, only?, agents?, allAgents?, skipIngest?}'
+  dryRun:
+    type: boolean
+  force:
+    type: boolean
+  only:
+    type: array
+  agents:
+    type: array
+  allAgents:
+    type: boolean
+  skipIngest:
+    type: boolean
+do:
+  - conditions:
+      '!{{body}}':
+        - set:
+            name: body
+            value: {}
+  - comment: Direct arguments (Builder form, DSUL call without body) fill the body fields the body does not set.
+  - conditions:
+      '{{dryRun}} == true':
+        - set:
+            name: body.dryRun
+            value: true
+  - conditions:
+      '{{force}} == true':
+        - set:
+            name: body.force
+            value: true
+  - conditions:
+      '{{allAgents}} == true':
+        - set:
+            name: body.allAgents
+            value: true
+  - conditions:
+      '{{skipIngest}} == true':
+        - set:
+            name: body.skipIngest
+            value: true
+  - conditions:
+      '{{only.length}} > 0':
+        - conditions:
+            '!{{body.only}}':
+              - set:
+                  name: body.only
+                  value: '{{only}}'
+  - conditions:
+      '{{agents.length}} > 0':
+        - conditions:
+            '!{{body.agents}}':
+              - set:
+                  name: body.agents
+                  value: '{{agents}}'
+  - set:
+      name: _dryRun
+      value: false
+  - conditions:
+      '{{body.dryRun}} = true':
+        - set:
+            name: _dryRun
+            value: true
+  - set:
+      name: _force
+      value: false
+  - conditions:
+      '{{body.force}} = true':
+        - set:
+            name: _force
+            value: true
+  - _guard-control:
+      admin: '{{_force}}'
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _output
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - conditions:
+            '{{_force}}':
+              - set:
+                  name: _output
+                  value:
+                    error: AdminRequired
+                    message: force requires an admin role
+        - break:
+            scope: automation
+  - comment: Parts to sync (body.only, array or one string; default every part).
+  - set:
+      name: _parts
+      value:
+        - kbs
+        - documents
+        - agents
+        - sources
+  - conditions:
+      '{{body.only}}':
+        - set:
+            name: _parts
+            value:
+              - '{{body.only}}'
+        - conditions:
+            '{% isArray({{body.only}}) %}':
+              - set:
+                  name: _parts
+                  value: '{{body.only}}'
+  - set:
+      name: _bad
+      value: []
+  - repeat:
+      'on': '{{_parts}}'
+      do:
+        - conditions:
+            '{{item}} = "kbs" or {{item}} = "documents" or {{item}} = "agents" or {{item}} = "sources"':
+              - comment: known part
+            default:
+              - set:
+                  name: _bad
+                  type: push
+                  value: '{{item}}'
+  - conditions:
+      '{{_bad.length}} > 0':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _output
+            value:
+              error: InvalidOnly
+              message: 'only accepts kbs, documents, agents, sources (got: {% join({{_bad}}, ", ") %})'
+              dryRun: '{{_dryRun}}'
+              actions: []
+        - break:
+            scope: automation
+  - comment: Agent selection — default the entries without optional true; optional ones when named or with allAgents.
+  - set:
+      name: _declared
+      value: []
+  - set:
+      name: _selected
+      value: {}
+  - repeat:
+      'on': '{{config.agents}}'
+      do:
+        - set:
+            name: _declared
+            type: push
+            value: '{{item.key}}'
+        - conditions:
+            '!{{item.optional}}':
+              - set:
+                  name: _selected[{{item.key}}]
+                  value: true
+            '{{body.allAgents}}':
+              - set:
+                  name: _selected[{{item.key}}]
+                  value: true
+  - set:
+      name: _requested
+      value: []
+  - conditions:
+      '{{body.agents}}':
+        - set:
+            name: _requested
+            value:
+              - '{{body.agents}}'
+        - conditions:
+            '{% isArray({{body.agents}}) %}':
+              - set:
+                  name: _requested
+                  value: '{{body.agents}}'
+  - repeat:
+      'on': '{{_requested}}'
+      do:
+        - conditions:
+            '{{item}} in {{_declared}}':
+              - set:
+                  name: _selected[{{item}}]
+                  value: true
+            default:
+              - set:
+                  name: _bad
+                  type: push
+                  value: '{{item}}'
+  - conditions:
+      '{{_bad.length}} > 0':
+        - set:
+            name: $http
+            value:
+              status: 400
+        - set:
+            name: _output
+            value:
+              error: UnknownManifestKey
+              message: 'agents must name declared agents (unknown: {% join({{_bad}}, ", ") %})'
+              dryRun: '{{_dryRun}}'
+              actions: []
+        - break:
+            scope: automation
+  - comment: A selected agent pulls its sub agents in; sub agents are synced first so that their ids resolve.
+  - set:
+      name: _isSub
+      value: {}
+  - repeat:
+      'on': '{{config.agents}}'
+      do:
+        - set:
+            name: _parentKey
+            value: '{{item.key}}'
+        - repeat:
+            'on': '{{item.subAgents}}'
+            do:
+              - set:
+                  name: _isSub[{{item.agent}}]
+                  value: true
+              - conditions:
+                  '{{_selected[{{_parentKey}}]}}':
+                    - set:
+                        name: _selected[{{item.agent}}]
+                        value: true
+  - set:
+      name: _actions
+      value: []
+  - set:
+      name: _drifted
+      value: []
+  - set:
+      name: _plannedKbs
+      value: []
+  - conditions:
+      '"kbs" in {{_parts}}':
+        - repeat:
+            'on': '{{config.knowledgeBases}}'
+            do:
+              - set:
+                  name: _kbKey
+                  value: '{{item.key}}'
+              - _ensure-kb:
+                  key: '{{_kbKey}}'
+                  dryRun: '{{_dryRun}}'
+                  output: _res
+              - conditions:
+                  '{{_res.action}} = "would-create"':
+                    - set:
+                        name: _plannedKbs
+                        type: push
+                        value: '{{_kbKey}}'
+              - set:
+                  name: _actions
+                  type: push
+                  value: '{{_res}}'
+  - conditions:
+      '"documents" in {{_parts}}':
+        - repeat:
+            'on': '{{config.documents}}'
+            do:
+              - set:
+                  name: _docKey
+                  value: '{{item.key}}'
+              - _ensure-kb-document:
+                  key: '{{_docKey}}'
+                  dryRun: '{{_dryRun}}'
+                  output: _res
+              - set:
+                  name: _actions
+                  type: push
+                  value: '{{_res}}'
+  - conditions:
+      '"agents" in {{_parts}}':
+        - set:
+            name: _order
+            value: []
+        - set:
+            name: _others
+            value: []
+        - repeat:
+            'on': '{{config.agents}}'
+            do:
+              - conditions:
+                  '!{{_selected[{{item.key}}]}}':
+                    - set:
+                        name: _actions
+                        type: push
+                        value:
+                          type: agent
+                          key: '{{item.key}}'
+                          action: optional
+                          id: null
+                  '{{_isSub[{{item.key}}]}}':
+                    - set:
+                        name: _order
+                        type: push
+                        value: '{{item.key}}'
+                  default:
+                    - set:
+                        name: _others
+                        type: push
+                        value: '{{item.key}}'
+        - repeat:
+            'on': '{{_others}}'
+            do:
+              - set:
+                  name: _order
+                  type: push
+                  value: '{{item}}'
+        - repeat:
+            'on': '{{_order}}'
+            do:
+              - set:
+                  name: _agentKey
+                  value: '{{item}}'
+              - _ensure-agent:
+                  key: '{{_agentKey}}'
+                  dryRun: '{{_dryRun}}'
+                  force: '{{_force}}'
+                  plannedKbs: '{{_plannedKbs}}'
+                  output: _res
+              - conditions:
+                  '{{_res.action}} = "drift"':
+                    - set:
+                        name: _drifted
+                        type: push
+                        value: '{{_agentKey}}'
+              - set:
+                  name: _actions
+                  type: push
+                  value: '{{_res}}'
+  - comment: Sources — refreshSource per effective source (delivered entries with the console overlay); never in a dry run nor with skipIngest.
+  - conditions:
+      '"sources" in {{_parts}}':
+        - conditions:
+            '!{{_dryRun}} and !{{body.skipIngest}}':
+              - _sources-effective:
+                  output: _eff
+              - repeat:
+                  'on': '{{_eff.sources}}'
+                  do:
+                    - set:
+                        name: _srcKey
+                        value: '{{item.key}}'
+                    - refreshSource:
+                        source: '{{_srcKey}}'
+                        body:
+                          source: '{{_srcKey}}'
+                        output: _refresh
+                    - set:
+                        name: _action
+                        value:
+                          type: source
+                          key: '{{_srcKey}}'
+                          action: refreshed
+                          queued: '{{_refresh.queued}}'
+                          discovered: '{{_refresh.discovered}}'
+                    - conditions:
+                        '{{_refresh.error}}':
+                          - set:
+                              name: _action.action
+                              value: failed
+                          - set:
+                              name: _action.error
+                              value: '{{_refresh.error}}'
+                          - set:
+                              name: _action.message
+                              value: '{{_refresh.message}}'
+                    - set:
+                        name: _actions
+                        type: push
+                        value: '{{_action}}'
+  - comment: Summary and warnings of the whole sync (Custom Code agentConfig summary over the actions).
+  - Custom Code.run:
+      function: agentConfig
+      parameters:
+        op: summary
+        data: '{{_actions}}'
+      output: _sum
+  - set:
+      name: _summary
+      value: '{{_sum.summary}}'
+  - set:
+      name: _warnings
+      value: '{{_sum.warnings}}'
+  - conditions:
+      '!{{_sum.summary}}':
+        - set:
+            name: _summary
+            value: []
+        - set:
+            name: _warnings
+            value:
+              - 'Custom Code agentConfig is not deployed: no summary (CustomCodeUnavailable).'
+  - repeat:
+      'on': '{{_actions}}'
+      do:
+        - conditions:
+            '{{item.warning}}':
+              - set:
+                  name: _warnings
+                  type: push
+                  value: '{{item.key}}: {{item.warning}}'
+  - set:
+      name: _output
+      value:
+        dryRun: '{{_dryRun}}'
+        force: '{{_force}}'
+        actions: '{{_actions}}'
+        warnings: '{{_warnings}}'
+        drifted: '{{_drifted}}'
+        summary: '{{_summary}}'
+output: '{{_output}}'

@@ -1,0 +1,135 @@
+slug: consoleState
+name:
+  en: console/State
+  fr: console/État
+description: 'Read endpoint of the operator console (guarded, writes nothing, DESIGN 5.3): one call feeds every view. Body {withAgents?: bool (adds describeInstance without instructions nor upload), withJournal?: bool (default true), journalLimit?: number (default 30, at most 200)}. Returns {generatedAt, me {id, email, role, canControl, canAdmin}, status (statusReport output), sources (_sources-effective with console details: [{key, type, target, label, params, overlay {added, removed, by, at, baseHash, param, baseChanged} | null, delivered {param, items, hash}}]), agents: [{key, name, optional, variantOf, id, wouldDo, reason, summary, publishedAt, hasDraftChanges, status}] | null (null without withAgents; a single {error, message} entry when describeInstance fails), journal: [{key, status, updatedAt, data}] (newest first)}. Error: 403 Forbidden.'
+when:
+  endpoint: true
+validateArguments: true
+arguments:
+  body:
+    type: object
+    properties:
+      withAgents:
+        type: boolean
+      withJournal:
+        type: boolean
+      journalLimit:
+        type: number
+do:
+  - _guard-control:
+      output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _output
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - break:
+            scope: automation
+  - comment: Admin exactly as the guard decides it (the one rule, _guard-control).
+  - set:
+      name: _canAdmin
+      value: '{{_guard.admin}}'
+  - statusReport:
+      body: {}
+      output: _status
+  - _sources-effective:
+      console: true
+      output: _src
+  - set:
+      name: _agents
+      value: null
+  - conditions:
+      '{{body.withAgents}}':
+        - describeInstance:
+            body:
+              includeInstructions: false
+              upload: false
+            output: _desc
+        - set:
+            name: _agents
+            value: []
+        - repeat:
+            'on': '{{_desc.agents}}'
+            do:
+              - set:
+                  name: _agents[]
+                  value:
+                    key: '{{item.key}}'
+                    name: '{{item.name}}'
+                    optional: '{{item.optional}}'
+                    variantOf: '{{item.variantOf}}'
+                    id: '{{item.resolution.id}}'
+                    wouldDo: '{{item.syncAll.wouldDo}}'
+                    reason: '{{item.syncAll.reason}}'
+                    summary: '{{item.syncAll.summary}}'
+                    publishedAt: '{{item.live.publishedAt}}'
+                    hasDraftChanges: '{{item.live.hasDraftChanges}}'
+                    status: '{{item.live.status}}'
+        - conditions:
+            '{{_desc.error}}':
+              - set:
+                  name: _agents
+                  value:
+                    - error: '{{_desc.error}}'
+                      message: '{{_desc.message}}'
+  - comment: withJournal defaults to true; only an explicit false skips the journal.
+  - set:
+      name: _withJournal
+      value: true
+  - conditions:
+      '{{body}} and "withJournal" in {{body}} and !{{body.withJournal}}':
+        - set:
+            name: _withJournal
+            value: false
+  - set:
+      name: _limit
+      value: '{% {{body.journalLimit}} || 30 %}'
+  - conditions:
+      '{{_limit}} > 200':
+        - set:
+            name: _limit
+            value: 200
+  - set:
+      name: _journal
+      value: []
+  - conditions:
+      '{{_withJournal}}':
+        - _state-find:
+            query:
+              kind: journal
+            sort:
+              updatedAt: -1
+            limit: '{{_limit}}'
+            output: _jr
+        - repeat:
+            'on': '{{_jr.rows}}'
+            do:
+              - set:
+                  name: _journal[]
+                  value:
+                    key: '{{item.key}}'
+                    status: '{{item.status}}'
+                    updatedAt: '{{item.updatedAt}}'
+                    data: '{{item.data}}'
+  - set:
+      name: _output
+      value:
+        generatedAt: '{{run.date}}'
+        me:
+          id: '{{user.id}}'
+          email: '{{user.email}}'
+          role: '{{_guard.role}}'
+          canControl: '{{_guard.allowed}}'
+          canAdmin: '{{_canAdmin}}'
+        status: '{{_status}}'
+        sources: '{{_src.sources}}'
+        agents: '{{_agents}}'
+        journal: '{{_journal}}'
+output: '{{_output}}'

@@ -1,0 +1,286 @@
+slug: pumpIngest
+name:
+  en: ingestion/Pump ingest queue
+  fr: ingestion/Pomper la file d'ingestion
+description: 'Self-draining dispatcher of the ingestion queue (state rows kind item). Triggered by the schedule (only with config.ingestion.unattended: a schedule run has no user, so it returns {skipped: NoUserIdentity} otherwise), by the event ingest.pump (emitted by refreshSource, controlIngest resume and every finished onIngestItem) and as a guarded webhook (403 Forbidden). Reads setting:ingestControl FRESH first: while every source is suspended / stopped it dispatches nothing and runs no housekeeping. Otherwise it runs _ingest-housekeeping, counts the items in flight (dispatched + processing) and dispatches up to min(batchSize, maxInFlight - inFlight) queued items, oldest first, skipping a source suspended by a scoped key: each row is claimed with a conditional update (queued → dispatched + a per-run dispatchToken), read back, and only the winner emits ingest.item {key, token, hop}, so concurrent pumps never dispatch twice. config.ingestion {batchSize (5), maxInFlight (10)}; body.batchSize overrides batchSize. Returns {suspended, phase, control, queued, inFlight, dispatched, remaining, requeuedStale, requeuedFailed, exhausted}.'
+when:
+  endpoint: true
+  events:
+    - ingest.pump
+  schedules:
+    - '*/15 * * * *'
+arguments:
+  batchSize:
+    type: number
+    description: Items dispatched at most by this run (default config.ingestion.batchSize, else 5).
+  body:
+    type: object
+    description: Webhook body.
+    properties:
+      batchSize:
+        type: number
+  payload:
+    type: object
+    description: Event payload (ingest.pump).
+    properties:
+      source:
+        type: string
+      hop:
+        type: number
+        description: Hop counter of the ingest.pump / ingest.item chain, passed on to ingest.item.
+do:
+  - conditions:
+      '!{{body}}':
+        - set:
+            name: body
+            value: {}
+  - conditions:
+      '{{batchSize}} > 0 and !{{body.batchSize}}':
+        - set:
+            name: body.batchSize
+            value: '{{batchSize}}'
+  - set:
+      name: _hop
+      value: 0
+  - conditions:
+      isNumber({{payload.hop}}):
+        - set:
+            name: _hop
+            value: '{{payload.hop}}'
+  - comment: |
+      Schedule and event runs are trusted HERE, not in _guard-control: a helper called as a child
+      sees run.trigger.type = automation. A schedule has no user; ingest.pump only starts a
+      dispatch that obeys the control key and claims rows conditionally. Webhook runs are guarded.
+  - set:
+      name: _guard
+      value:
+        allowed: false
+  - conditions:
+      '{{run.trigger.type}} = "schedule" or {{run.trigger.type}} = "event"':
+        - set:
+            name: _guard
+            value:
+              allowed: true
+              role: '{{run.trigger.type}}'
+      default:
+        - _guard-control:
+            output: _guard
+  - conditions:
+      '!{{_guard.allowed}}':
+        - set:
+            name: $http
+            value:
+              status: 403
+        - set:
+            name: _result
+            value:
+              error: Forbidden
+              message: control endpoints require a control role
+        - break:
+            scope: automation
+  - comment: |
+      A schedule run has no user, and Storage refuses calls without an identity it accepts: it
+      would only burn the items' attempts. Unless config.ingestion.unattended says an identity is
+      configured for such runs, the schedule does nothing; the queue moves on with ingest.pump
+      events (which keep the user of the run that started them) and with the console, which kicks
+      pumpIngest while it is open.
+  - conditions:
+      '{{run.trigger.type}} = "schedule" and !{{config.ingestion.unattended}}':
+        - set:
+            name: _result
+            value:
+              skipped: NoUserIdentity
+              message: schedule runs dispatch nothing without config.ingestion.unattended
+        - break:
+            scope: automation
+  - _ingest-control:
+      output: _ctl
+  - conditions:
+      '{{_ctl.global}}':
+        - _ingest-counts:
+            failedLimit: 1
+            output: _ctlCounts
+        - set:
+            name: _result
+            value:
+              suspended: true
+              phase: '{{_ctlCounts.phase}}'
+              control: '{{_ctlCounts.control}}'
+              queued: '{{_ctlCounts.queued}}'
+              inFlight: '{{_ctlCounts.inFlight}}'
+              dispatched: 0
+        - break:
+            scope: automation
+  - comment: A sentinel, never empty, so the source comparison always has two operands.
+  - set:
+      name: _skipSource
+      value: __none__
+  - conditions:
+      '{{_ctl.scoped}}':
+        - set:
+            name: _skipSource
+            value: '{{_ctl.source}}'
+  - set:
+      name: _n
+      value: 5
+  - conditions:
+      '{{config.ingestion.batchSize}} > 0':
+        - set:
+            name: _n
+            value: '{{config.ingestion.batchSize}}'
+  - conditions:
+      '{{body.batchSize}} > 0':
+        - set:
+            name: _n
+            value: '{{body.batchSize}}'
+  - set:
+      name: _max
+      value: 10
+  - conditions:
+      '{{config.ingestion.maxInFlight}} > 0':
+        - set:
+            name: _max
+            value: '{{config.ingestion.maxInFlight}}'
+  - _ingest-housekeeping:
+      output: _hk
+  - set:
+      name: _inFlight
+      value: 0
+  - set:
+      name: _pumpInList1
+      value:
+        - dispatched
+        - processing
+  - repeat:
+      'on': '{{_pumpInList1}}'
+      do:
+        - _state-find:
+            query:
+              kind: item
+              status: '{{item}}'
+            limit: 5000
+            output: _fl
+        - set:
+            name: _inFlight
+            value: '{% {{_inFlight}} + {{_fl.rows.length}} %}'
+  - _state-find:
+      query:
+        kind: item
+        status: queued
+      sort:
+        updatedAt: 1
+      limit: 1000
+      output: _q
+  - set:
+      name: _queue
+      value: []
+  - repeat:
+      'on': '{{_q.rows}}'
+      do:
+        - conditions:
+            '{{item.data.source}} != {{_skipSource}}':
+              - set:
+                  name: _queue
+                  type: push
+                  value: '{{item}}'
+  - set:
+      name: _slots
+      value: '{% {{_max}} - {{_inFlight}} %}'
+  - conditions:
+      '{{_slots}} > {{_n}}':
+        - set:
+            name: _slots
+            value: '{{_n}}'
+  - conditions:
+      '{{_slots}} < 0':
+        - set:
+            name: _slots
+            value: 0
+  - comment: |
+      Conditional claim (query key + status queued) carrying a per-run token, then read back: only
+      the run whose token is stored emits ingest.item. Gating on $index (not on the dispatched count)
+      keeps concurrent pumps that computed the same free slots within the cap.
+  - set:
+      name: _token
+      value: '{% uuid() %}'
+  - set:
+      name: _dispatched
+      value: 0
+  - repeat:
+      'on': '{{_queue}}'
+      do:
+        - conditions:
+            '{{$index}} < {{_slots}}':
+              - set:
+                  name: _qRow
+                  value: '{{item}}'
+              - set:
+                  name: _claimData
+                  value: '{{_qRow.data}}'
+              - set:
+                  name: _claimData.dispatchToken
+                  value: '{{_token}}'
+              - set:
+                  name: _claimData.dispatchedAt
+                  value: '{{run.date}}'
+              - try:
+                  do:
+                    - state.updateOne:
+                        query:
+                          key: '{{_qRow.key}}'
+                          status: queued
+                        data:
+                          $set:
+                            status: dispatched
+                            data: '{{_claimData}}'
+                            updatedAt: '{{run.date}}'
+                  catch:
+                    - comment: No queued row left under this key (claimed elsewhere) — checked below.
+              - _state-get:
+                  key: '{{_qRow.key}}'
+                  output: _claimed
+              - set:
+                  name: _won
+                  value: false
+              - conditions:
+                  '{{_claimed.row.data.dispatchToken}}':
+                    - conditions:
+                        '{{_claimed.row.status}} = "dispatched" and {{_claimed.row.data.dispatchToken}} == {{_token}}':
+                          - set:
+                              name: _won
+                              value: true
+              - conditions:
+                  '{{_won}}':
+                    - emit:
+                        event: ingest.item
+                        payload:
+                          key: '{{_qRow.key}}'
+                          token: '{{_token}}'
+                          hop: '{{_hop}}'
+                    - set:
+                        name: _dispatched
+                        value: '{% {{_dispatched}} + 1 %}'
+  - set:
+      name: _phase
+      value: idle
+  - conditions:
+      '{{_queue.length}} > 0 or {{_inFlight}} > 0 or {{_dispatched}} > 0':
+        - set:
+            name: _phase
+            value: running
+  - set:
+      name: _result
+      value:
+        suspended: false
+        phase: '{{_phase}}'
+        control:
+          action: '{{_ctl.action}}'
+          source: '{{_ctl.source}}'
+        queued: '{{_q.rows.length}}'
+        inFlight: '{% {{_inFlight}} + {{_dispatched}} %}'
+        dispatched: '{{_dispatched}}'
+        remaining: '{% {{_queue.length}} - {{_dispatched}} %}'
+        requeuedStale: '{{_hk.requeuedStale}}'
+        requeuedFailed: '{{_hk.requeuedFailed}}'
+        exhausted: '{{_hk.exhausted}}'
+output: '{{_result}}'
