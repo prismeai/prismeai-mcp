@@ -1,12 +1,12 @@
 ---
 name: app-mcp-document
-description: Generate public documentation (MDX) for a Prisme.ai App+MCP connector, mirroring the structure of existing pages (gryzzly.mdx, data-galaxy.mdx, …) in the prismeai/docs repo. Produces one connector MDX page, inserts its matching overview card, and uses an existing locally scaffolded connector workspace. Use when the user says "document the X app+mcp", "écris la doc de X", "/app-mcp-document X", or similar.
+description: Generate public documentation (MDX) for a Prisme.ai App+MCP connector, mirroring the structure of existing pages (gryzzly.mdx, data-galaxy.mdx, …) in the Prisme.ai docs repo (gitlab.com/prisme.ai/docs, MRs target `dev`). Produces one connector MDX page, inserts its matching overview card, and uses an existing locally scaffolded connector workspace. Use when the user says "document the X app+mcp", "écris la doc de X", "/app-mcp-document X", or similar.
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent
 ---
 
 # App + MCP documentation writer
 
-You are producing the **public, user-facing documentation** for a connector that already exists as a local Prisme.ai App+MCP workspace. The output is an MDX page in the `prismeai/docs` repo (Mintlify-flavoured) following the **audience-driven model** described below. Canonical references: `google-workspaces.mdx` (Tenant-context + config SPA archetype) and `gitlab.mdx` (Central-OAuth via Governance archetype). Older pages (`gryzzly.mdx`, `data-galaxy.mdx`, `monday.mdx`) predate this model — use them for prose tone only, not for structure.
+You are producing the **public, user-facing documentation** for a connector that already exists as a local Prisme.ai App+MCP workspace. The output is an MDX page in the Prisme.ai docs repo — **`gitlab.com/prisme.ai/docs`** (Mintlify-flavoured; the former GitHub `prismeai/docs` repo is obsolete) following the **audience-driven model** described below. Canonical references: `google-workspaces.mdx` (Tenant-context + config SPA archetype) and `gitlab.mdx` (Central-OAuth via Governance archetype). Older pages (`gryzzly.mdx`, `data-galaxy.mdx`, `monday.mdx`) predate this model — use them for prose tone only, not for structure.
 
 **Three deliverables**, all under `<docs-repo>/`:
 - **`apps-store/marketplace/connectors/<slug>.mdx`** — the full connector page
@@ -110,7 +110,8 @@ Run sequentially. Pause after phase 1 for confirmation.
 1. If `$ARGUMENTS` is empty, ask via `AskUserQuestion`:
    - "Quel connecteur documenter ? (slug / nom de dossier local)"
 2. Ask for the docs repo path via `AskUserQuestion`:
-   - "Où se trouve le repo `prismeai/docs` ?" — suggest the user paste an absolute path; no default is assumed.
+   - "Où se trouve le clone du repo docs (`gitlab.com/prisme.ai/docs`) ?" — suggest `~/Documents/docs`; if there is no clone, offer `git clone git@gitlab.com:prisme.ai/docs.git`.
+   - Work in a dedicated branch created from `origin/dev` (a git worktree if the clone is shared), never on `dev` itself. The merge request targets **`dev`**, not `main`.
    - Verify `<docs-repo>/apps-store/marketplace/connectors/overview.mdx` exists; abort with a clear message otherwise.
 3. Locate the source workspace locally:
    - Prefer `./prismeai-workspaces/workspaces/<slug>/`
