@@ -144,7 +144,7 @@ do:
       name: results.expiredStoredTokenReplayed
       value: false
   - conditions:
-      '{{t1.success}} and {{t1.status}} == 200 and {{t1.data.ok}} == 42':
+      '{{t1.success}} and {{t1.status}} == 200 and {{t1.data.ok}} == 42 and {{t1.testAttempts}} == 2':
         - set:
             name: results.expiredStoredTokenReplayed
             value: true
@@ -166,7 +166,7 @@ do:
       name: results.callerTokenNotRefreshed
       value: false
   - conditions:
-      '!{{t2.success}} and {{t2.status}} == 401':
+      '!{{t2.success}} and {{t2.status}} == 401 and {{t2.testAttempts}} == 1':
         - set:
             name: results.callerTokenNotRefreshed
             value: true
@@ -219,7 +219,7 @@ do:
         - set:
             name: results.unavailableRefreshAsksToRetry
             value: true
-  - comment: A 401 that survives a freshly minted token is replayed once, not twice — it falls through to handleApiError.
+  - comment: A 401 that survives a freshly minted token is replayed once, not twice — exactly two requests are sent, then it falls through to handleApiError. `testAttempts` makes this fail if the replay ever loops; the 2-turn loop alone would hide it.
   - executeApiCall:
       path: limits
       method: GET
@@ -237,7 +237,7 @@ do:
       name: results.secondRejectionNotReplayed
       value: false
   - conditions:
-      '!{{t5.success}} and {{t5.status}} == 401 and !{{t5.requiresOAuth}}':
+      '!{{t5.success}} and {{t5.status}} == 401 and !{{t5.requiresOAuth}} and {{t5.testAttempts}} == 2':
         - set:
             name: results.secondRejectionNotReplayed
             value: true
