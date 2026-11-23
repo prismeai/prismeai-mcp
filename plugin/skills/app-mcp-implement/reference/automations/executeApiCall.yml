@@ -32,7 +32,7 @@ arguments:
     description: Short description used in error messages.
   _testResponses:
     type: object
-    description: 'TEST-ONLY seam, inert in production (no tool or method layer forwards it). `{ validToken, accepted, rejected, freshAuth }`: each attempt answers `accepted` when the request carries `Bearer {validToken}` and `rejected` otherwise — a provider that only honours a live token — and the forced refresh returns `freshAuth` instead of running buildAppAuth. See tests-tokenExpiry.'
+    description: 'TEST-ONLY seam, inert in production (no tool or method layer forwards it). `{ validToken, accepted, rejected, freshAuth }`: the result then carries `testAttempts`, the number of requests sent; each attempt answers `accepted` when the request carries `Bearer {validToken}` and `rejected` otherwise — a provider that only honours a live token — and the forced refresh returns `freshAuth` instead of running buildAppAuth. See tests-tokenExpiry.'
 do:
   - conditions:
       '!{{baseUrl}}':
@@ -71,12 +71,18 @@ do:
             name: fetchHeaders.Content-Type
             value: '{% {{contentType}} || "application/json" %}'
   - comment: 'A 401 on a token served from the interactive store (an opaque `$secret:` ref — buildAppAuth tracks no expiry for it) means that token is dead: mint a fresh one (buildAppAuth forceRefresh, under the renewal lease) and replay the request ONCE, hence the two turns of this loop. Tokens minted on the spot (cron) or supplied by the caller are not retried — a 401 there is not an expiry, and re-minting would only hide it. A second 401 falls through to the normal error path. Pattern of powerbi / google-workspaces executeApiCall.'
+  - set:
+      name: _testAttempts
+      value: 0
   - repeat:
       until: 2
       do:
         - conditions:
             '{{_testResponses}}':
-              - comment: Test seam — see the `_testResponses` argument.
+              - comment: Test seam — see the `_testResponses` argument. Counts the requests sent, so a test can tell one replay from two.
+              - set:
+                  name: _testAttempts
+                  value: '{% {{_testAttempts}} + 1 %}'
               - set:
                   name: testBearer
                   value: Bearer {{_testResponses.validToken}}
@@ -164,6 +170,11 @@ do:
               requiresOAuth: '{{freshAuth.requiresOAuth}}'
               transient: '{{freshAuth.transient}}'
               status: 401
+        - conditions:
+            '{{_testResponses}}':
+              - set:
+                  name: result.testAttempts
+                  value: '{{_testAttempts}}'
         - break: {}
   - handleApiError:
       response: '{{response}}'
@@ -178,6 +189,11 @@ do:
               error: '{{errorResult}}'
               data: '{{response.body}}'
               status: '{{response.status}}'
+        - conditions:
+            '{{_testResponses}}':
+              - set:
+                  name: result.testAttempts
+                  value: '{{_testAttempts}}'
         - break: {}
   - set:
       name: result
@@ -185,4 +201,9 @@ do:
         success: true
         data: '{{response.body}}'
         status: '{{response.status}}'
+  - conditions:
+      '{{_testResponses}}':
+        - set:
+            name: result.testAttempts
+            value: '{{_testAttempts}}'
 output: '{{result}}'

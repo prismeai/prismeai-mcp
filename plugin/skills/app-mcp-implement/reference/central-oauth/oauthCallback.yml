@@ -19,11 +19,15 @@ do:
   - set:
       name: redirectTo
       value: '{{spaBase}}&status=error&message=unknown'
+  - comment: This page is served by an anonymous webhook and puts the redirect URL in HTML attributes, so only a symbolic error code may reach it (safeOAuthErrorCode, as in every fleet connector) — a raw `error` would let a crafted link show any text on the platform's domain.
   - conditions:
       '{{query.error}}':
+        - safeOAuthErrorCode:
+            value: '{{query.error}}'
+            output: errCode
         - set:
             name: redirectTo
-            value: '{{spaBase}}&status=error&message={{query.error}}'
+            value: '{{spaBase}}&status=error&message={{errCode}}'
         - break: {}
   - conditions:
       '!{{query.code}} || !{{query.state}}':

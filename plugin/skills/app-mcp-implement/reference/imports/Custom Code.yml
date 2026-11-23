@@ -142,7 +142,9 @@ config:
         // Format `p1.<payload>.<sig>`: payload = base64url JSON { uid, n, iat },
         // sig = HMAC-SHA256(secret, 'state:' + payload). The PKCE verifier is
         // DERIVED from the nonce (HMAC(secret, 'pkce:' + n)), so the callback
-        // recomputes it instead of storing it.
+        // recomputes it instead of storing it. Only the challenge (public) is
+        // returned: whatever a Custom Code function returns is recorded in the
+        // Activity Feed, so the verifier never leaves this function.
         const crypto = require('crypto');
         const key = String(secret || '');
         const u = String(uid || '');
@@ -169,7 +171,7 @@ config:
       code: |
         // Reverse of signOAuthState (powerbi `unpackOAuthState`).
         // { signed: false, valid: false } for an unsigned state, which the caller
-        // refuses. Otherwise { signed: true, valid, reason, codeVerifier }: the
+        // refuses. Otherwise { signed: true, valid, reason, nonce }: the
         // signature must verify (timing-safe), the payload uid must be the
         // callback user, and the state must be younger than maxAgeMs (10 min).
         const crypto = require('crypto');
@@ -190,8 +192,11 @@ config:
         const maxAge = Number(maxAgeMs) > 0 ? Number(maxAgeMs) : 600000;
         const iat = Number(obj.iat);
         if (!(iat > 0) || t - iat > maxAge || iat - t > 60000) return { signed: true, valid: false, reason: 'state_expired' };
-        const codeVerifier = crypto.createHmac('sha256', key).update('pkce:' + String(obj.n || '')).digest('base64url');
-        return { signed: true, valid: true, codeVerifier: codeVerifier };
+        // The nonce, not the verifier: a Custom Code result is recorded in the
+        // Activity Feed. The caller derives the verifier with the runtime crypto
+        // module (hmac(secret, 'pkce:' + nonce)), whose result is not. The nonce
+        // alone is useless without the client secret.
+        return { signed: true, valid: true, nonce: String(obj.n || '') };
     buildAuthorizeUrl:
       parameters:
         authorizeUrl:

@@ -1,0 +1,24 @@
+slug: safeOAuthErrorCode
+name: OAuth/safeOAuthErrorCode
+description: Reduces an OAuth error value (the `error` query parameter of the callback, or the `error` field of a token-endpoint answer) to a symbolic code before it is placed in the callback page. Returns the value unchanged when it has the shape of an RFC 6749 error code ([A-Za-z0-9_.-], 1 to 64 characters), `unknown` when it is empty, and `provider_error` otherwise, so the raw value never reaches the page.
+private: true
+arguments:
+  value:
+    type: string
+    description: The error value to reduce.
+do:
+  - comment: Duplicated byte for byte in every App+MCP connector that has an OAuth callback (one-note keeps a Custom Code variant) until it moves to MCP Core. Change every copy together.
+  - set:
+      name: code
+      value: unknown
+  - conditions:
+      '{{value}}':
+        - set:
+            name: code
+            value: provider_error
+        - conditions:
+            isString({{value}}) && {{value}} matches regex("^[A-Za-z0-9_.-]{1,64}$"):
+              - set:
+                  name: code
+                  value: '{{value}}'
+output: '{{code}}'
