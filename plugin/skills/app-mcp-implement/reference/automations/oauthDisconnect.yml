@@ -2,30 +2,19 @@ slug: oauthDisconnect
 name: OAuth/oauthDisconnect
 description: >-
   Disconnect the current user's Salesforce OAuth session: best-effort token
-  revocation, then delete the stored token. Opened in a popup by the config app
-  and by agent-factory's capability `disconnect_url` (both navigate to it, never
-  fetch it server-side) — so it always redirects (meta-refresh, CSP-safe) to the
-  SPA callback view (?view=oauthCallback&status=disconnected), which auto-closes.
+  revocation, then delete the user-scoped token secrets, the workspace mirror of
+  the refresh token and the connection metadata. Opened in a popup by the config
+  app and by agent-factory's capability `disconnect_url` (both navigate to it,
+  never fetch it server-side) — so it always redirects (meta-refresh, CSP-safe)
+  to the SPA callback view (?view=oauthCallback&status=disconnected), which
+  auto-closes.
 private: true
 when:
   endpoint: true
+schemas:
+  - output:
+      redact: true
 do:
-  - conditions:
-      '{{user.salesforceNext.oauth.accessToken}}':
-        - fetch:
-            url: '{{config.oauthRevokeUrl}}'
-            method: POST
-            headers:
-              Content-Type: application/x-www-form-urlencoded
-            body:
-              token: '{{user.salesforceNext.oauth.accessToken}}'
-            output: revokeResp
-            outputMode: detailed_response
-            emitErrors: false
-  - delete:
-      name: user.salesforceNext.oauth
-      scope: user
-  - comment: Also drop the workspace refresh-token secret (cron/non-interactive store), if any.
   - conditions:
       '{{user.id}}':
         - Custom Code.run:
@@ -43,13 +32,74 @@ do:
             output: tokName
         - conditions:
             '!{{tokName.error}}':
-              - run:
-                  module: secrets
-                  function: delete
-                  parameters:
-                    name: '{{tokName.name}}'
-                    scope: workspace
-                  output: tokDelResp
+              - comment: Revoke the refresh token (it ends the whole grant at the provider). The secret ref resolves inside the fetch body; only a `$secret:` ref is sent.
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: get
+                        parameters:
+                          name: '{{tokName.name}}'
+                          scope: user
+                        output: rtSecret
+                  catch:
+                    - set:
+                        name: rtSecret
+                        value:
+                          error: '{{$error.message}}'
+              - conditions:
+                  '{{rtSecret}} matches "$secret:" and {{config.oauthRevokeUrl}}':
+                    - fetch:
+                        url: '{{config.oauthRevokeUrl}}'
+                        method: POST
+                        headers:
+                          Content-Type: application/x-www-form-urlencoded
+                        body:
+                          token: '{{rtSecret}}'
+                        output: revokeResp
+                        outputMode: detailed_response
+                        emitErrors: false
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: delete
+                        parameters:
+                          name: '{{tokName.name}}'
+                          scope: user
+                  catch:
+                    - set:
+                        name: _rtDelErr
+                        value: '{{$error.message}}'
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: delete
+                        parameters:
+                          name: '{{tokName.accessName}}'
+                          scope: user
+                  catch:
+                    - set:
+                        name: _atDelErr
+                        value: '{{$error.message}}'
+              - comment: The workspace mirror (cron store). A member rule can never grant `delete`, so it takes the tokenDepositor role (bound to this user's own name) — best-effort.
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: delete
+                        assumeRole: tokenDepositor
+                        parameters:
+                          name: '{{tokName.name}}'
+                          scope: workspace
+                  catch:
+                    - set:
+                        name: _rtWsDelErr
+                        value: '{{$error.message}}'
+  - delete:
+      name: user.salesforceNext.oauth
+      scope: user
   - set:
       name: $http
       value:

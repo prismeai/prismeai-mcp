@@ -3,12 +3,17 @@ name: OAuth/oauthConnect
 description: >-
   Per-user OAuth2 (authorization-code + PKCE) connect endpoint. Opened in the
   user's browser (Connexion button / agent-factory connect_url). Reads the tenant
-  Connected App creds from field-level config values, stores PKCE + state in user
-  scope, and redirects to Salesforce's authorize endpoint. oauthCallback then
-  exchanges the code and stores the token for this user.
+  Connected App creds from field-level config values, builds a stateless
+  HMAC-signed state (signOAuthState — the PKCE verifier is derived from its
+  nonce, nothing is written to the user context) and redirects to Salesforce's
+  authorize endpoint. oauthCallback verifies the state, exchanges the code and
+  stores the tokens in user-scoped secrets. Pattern of powerbi `oauthConnect`.
 private: true
 when:
   endpoint: true
+schemas:
+  - output:
+      redact: true
 do:
   - conditions:
       '!{{user.id}}':
@@ -26,7 +31,8 @@ do:
         loginHost: '{{config.loginHost}}'
         oauthClientId: '{{config.oauthClientId}}'
         oauthClientSecret: '{{config.oauthClientSecret}}'
-        scopes: '{{config.oauthScopes}}'
+        oauthAuthorizeUrl: '{{config.oauthAuthorizeUrl}}'
+        oauthScopes: '{{config.oauthScopes}}'
   - conditions:
       '!{{a.oauthClientId}} || !{{a.oauthClientSecret}} || !{{a.oauthAuthorizeUrl}} || !{{a.oauthScopes}}':
         - set:
@@ -46,19 +52,23 @@ do:
   - set:
       name: loginHost
       value: '{{lh.host}}'
+  - comment: Stateless signed state + derived PKCE verifier — nothing is written to the user context. The callback may run on another worker whose cached user context does not hold a value written here yet (the intermittent `invalid_state`), and a second Connect click used to overwrite the first popup's state.
   - Custom Code.run:
-      function: generatePkce
-      output: pkce
-  - Custom Code.run:
-      function: generateState
+      function: signOAuthState
+      parameters:
+        uid: '{{user.id}}'
+        secret: '{{a.oauthClientSecret}}'
       output: stateResult
-  - set:
-      name: user.salesforceNext.oauthPending
-      scope: user
-      value:
-        codeVerifier: '{{pkce.codeVerifier}}'
-        state: '{{stateResult.state}}'
-        createdAt: '{{run.date}}'
+  - conditions:
+      '{{stateResult.error}}':
+        - set:
+            name: $http
+            value:
+              status: 500
+        - set:
+            name: output
+            value: Could not start the Salesforce sign-in. Please retry.
+        - break: {}
   - Custom Code.run:
       function: buildAuthorizeUrl
       parameters:
@@ -67,7 +77,7 @@ do:
         redirectUri: '{{config.oauthCallbackUrl}}'
         scopes: '{{a.oauthScopes}}'
         state: '{{stateResult.state}}'
-        codeChallenge: '{{pkce.codeChallenge}}'
+        codeChallenge: '{{stateResult.codeChallenge}}'
       output: urlResult
   - set:
       name: $http

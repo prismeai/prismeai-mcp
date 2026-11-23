@@ -1,5 +1,43 @@
 # Custom Code functions to add to imports/Custom Code.yml > config.functions
-# (state packing for the central-client callback proxy)
+# (central-client flow: pending sign-in + state packing for the callback proxy).
+# Pattern of google-workspaces. Replace `<pfx>` with the connector prefix.
+    newOAuthPending:
+      parameters:
+        userId:
+          type: string
+      code: |
+        // One pending sign-in = one random nonce. The caller stores the PKCE
+        // verifier in a user-scoped secret NAMED after this nonce (DB-backed,
+        // read the same way by every worker), so nothing is kept in the user
+        // context, a second Connect click no longer overwrites the first, and
+        // the callback can delete it after a single use. The verifier is NOT
+        // drawn here: whatever a Custom Code function returns is recorded in the
+        // Activity Feed — the caller draws it with the runtime crypto module.
+        const crypto = require('crypto');
+        const u = (userId === null || userId === undefined) ? '' : String(userId).trim();
+        if (!u || u.indexOf('{' + '{') >= 0) { return { error: 'invalid_user' }; }
+        const nonce = crypto.randomBytes(16).toString('hex');
+        return { state: nonce, nonce };
+    makePendingSecretName:
+      parameters:
+        nonce:
+          type: string
+      code: |
+        // The one place that names a pending sign-in's user secret, called by
+        // oauthConnect (which writes it) and oauthCallback (which reads it).
+        const n = String(nonce || '');
+        if (!/^[a-f0-9]{32}$/.test(n)) { return { error: 'invalid_nonce' }; }
+        return { name: '<pfx>Pending_' + n };
+    parseOAuthPending:
+      parameters:
+        state:
+          type: string
+      code: |
+        // Reverse of newOAuthPending, on the state as the provider returns it
+        // (a packed tenant callback after the first '.' is ignored here).
+        const head = String(state || '').split('.')[0];
+        if (!/^[a-f0-9]{32}$/.test(head)) { return { error: 'invalid_state' }; }
+        return { nonce: head };
     packOAuthState:
       parameters:
         state:
@@ -7,8 +45,8 @@
         callbackUrl:
           type: string
       code: |
-        // Central-client flow: the Google redirect_uri is the CORE workspace callback,
-        // so the tenant callback URL rides inside the state ("<random>.<b64url(url)>")
+        // Central-client flow: the provider redirect_uri is the CORE workspace callback,
+        // so the tenant callback URL rides inside the state ("<nonce>.<b64url(url)>")
         // for the core to proxy code+state back to the right tenant instance.
         if (!callbackUrl) return { packed: state || '' };
         return { packed: (state || '') + '.' + Buffer.from(String(callbackUrl), 'utf8').toString('base64url') };
@@ -20,22 +58,44 @@
           type: string
         apiUrl:
           type: string
+        selfCallbackUrl:
+          type: string
       code: |
-        // Reverse of packOAuthState. Returns { callbackUrl, redirectUrl } when the
-        // state carries a tenant callback (redirectUrl = ready-to-use proxy target
-        // forwarding code+state verbatim), {} otherwise. Anti open-redirect: the
-        // target must be an oauthCallback webhook on OUR api host (apiUrl prefix).
+        // Reverse of packOAuthState. Returns { callbackUrl, redirectUrl, isSelf } when
+        // the state carries a tenant callback (redirectUrl = proxy target forwarding
+        // code+state), {} otherwise. The target is parsed with URL and must be an
+        // oauthCallback webhook of OUR api (same origin, under its path), with no
+        // credentials, query or fragment, and only [A-Za-z0-9_.-] in its workspace
+        // and webhook segments; code and state are set through searchParams.
         const s = String(state || '');
         const dot = s.indexOf('.');
         if (dot < 0) return {};
         try {
+          const { URL } = require('url');
           const callbackUrl = Buffer.from(s.slice(dot + 1), 'base64url').toString('utf8');
-          const base = String(apiUrl || '').replace(/\/+$/, '');
-          if (!base || !callbackUrl.startsWith(base + '/workspaces/')) return {};
-          if (!/\/webhooks\/[A-Za-z0-9_.-]*oauthCallback$/.test(callbackUrl)) return {};
-          const sep = callbackUrl.includes('?') ? '&' : '?';
-          const redirectUrl = callbackUrl + sep + 'code=' + encodeURIComponent(String(code || '')) + '&state=' + encodeURIComponent(s);
-          return { callbackUrl, redirectUrl };
+          const api = new URL(String(apiUrl || ''));
+          const target = new URL(callbackUrl);
+          const basePath = api.pathname.replace(/\/+$/, '');
+          if (target.origin !== api.origin) return {};
+          if (target.username || target.password || target.search || target.hash) return {};
+          if (!target.pathname.startsWith(basePath + '/workspaces/')) return {};
+          const relativePath = target.pathname.slice(basePath.length);
+          if (!/^\/workspaces\/(?:slug:)?[A-Za-z0-9_-]+\/webhooks\/[A-Za-z0-9_.-]*oauthCallback$/.test(relativePath)) return {};
+          // `isSelf`: the packed callback is this very instance's, compared on both
+          // URLs normalized the same way (origin, decoded path, no trailing slash).
+          const norm = (u) => {
+            const x = new URL(String(u));
+            let p = x.pathname;
+            try { p = decodeURIComponent(p); } catch (e) {}
+            return x.origin.toLowerCase() + p.replace(/\/+$/, '');
+          };
+          let isSelf = false;
+          if (selfCallbackUrl) {
+            try { isSelf = norm(target.toString()) === norm(selfCallbackUrl); } catch (e) { isSelf = false; }
+          }
+          target.searchParams.set('code', String(code || ''));
+          target.searchParams.set('state', s);
+          return { callbackUrl: target.origin + target.pathname, redirectUrl: target.toString(), isSelf };
         } catch (e) {
           return {};
         }

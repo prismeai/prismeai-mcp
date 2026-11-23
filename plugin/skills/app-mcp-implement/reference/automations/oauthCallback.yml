@@ -1,14 +1,22 @@
 slug: oauthCallback
 name: OAuth/oauthCallback
 description: >-
-  OAuth2 authorization-code callback. Validates state, exchanges the code at
-  {loginHost}/services/oauth2/token (field-level config creds + stored code_verifier),
-  stores the token in user scope, then redirects (meta-refresh, CSP-safe) to the
+  OAuth2 authorization-code callback. Verifies the signed state
+  (verifyOAuthState — signature, user, 10 min expiry; an unsigned state is
+  refused) and recomputes the PKCE verifier from it, exchanges the code at the
+  token URL (field-level config creds), stores the tokens in user-scoped secrets
+  (access + refresh, fingerprinted names) plus a best-effort workspace mirror of
+  the refresh token for cron, then redirects (meta-refresh, CSP-safe) to the
   config SPA callback view (?view=oauthCallback&status=…) which shows the result
-  and auto-closes the popup. The redirect URI must equal config.oauthCallbackUrl.
+  and auto-closes the popup. No token is written to the user context. The
+  redirect URI must equal config.oauthCallbackUrl. Pattern of powerbi
+  `oauthCallback`.
 private: true
 when:
   endpoint: true
+schemas:
+  - output:
+      redact: true
 do:
   - set:
       name: $http
@@ -27,11 +35,8 @@ do:
             name: redirectTo
             value: '{{spaBase}}&status=error&message={{query.error}}'
         - break: {}
-  - set:
-      name: pending
-      value: '{{user.salesforceNext.oauthPending}}'
   - conditions:
-      '!{{query.code}} or !{{query.state}} or {{query.state}} != {{pending.state}}':
+      '!{{user.id}} or !{{query.code}} or !{{query.state}}':
         - set:
             name: redirectTo
             value: '{{spaBase}}&status=error&message=invalid_state'
@@ -39,9 +44,24 @@ do:
   - set:
       name: a
       value:
-        loginHost: '{{config.loginHost}}'
         oauthClientId: '{{config.oauthClientId}}'
         oauthClientSecret: '{{config.oauthClientSecret}}'
+        oauthScopes: '{{config.oauthScopes}}'
+        oauthTokenUrl: '{{config.oauthTokenUrl}}'
+  - comment: Stateless signed state (signOAuthState) — verified from the request alone, no user-context read, so a callback served by a worker whose user context is not yet synced no longer fails. The PKCE verifier is recomputed from the state nonce.
+  - Custom Code.run:
+      function: verifyOAuthState
+      parameters:
+        state: '{{query.state}}'
+        secret: '{{a.oauthClientSecret}}'
+        uid: '{{user.id}}'
+      output: st
+  - conditions:
+      '!{{st.signed}} or !{{st.valid}}':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message={% {{st.reason}} || "invalid_state" %}'
+        - break: {}
   - Custom Code.run:
       function: makeTokenCacheKey
       parameters:
@@ -55,6 +75,18 @@ do:
             name: redirectTo
             value: '{{spaBase}}&status=error&message=missing_secret_backed_oauth_config'
         - break: {}
+  - Custom Code.run:
+      function: makeTokenSecretName
+      parameters:
+        userId: '{{user.id}}'
+        cacheKey: '{{tokenCache.key}}'
+      output: tokName
+  - conditions:
+      '{{tokName.error}}':
+        - set:
+            name: redirectTo
+            value: '{{spaBase}}&status=error&message=invalid_state'
+        - break: {}
   - fetch:
       url: '{{a.oauthTokenUrl}}'
       method: POST
@@ -66,44 +98,47 @@ do:
         client_id: '{{a.oauthClientId}}'
         client_secret: '{{a.oauthClientSecret}}'
         redirect_uri: '{{config.oauthCallbackUrl}}'
-        code_verifier: '{{pending.codeVerifier}}'
+        code_verifier: '{{st.codeVerifier}}'
       output: tokenResp
       outputMode: detailed_response
       emitErrors: false
   - conditions:
       '{{tokenResp.status}} != 200':
+        - comment: Only the provider's error code and description go to the Activity Feed for diagnosis (invalid_client, redirect_uri mismatch…) — never the body, which could carry a token. Only a symbolic code reaches the page.
+        - emit:
+            event: error
+            payload:
+              error: OAuthTokenExchangeFailed
+              message: OAuth authorization code exchange failed
+              details:
+                stage: oauthCallback
+                status: '{{tokenResp.status}}'
+                providerError: '{{tokenResp.body.error}}'
+                providerErrorDescription: '{{tokenResp.body.error_description}}'
         - set:
             name: redirectTo
             value: '{{spaBase}}&status=error&message=token_exchange_rejected'
         - break: {}
-  - set:
-      name: oauthTtlSec
-      value: '{% {{tokenResp.body.expires_in}} || 3600 %}'
-  - set:
-      name: user.salesforceNext.oauth
-      scope: user
-      value:
-        accessToken: '{{tokenResp.body.access_token}}'
-        refreshToken: '{{tokenResp.body.refresh_token}}'
-        instanceUrl: '{{tokenResp.body.instance_url}}'
-        scopes: '{{a.oauthScopes}}'
-        cacheKey: '{{tokenCache.key}}'
-        connectedAt: '{{run.date}}'
-        expiresAt: '{% date({{run.date}}).ts + ({{oauthTtlSec}} * 1000) %}'
-  - comment: >-
-      Best-effort: persist the refresh token as a workspace secret keyed by user
-      so cron / autonomous automations can resolve this user via
-      buildAppAuth(targetUserId). Requires the connecting user to be a workspace
-      editor/owner (the config app is) — silently skipped (RBAC) otherwise; the
-      interactive user-scope path above still works for everyone.
-  - Custom Code.run:
-      function: makeTokenSecretName
-      parameters:
-        userId: '{{user.id}}'
-        cacheKey: '{{tokenCache.key}}'
-      output: tokName
+  - comment: Seed the access-token secret buildAppAuth reads first. Overwriting it is also what keeps a reconnection — possibly to another account — from being served the previous connection's token. Every catch reads `$error`; `error` is not set there and would record an empty object.
+  - try:
+      do:
+        - run:
+            module: secrets
+            function: set
+            parameters:
+              name: '{{tokName.accessName}}'
+              scope: user
+              value: '{{tokenResp.body.access_token}}'
+      catch:
+        - set:
+            name: _atUserErr
+            value: '{{$error.message}}'
   - conditions:
-      '!{{tokName.error}} and {{tokenResp.body.refresh_token}}':
+      '{{tokenResp.body.refresh_token}}':
+        - comment: 'Source of truth for the refresh path: a user-scoped secret — DB-backed, never worker-cached, writable from an MCP dispatch, and not RBAC-gated (it is the connecting user''s own). A provider that omits the refresh token on re-consent leaves the stored one in place.'
+        - set:
+            name: _rtSaved
+            value: false
         - try:
             do:
               - run:
@@ -111,28 +146,106 @@ do:
                   function: set
                   parameters:
                     name: '{{tokName.name}}'
+                    scope: user
+                    value: '{{tokenResp.body.refresh_token}}'
+              - set:
+                  name: _rtSaved
+                  value: true
+            catch:
+              - set:
+                  name: _rtUserErr
+                  value: '{{$error.message}}'
+        - conditions:
+            '!{{_rtSaved}}':
+              - set:
+                  name: redirectTo
+                  value: '{{spaBase}}&status=error&message=token_store_failed'
+              - break: {}
+        - comment: >-
+            Best-effort workspace mirror so cron / autonomous automations can
+            resolve this user via buildAppAuth(targetUserId), under the
+            tokenDepositor role (bound to the member's own name; granted through
+            `requiredAuthorizations` in an installed app). If it is missing, the
+            denial MUST NOT abort the callback — it is reported to the activity
+            feed, and the interactive path works.
+        - try:
+            do:
+              - run:
+                  module: secrets
+                  function: set
+                  assumeRole: tokenDepositor
+                  parameters:
+                    name: '{{tokName.name}}'
                     scope: workspace
                     value: '{{tokenResp.body.refresh_token}}'
                   output: tokSetResp
+              - conditions:
+                  '{{tokSetResp.error}}':
+                    - emit:
+                        event: error
+                        payload:
+                          error: OAuthCronTokenPersistFailed
+                          message: Connected, but the per-user refresh token could not be stored as a workspace secret — scheduled runs for this user will fail.
+                          details:
+                            reason: '{{tokSetResp.error}}'
+                            detail: '{{tokSetResp.message}}'
             catch:
-              - comment: >-
-                  Best-effort only: the connecting end-user is usually NOT a
-                  workspace editor/owner, so the workspace-scoped secret write is
-                  denied by RBAC (SecretsError "create on secure_secrets"). This
-                  MUST NOT abort the callback — the user-scope OAuth token above
-                  is already persisted and powers the interactive flow for
-                  everyone. The cron/autonomous resolution via
-                  buildAppAuth(targetUserId) only works when an editor connects.
               - set:
                   name: tokSetResp
                   value:
-                    error: '{{error.error}}'
-                    message: '{{error.message}}'
-  - delete:
-      name: user.salesforceNext.oauthPending
+                    error: '{{$error.error}}'
+                    message: '{{$error.message}}'
+      default:
+        - comment: No refresh token in the answer (re-consent, or a scope set without offline access). Without one already stored, nothing could ever renew this connection, and oauthStatus — which judges on that secret — would report it disconnected before every tool call, looping on the connect card. Fail the sign-in instead.
+        - try:
+            do:
+              - run:
+                  module: secrets
+                  function: get
+                  parameters:
+                    name: '{{tokName.name}}'
+                    scope: user
+                  output: _rtExisting
+            catch:
+              - set:
+                  name: _rtExisting
+                  value: ''
+        - set:
+            name: _rtExistingOk
+            value: false
+        - conditions:
+            '{{_rtExisting}} matches "$secret:"':
+              - set:
+                  name: _rtExistingOk
+                  value: true
+        - conditions:
+            '!{{_rtExistingOk}}':
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: delete
+                        parameters:
+                          name: '{{tokName.accessName}}'
+                          scope: user
+                  catch:
+                    - set:
+                        name: _atDelErr
+                        value: '{{$error.message}}'
+              - set:
+                  name: redirectTo
+                  value: '{{spaBase}}&status=error&message=no_refresh_token'
+              - break: {}
+  - comment: Non-credential metadata only (shown by oauthStatus / the config app). The instance URL is where the API lives for this user.
+  - set:
+      name: user.salesforceNext.oauth
       scope: user
+      value:
+        instanceUrl: '{{tokenResp.body.instance_url}}'
+        scopes: '{{a.oauthScopes}}'
+        connectedAt: '{{run.date}}'
   - set:
       name: redirectTo
       value: '{{spaBase}}&status=connected'
 output: |
-  <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={{redirectTo}}"><title>Salesforce</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting… <a href="{{redirectTo}}">continue</a></body></html>
+  <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={% sanitize({{redirectTo}}) %}"><title>Salesforce</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting… <a href="{% sanitize({{redirectTo}}) %}">continue</a></body></html>

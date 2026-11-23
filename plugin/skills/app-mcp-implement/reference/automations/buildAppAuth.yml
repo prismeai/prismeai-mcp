@@ -11,8 +11,12 @@ description: >-
   - `jwt` (default): OAuth2 JWT Bearer (Connected App + service-account user).
   - `clientCredentials`: OAuth2 client_credentials grant (Connected App run-as user).
   - `accessToken`: caller-managed access token + instance URL (no exchange).
+  - `oauth`: per-user authorization code + PKCE, tokens in user-scoped secrets
+    (see the oauth branch).
   Returns { accessToken, baseUrl } (baseUrl = {instance_url}/services/data/{apiVersion})
-  or { error }. Runs in tenant context — used by the MCP endpoint and App-mode.
+  or { error, code, requiresOAuth, transient } — `code` is AUTH_EXPIRED (the user
+  must reconnect, `requiresOAuth: true`), TEMPORARY (retry, `transient: true`),
+  OAUTH_CLIENT_MISCONFIGURED or OAUTH_TOKEN_REJECTED (an administrator must act). Runs in tenant context — used by the MCP endpoint and App-mode.
 private: true
 arguments:
   accessToken:
@@ -32,6 +36,16 @@ arguments:
       that user's refresh token from the workspace store and exchanges it for a
       fresh access token. MUST be set only from trusted server config (e.g. a
       cron automation) — NEVER from inbound/LLM tool arguments.
+  forceRefresh:
+    type: boolean
+    description: >-
+      Interactive OAuth only. Skip the stored access token and mint a fresh one
+      from the refresh token. Set by executeApiCall when Salesforce answered 401
+      on a stored token — no expiry is tracked, so that rejection is the signal
+      that the token is dead.
+schemas:
+  - output:
+      redact: true
 do:
   - set:
       name: auth
@@ -77,11 +91,6 @@ do:
             value:
               error: OAuth cache context is incomplete. Configure tenant client ID and scopes in the config app.
         - break: {}
-  - conditions:
-      '{{mode}} == "oauth" and {{user.salesforceNext.oauth.cacheKey}} and {{user.salesforceNext.oauth.cacheKey}} != {{tokenCache.key}}':
-        - delete:
-            name: user.salesforceNext.oauth
-            scope: user
   - comment: Priority 0 — caller passed an explicit accessToken + instanceUrl.
   - conditions:
       '{{accessToken}} and {{instanceUrl}}':
@@ -102,16 +111,28 @@ do:
                     accessToken: '{{auth.accessToken}}'
                     baseUrl: '{{auth.instanceUrl}}/services/data/{{effectiveApiVersion}}'
               - break: {}
-  - comment: >-
-      Mode oauth — per-user delegated token. If targetUserId is set (cron /
-      autonomous, server-controlled), resolve that user's refresh token from the
-      workspace store and exchange it for a fresh access token. Otherwise use the
-      interactive user-scope token stored by oauthCallback. targetUserId must
-      NEVER be sourced from tool arguments (see mcp.yml — it calls without it).
+  - comment: |
+      Mode oauth — per-user delegated token, kept ONLY in secrets (Refs #272,
+      #375, #391, #401). The user context is never a token store: a tool call
+      reaches this automation through the MCP dispatch, where the user context
+      is read-only (every `set user.*` is dropped silently), and it is a
+      per-worker cache that can hand out a refresh token another worker already
+      burnt. The secrets module is DB-backed and writable from there.
+        - `<pfx>Access_<userId>_<fp>`  (scope user)      — access token, read first.
+        - `<pfx>Refresh_<userId>_<fp>` (scope user)      — refresh token, source of truth.
+        - `<pfx>Refresh_<userId>_<fp>` (scope workspace) — mirror for cron (targetUserId).
+      No expiry is tracked: executeApiCall replays ONCE with `forceRefresh` when
+      the provider answers 401, which is authoritative where an expiry guess is not.
+      Only ONE call renews a given refresh token at a time
+      (`secrets.acquireRenewal` / `releaseRenewal`), and a refusal purges only
+      on `invalid_grant` (classifyTokenError) and only the version that was sent
+      (`ifRef`). targetUserId must NEVER be sourced from tool arguments (see
+      mcp.yml — it calls without it).
   - conditions:
       '{{mode}} == "oauth"':
         - conditions:
             '{{targetUserId}}':
+              - comment: Non-interactive (cron / autonomous, server-controlled) — exchange the workspace mirror of that user's refresh token, under the renewal lease.
               - Custom Code.run:
                   function: makeTokenSecretName
                   parameters:
@@ -125,29 +146,89 @@ do:
                         value:
                           error: Invalid targetUserId for Salesforce OAuth resolution.
                     - break: {}
-              - run:
-                  module: secrets
-                  function: get
-                  assumeRole: tokenResolver
-                  parameters:
-                    name: '{{tokName.name}}'
-                    scope: workspace
-                  output: refRef
+              - comment: '`reuseWindow: 0` — the scheduled path keeps no access token, so a renewal made by somebody else gives it nothing to reuse. When it waited on another holder (`renewed`), the lease is free again: take it once more and exchange the token that holder stored.'
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: acquireRenewal
+                        assumeRole: tokenResolver
+                        parameters:
+                          name: '{{tokName.name}}'
+                          scope: workspace
+                          reuseWindow: 0
+                          ttl: 60
+                        output: renewal
+                  catch:
+                    - set:
+                        name: renewal
+                        value:
+                          error: '{{$error.message}}'
               - conditions:
-                  '{{refRef.error}}':
+                  '{{renewal.status}} == "renewed"':
+                    - try:
+                        do:
+                          - run:
+                              module: secrets
+                              function: acquireRenewal
+                              assumeRole: tokenResolver
+                              parameters:
+                                name: '{{tokName.name}}'
+                                scope: workspace
+                                reuseWindow: 0
+                                ttl: 60
+                                wait: 0
+                              output: renewal
+                        catch:
+                          - set:
+                              name: renewal
+                              value:
+                                error: '{{$error.message}}'
+              - conditions:
+                  '{{renewal.status}} == "not_found" or {{renewal.error}}':
+                    - comment: The platform's reason goes to the activity feed, for whoever administers the workspace. The caller gets the plain answer below, which can reach the member or the model.
+                    - emit:
+                        event: connector.token.unresolved
+                        payload:
+                          code: '{% {{renewal.error}} || {{renewal.status}} %}'
+                          message: '{{renewal.message}}'
+                          target_user_id: '{{targetUserId}}'
+              - conditions:
+                  '{{renewal.status}} == "not_found" and !{{renewal.message}}':
+                    - comment: Only a missing secret sends the member to reconnect. With a `message`, the tokenResolver role or its rule is missing — reconnecting fixes nothing.
                     - set:
                         name: output
                         value:
-                          error: No stored Salesforce token for this user. They must connect once from the connector config app (OAuth mode) as a workspace editor.
+                          error: 'AUTH_EXPIRED: no stored Salesforce token for this user. They must connect once from the connector config app (OAuth mode).'
+                          code: AUTH_EXPIRED
+                          requiresOAuth: true
                     - break: {}
+                  '{{renewal.status}} == "not_found" or {{renewal.error}}':
+                    - set:
+                        name: output
+                        value:
+                          error: 'The stored Salesforce token could not be read ({% {{renewal.error}} || {{renewal.message}} %}), and reconnecting will not fix it. An administrator must check the tokenResolver role in security.yml.'
+                    - break: {}
+                  '{{renewal.status}} != "acquired"':
+                    - set:
+                        name: output
+                        value:
+                          error: 'TEMPORARY: the Salesforce sign-in of this user is being renewed by another run, or the secret store did not answer ({{renewal.status}}). Retry in a moment — no reconnection needed.'
+                          code: TEMPORARY
+                          requiresOAuth: false
+                          transient: true
+                    - break: {}
+              - comment: 'Sent once (`maxRetries: 0`) and bounded well under the lease (`timeout` 10 s + up to 10 s to connect + the writes, inside `ttl: 60`) — a retried or late exchange would present the same refresh token again after the provider rotated it.'
               - fetch:
                   url: '{{auth.oauthTokenUrl}}'
                   method: POST
+                  timeout: 10000
+                  maxRetries: 0
                   headers:
                     Content-Type: application/x-www-form-urlencoded
                   body:
                     grant_type: refresh_token
-                    refresh_token: '{{refRef}}'
+                    refresh_token: '{{renewal.ref}}'
                     client_id: '{{auth.oauthClientId}}'
                     client_secret: '{{auth.oauthClientSecret}}'
                   output: refResp
@@ -155,128 +236,419 @@ do:
                   emitErrors: false
               - conditions:
                   '{{refResp.status}} == 200':
+                    - conditions:
+                        '{{refResp.body.refresh_token}}':
+                          - comment: The provider rotated the refresh token — store the new one over the version this lease read only (`ifRef`). `version_conflict` means the member reconnected meanwhile; their newer token stays.
+                          - try:
+                              do:
+                                - run:
+                                    module: secrets
+                                    function: set
+                                    assumeRole: tokenResolver
+                                    parameters:
+                                      name: '{{tokName.name}}'
+                                      scope: workspace
+                                      value: '{{refResp.body.refresh_token}}'
+                                      ifRef: '{{renewal.ref}}'
+                                    output: _tokRotate
+                              catch:
+                                - set:
+                                    name: _tokRotate
+                                    value:
+                                      error: '{{$error.message}}'
+                    - try:
+                        do:
+                          - run:
+                              module: secrets
+                              function: releaseRenewal
+                              assumeRole: tokenResolver
+                              parameters:
+                                name: '{{tokName.name}}'
+                                scope: workspace
+                                leaseId: '{{renewal.leaseId}}'
+                                renewed: true
+                        catch:
+                          - set:
+                              name: _releaseErr
+                              value: '{{$error.message}}'
                     - set:
                         name: output
                         value:
                           accessToken: '{{refResp.body.access_token}}'
                           baseUrl: '{{refResp.body.instance_url}}/services/data/{{effectiveApiVersion}}'
                     - break: {}
-                  default:
+              - classifyTokenError:
+                  response: '{{refResp}}'
+                  output: _tokErr
+              - conditions:
+                  '{{_tokErr.kind}} == "revoked"':
+                    - comment: Confirmed refusal (invalid_grant) — drop only the token that was sent. If the member reconnected during the exchange, `ifRef` leaves the newer secret in place and the next run uses it.
+                    - try:
+                        do:
+                          - run:
+                              module: secrets
+                              function: delete
+                              assumeRole: tokenResolver
+                              parameters:
+                                name: '{{tokName.name}}'
+                                scope: workspace
+                                ifRef: '{{renewal.ref}}'
+                              output: tokDel
+                        catch:
+                          - set:
+                              name: tokDel
+                              value:
+                                error: '{{$error.message}}'
                     - conditions:
-                        '{{refResp.status}} >= 400 and {{refResp.status}} < 500':
-                          - comment: Permanent rejection (invalid_grant / revoked) — drop the stored refresh token so this user stops resolving until they reconnect. Best-effort (RBAC may deny from some contexts).
+                        '{{tokDel.error}} == "version_conflict"':
+                          - set:
+                              name: _tokErr
+                              value:
+                                kind: transient
+                                code: TEMPORARY
+                                requiresOAuth: false
+                                transient: true
+                                message: 'TEMPORARY: this Salesforce connection was replaced while its token was being renewed. Retry — no reconnection needed.'
+                  '{{_tokErr.kind}} == "client" or {{_tokErr.kind}} == "rejected"':
+                    - emit:
+                        event: error
+                        payload:
+                          error: '{{_tokErr.event}}'
+                          message: '{{_tokErr.message}}'
+                          details:
+                            code: '{{_tokErr.code}}'
+                            status: '{{_tokErr.status}}'
+                            providerError: '{{_tokErr.providerError}}'
+                            providerErrorDescription: '{{_tokErr.providerErrorDescription}}'
+                            path: delegated
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: releaseRenewal
+                        assumeRole: tokenResolver
+                        parameters:
+                          name: '{{tokName.name}}'
+                          scope: workspace
+                          leaseId: '{{renewal.leaseId}}'
+                          renewed: false
+                  catch:
+                    - set:
+                        name: _releaseErr
+                        value: '{{$error.message}}'
+              - set:
+                  name: output
+                  value:
+                    error: '{{_tokErr.message}}'
+                    code: '{{_tokErr.code}}'
+                    requiresOAuth: '{{_tokErr.requiresOAuth}}'
+                    transient: '{{_tokErr.transient}}'
+              - break: {}
+        - comment: 'Interactive — the caller''s own user-scoped secrets, read and written with the caller''s own rights (never under `tokenResolver`, which the secrets module only honours for `scope: workspace`).'
+        - Custom Code.run:
+            function: makeTokenSecretName
+            parameters:
+              userId: '{{user.id}}'
+              cacheKey: '{{tokenCache.key}}'
+            output: rtName
+        - conditions:
+            '{{rtName.error}}':
+              - set:
+                  name: output
+                  value:
+                    error: 'AUTH_EXPIRED: Salesforce is not connected for this user. Ask the user to connect Salesforce (connect card, or Connexion in the connector config app), then retry.'
+                    code: AUTH_EXPIRED
+                    requiresOAuth: true
+              - break: {}
+        - comment: The instance URL is not a credential — oauthCallback keeps it in the user context (written from a webhook, where the context is writable).
+        - set:
+            name: userInstanceUrl
+            value: '{% {{user.salesforceNext.oauth.instanceUrl}} || {{auth.instanceUrl}} %}'
+        - comment: Fast path — the stored access token. A read is accepted only when it is a `$secret:` ref; a failure caught as an object must never pass for a token (the catches read `$error`, never `error`).
+        - conditions:
+            '!{{forceRefresh}}':
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: get
+                        parameters:
+                          name: '{{rtName.accessName}}'
+                          scope: user
+                        output: atSecret
+                  catch:
+                    - set:
+                        name: atSecret
+                        value:
+                          error: '{{$error.message}}'
+              - conditions:
+                  '{{atSecret}} matches "$secret:"':
+                    - set:
+                        name: output
+                        value:
+                          accessToken: '{{atSecret}}'
+                          baseUrl: '{{userInstanceUrl}}/services/data/{{effectiveApiVersion}}'
+                    - break: {}
+        - comment: |
+            Renewal under the lease. Several tool calls of one agent can need a
+            new token at the same instant; a provider that rotates refresh
+            tokens takes a second presentation for a replay and may revoke the
+            whole grant. `acquireRenewal` lets one call exchange and the others
+            wait for it, then reuse what it stored (`renewed`).
+        - try:
+            do:
+              - run:
+                  module: secrets
+                  function: acquireRenewal
+                  parameters:
+                    name: '{{rtName.name}}'
+                    scope: user
+                    ttl: 60
+                  output: renewal
+            catch:
+              - set:
+                  name: renewal
+                  value:
+                    error: '{{$error.message}}'
+        - conditions:
+            '{{renewal.status}} == "renewed"':
+              - comment: Another call renewed it a moment ago — read the access token it stored, without calling the provider.
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: get
+                        parameters:
+                          name: '{{rtName.accessName}}'
+                          scope: user
+                        output: atRenewed
+                  catch:
+                    - set:
+                        name: atRenewed
+                        value:
+                          error: '{{$error.message}}'
+              - conditions:
+                  '{{atRenewed}} matches "$secret:"':
+                    - set:
+                        name: output
+                        value:
+                          accessToken: '{{atRenewed}}'
+                          baseUrl: '{{userInstanceUrl}}/services/data/{{effectiveApiVersion}}'
+                    - break: {}
+              - set:
+                  name: output
+                  value:
+                    error: 'TEMPORARY: the Salesforce sign-in was just renewed by another request. Retry — no reconnection needed.'
+                    code: TEMPORARY
+                    requiresOAuth: false
+                    transient: true
+              - break: {}
+            '{{renewal.status}} == "not_found" and !{{renewal.message}}':
+              - set:
+                  name: output
+                  value:
+                    error: 'AUTH_EXPIRED: Salesforce is not connected for this user. Ask the user to connect Salesforce (connect card, or Connexion in the connector config app), then retry.'
+                    code: AUTH_EXPIRED
+                    requiresOAuth: true
+              - break: {}
+            '{{renewal.status}} != "acquired"':
+              - comment: '`retry` (the holder gave up or `wait` elapsed), `unavailable` (the secret store did not answer — renewing anyway would lose the rotated token) or an error of the module. Never call the provider here.'
+              - set:
+                  name: output
+                  value:
+                    error: 'TEMPORARY: the Salesforce sign-in could not be renewed right now ({% {{renewal.status}} || {{renewal.error}} %}). Retry in a moment — no reconnection needed.'
+                    code: TEMPORARY
+                    requiresOAuth: false
+                    transient: true
+              - break: {}
+        - comment: 'Sent once (`maxRetries: 0`) and bounded well under the lease (`timeout` 10 s + up to 10 s to connect + the writes, inside `ttl: 60`) — see the platform doc "Renewing a rotating token once".'
+        - fetch:
+            url: '{{auth.oauthTokenUrl}}'
+            method: POST
+            timeout: 10000
+            maxRetries: 0
+            headers:
+              Content-Type: application/x-www-form-urlencoded
+            body:
+              grant_type: refresh_token
+              refresh_token: '{{renewal.ref}}'
+              client_id: '{{auth.oauthClientId}}'
+              client_secret: '{{auth.oauthClientSecret}}'
+            output: userRefResp
+            outputMode: detailed_response
+            emitErrors: false
+        - conditions:
+            '{{userRefResp.status}} == 200':
+              - set:
+                  name: refInstance
+                  value: '{% {{userRefResp.body.instance_url}} || {{userInstanceUrl}} %}'
+              - set:
+                  name: _rtSet
+                  value: {}
+              - conditions:
+                  '{{userRefResp.body.refresh_token}}':
+                    - comment: 'Rotated refresh token: written only over the version this lease read (`ifRef`). `version_conflict` = the user reconnected meanwhile — keep the newer connection whole, write no access token either; the token just obtained still serves this call.'
+                    - try:
+                        do:
+                          - run:
+                              module: secrets
+                              function: set
+                              parameters:
+                                name: '{{rtName.name}}'
+                                scope: user
+                                value: '{{userRefResp.body.refresh_token}}'
+                                ifRef: '{{renewal.ref}}'
+                              output: _rtSet
+                        catch:
+                          - set:
+                              name: _rtSet
+                              value:
+                                error: '{{$error.message}}'
+                    - conditions:
+                        '{{_rtSet.error}} != "version_conflict"':
+                          - comment: Workspace mirror for cron — best-effort, under the `tokenDepositor` role (security.yml, and `requiredAuthorizations` in index.yml for an installed app — where the platform stores it as `app:<source id>:<name>`, the name tokenResolver reads).
                           - try:
                               do:
                                 - run:
                                     module: secrets
-                                    function: delete
-                                    assumeRole: tokenResolver
+                                    function: set
+                                    assumeRole: tokenDepositor
                                     parameters:
-                                      name: '{{tokName.name}}'
+                                      name: '{{rtName.name}}'
                                       scope: workspace
+                                      value: '{{userRefResp.body.refresh_token}}'
                               catch:
                                 - set:
-                                    name: _tokDeleteErr
-                                    value: '{{error.message}}'
-                          - set:
-                              name: output
-                              value:
-                                error: 'Salesforce token refresh was rejected (status {{refResp.status}}). The user must reconnect from the config app.'
-                          - break: {}
-                    - set:
-                        name: output
-                        value:
-                          error: 'Salesforce token endpoint temporarily unavailable ({{refResp.status}}). Retry shortly — no reconnection needed.'
-                          transient: true
-                    - break: {}
-        - comment: Interactive — use the cached access token while still valid (120s skew); otherwise refresh it proactively from the stored refresh token and update the user-scope cache.
-        - conditions:
-            '{{user.salesforceNext.oauth.cacheKey}} == {{tokenCache.key}} and {{user.salesforceNext.oauth.accessToken}} and {{user.salesforceNext.oauth.expiresAt}} > {% date({{run.date}}).ts + 120000 %}':
-              - set:
-                  name: output
-                  value:
-                    accessToken: '{{user.salesforceNext.oauth.accessToken}}'
-                    baseUrl: '{{user.salesforceNext.oauth.instanceUrl}}/services/data/{{effectiveApiVersion}}'
-              - break: {}
-        - conditions:
-            '{{user.salesforceNext.oauth.cacheKey}} == {{tokenCache.key}} and {{user.salesforceNext.oauth.refreshToken}}':
-              - fetch:
-                  url: '{{auth.oauthTokenUrl}}'
-                  method: POST
-                  headers:
-                    Content-Type: application/x-www-form-urlencoded
-                  body:
-                    grant_type: refresh_token
-                    refresh_token: '{{user.salesforceNext.oauth.refreshToken}}'
-                    client_id: '{{auth.oauthClientId}}'
-                    client_secret: '{{auth.oauthClientSecret}}'
-                  output: userRefResp
-                  outputMode: detailed_response
-                  emitErrors: false
+                                    name: _rtMirrorErr
+                                    value: '{{$error.message}}'
               - conditions:
-                  '{{userRefResp.status}} == 200':
-                    - comment: Salesforce does not re-issue the refresh token on refresh — keep it. instance_url may change; cache it. No expires_in returned — default TTL.
-                    - set:
-                        name: refInstance
-                        value: '{% {{userRefResp.body.instance_url}} || {{user.salesforceNext.oauth.instanceUrl}} %}'
-                    - set:
-                        name: refTtlSec
-                        value: '{% {{userRefResp.body.expires_in}} || 3600 %}'
-                    - set:
-                        name: user.salesforceNext.oauth.accessToken
-                        scope: user
-                        value: '{{userRefResp.body.access_token}}'
-                    - set:
-                        name: user.salesforceNext.oauth.instanceUrl
-                        scope: user
-                        value: '{{refInstance}}'
-                    - set:
-                        name: user.salesforceNext.oauth.expiresAt
-                        scope: user
-                        value: '{% date({{run.date}}).ts + ({{refTtlSec}} * 1000) %}'
-                    - set:
-                        name: user.salesforceNext.oauth.cacheKey
-                        scope: user
-                        value: '{{tokenCache.key}}'
-                    - set:
-                        name: output
-                        value:
-                          accessToken: '{{userRefResp.body.access_token}}'
-                          baseUrl: '{{refInstance}}/services/data/{{effectiveApiVersion}}'
-                    - break: {}
-                  default:
-                    - conditions:
-                        '{{userRefResp.status}} >= 400 and {{userRefResp.status}} < 500':
-                          - comment: Permanent rejection (revoked / expired refresh token) — invalidate the user-scope connection so oauthStatus reports connected:false and agent-factory re-proposes the OAuth connect flow instead of silently retrying a dead token.
-                          - delete:
-                              name: user.salesforceNext.oauth
-                              scope: user
+                  '{{_rtSet.error}} != "version_conflict"':
+                    - try:
+                        do:
+                          - run:
+                              module: secrets
+                              function: set
+                              parameters:
+                                name: '{{rtName.accessName}}'
+                                scope: user
+                                value: '{{userRefResp.body.access_token}}'
+                        catch:
                           - set:
-                              name: output
-                              value:
-                                error: 'Salesforce token refresh was rejected (status {{userRefResp.status}}). The user must reconnect from the config app.'
-                          - break: {}
+                              name: _atSetErr
+                              value: '{{$error.message}}'
+              - comment: Released last, so the calls waiting on the lease find every new token in place.
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: releaseRenewal
+                        parameters:
+                          name: '{{rtName.name}}'
+                          scope: user
+                          leaseId: '{{renewal.leaseId}}'
+                          renewed: true
+                  catch:
                     - set:
-                        name: output
-                        value:
-                          error: 'Salesforce token endpoint temporarily unavailable ({{userRefResp.status}}). Retry shortly — no reconnection needed.'
-                          transient: true
-                    - break: {}
+                        name: _releaseErr
+                        value: '{{$error.message}}'
+              - set:
+                  name: output
+                  value:
+                    accessToken: '{{userRefResp.body.access_token}}'
+                    baseUrl: '{{refInstance}}/services/data/{{effectiveApiVersion}}'
+              - break: {}
+        - classifyTokenError:
+            response: '{{userRefResp}}'
+            output: _tokErr
         - conditions:
-            '{{user.salesforceNext.oauth.cacheKey}} == {{tokenCache.key}} and {{user.salesforceNext.oauth.accessToken}}':
-              - comment: No refresh token available (legacy connection) — fall back to the stored token; may be stale.
+            '{{_tokErr.kind}} == "revoked"':
+              - comment: Confirmed refusal (invalid_grant) — the only case that disconnects. The refresh token goes first, and only if it is still the version that was sent (`ifRef`); `version_conflict` = a reconnection landed during the exchange, so everything stays for the next call.
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: delete
+                        parameters:
+                          name: '{{rtName.name}}'
+                          scope: user
+                          ifRef: '{{renewal.ref}}'
+                        output: rtDel
+                  catch:
+                    - set:
+                        name: rtDel
+                        value:
+                          error: '{{$error.message}}'
+              - conditions:
+                  '{{rtDel.error}} == "version_conflict"':
+                    - set:
+                        name: _tokErr
+                        value:
+                          kind: transient
+                          code: TEMPORARY
+                          requiresOAuth: false
+                          transient: true
+                          message: 'TEMPORARY: this Salesforce connection was replaced while its token was being renewed. Retry — no reconnection needed.'
+                  default:
+                    - comment: The access token and the workspace mirror hold the same dead grant. The mirror delete needs a role (a member rule can never grant `delete`), hence `tokenDepositor` (bound to this user's own name), best-effort.
+                    - try:
+                        do:
+                          - run:
+                              module: secrets
+                              function: delete
+                              parameters:
+                                name: '{{rtName.accessName}}'
+                                scope: user
+                        catch:
+                          - set:
+                              name: _atDelErr
+                              value: '{{$error.message}}'
+                    - try:
+                        do:
+                          - run:
+                              module: secrets
+                              function: delete
+                              assumeRole: tokenDepositor
+                              parameters:
+                                name: '{{rtName.name}}'
+                                scope: workspace
+                        catch:
+                          - set:
+                              name: _rtWsDelErr
+                              value: '{{$error.message}}'
+            '{{_tokErr.kind}} == "client" or {{_tokErr.kind}} == "rejected"':
+              - emit:
+                  event: error
+                  payload:
+                    error: '{{_tokErr.event}}'
+                    message: '{{_tokErr.message}}'
+                    details:
+                      code: '{{_tokErr.code}}'
+                      status: '{{_tokErr.status}}'
+                      providerError: '{{_tokErr.providerError}}'
+                      providerErrorDescription: '{{_tokErr.providerErrorDescription}}'
+                      path: interactive
+        - try:
+            do:
+              - run:
+                  module: secrets
+                  function: releaseRenewal
+                  parameters:
+                    name: '{{rtName.name}}'
+                    scope: user
+                    leaseId: '{{renewal.leaseId}}'
+                    renewed: false
+            catch:
               - set:
-                  name: output
-                  value:
-                    accessToken: '{{user.salesforceNext.oauth.accessToken}}'
-                    baseUrl: '{{user.salesforceNext.oauth.instanceUrl}}/services/data/{{effectiveApiVersion}}'
-              - break: {}
-            default:
-              - set:
-                  name: output
-                  value:
-                    error: Salesforce is not connected for this user. Open the connector config app (OAuth mode) and click Connexion, or use the agent's connect action.
-              - break: {}
+                  name: _releaseErr
+                  value: '{{$error.message}}'
+        - set:
+            name: output
+            value:
+              error: '{{_tokErr.message}}'
+              code: '{{_tokErr.code}}'
+              requiresOAuth: '{{_tokErr.requiresOAuth}}'
+              transient: '{{_tokErr.transient}}'
+        - break: {}
   - comment: Mode clientCredentials — OAuth2 client_credentials grant.
   - conditions:
       '{{mode}} == "clientCredentials"':

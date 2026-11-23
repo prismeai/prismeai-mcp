@@ -1,0 +1,262 @@
+slug: tests-tokenExpiry
+name: Tests/tokenExpiry
+description: >-
+  Non-regression test of the expired-token path, shipped with every generated
+  OAuth connector (Refs #391, #401, #469). Runs anywhere, calls no provider and
+  touches no secret. (1) classifyTokenError: only invalid_grant disconnects
+  (AUTH_EXPIRED, requiresOAuth, provider reason quoted); a misconfigured client,
+  another 4xx, a 429, an outage or a network failure keep the connection.
+  (2) executeApiCall through its `_testResponses` seam — a provider stand-in
+  that only honours one token, and a scripted forced refresh: a stored token
+  answered 401 is refreshed and the request replayed ONCE; a caller-supplied
+  token is never refreshed; a refresh that fails hands the agent buildAppAuth's
+  message (AUTH_EXPIRED → reconnect, TEMPORARY → retry), not the generic 401
+  text; a 401 that survives a fresh token is not replayed again.
+  Returns { passed, failed, results }. Patterns of powerbi tests-executeApiCall
+  and google-workspaces tests-tokenErrors.
+private: true
+schemas:
+  - output:
+      redact: true
+do:
+  - comment: ═══ (1) classification of the token endpoint's answers ═══
+  - set:
+      name: _cases
+      value:
+        - key: invalidGrantDisconnects
+          response:
+            status: 400
+            body:
+              error: invalid_grant
+              error_description: expired access/refresh token
+          kind: revoked
+          code: AUTH_EXPIRED
+          requiresOAuth: true
+        - key: invalidClientKeepsConnection
+          response:
+            status: 401
+            body:
+              error: invalid_client
+              error_description: invalid client credentials
+          kind: client
+          code: OAUTH_CLIENT_MISCONFIGURED
+          requiresOAuth: false
+        - key: otherClientErrorKeepsConnection
+          response:
+            status: 400
+            body:
+              error: invalid_scope
+          kind: rejected
+          code: OAUTH_TOKEN_REJECTED
+          requiresOAuth: false
+        - key: rateLimitIsTransient
+          response:
+            status: 429
+            body: {}
+          kind: transient
+          code: TEMPORARY
+          requiresOAuth: false
+        - key: outageIsTransient
+          response:
+            status: 503
+            body: {}
+          kind: transient
+          code: TEMPORARY
+          requiresOAuth: false
+        - key: networkFailureIsTransient
+          response: {}
+          kind: transient
+          code: TEMPORARY
+          requiresOAuth: false
+  - set:
+      name: results
+      value: {}
+  - repeat:
+      'on': '{{_cases}}'
+      do:
+        - classifyTokenError:
+            response: '{{item.response}}'
+            output: _c
+        - set:
+            name: _ok
+            value: false
+        - conditions:
+            '{{_c.kind}} == {{item.kind}} and {{_c.code}} == {{item.code}} and {{_c.requiresOAuth}} == {{item.requiresOAuth}}':
+              - set:
+                  name: _ok
+                  value: true
+        - set:
+            name: results.{{item.key}}
+            value: '{{_ok}}'
+  - comment: The AUTH_EXPIRED message starts with its code (what agent-factory reads) and quotes the provider's reason.
+  - classifyTokenError:
+      response:
+        status: 400
+        body:
+          error: invalid_grant
+          error_description: expired access/refresh token
+      output: _revoked
+  - set:
+      name: results.authExpiredQuotesProvider
+      value: false
+  - conditions:
+      '{{_revoked.message}} matches regex("^AUTH_EXPIRED:") and {{_revoked.message}} matches "invalid_grant" and {{_revoked.message}} matches "expired access/refresh token"':
+        - set:
+            name: results.authExpiredQuotesProvider
+            value: true
+  - comment: ═══ (2) executeApiCall — expiry, single replay, messages ═══
+  - set:
+      name: _expired401
+      value:
+        status: 401
+        headers: {}
+        body:
+          - errorCode: INVALID_SESSION_ID
+            message: Session expired or invalid
+  - set:
+      name: _ok200
+      value:
+        status: 200
+        headers: {}
+        body:
+          ok: 42
+  - set:
+      name: _storedToken
+      value: $secret:sfnAccess_test
+  - set:
+      name: _baseUrl
+      value: https://provider.test.invalid/services/data/v60.0
+  - comment: A stored token answered 401 is refreshed, and the replay with the fresh token succeeds.
+  - executeApiCall:
+      path: limits
+      method: GET
+      accessToken: '{{_storedToken}}'
+      baseUrl: '{{_baseUrl}}'
+      operation: testExpiry
+      _testResponses:
+        validToken: fresh-token
+        accepted: '{{_ok200}}'
+        rejected: '{{_expired401}}'
+        freshAuth:
+          accessToken: fresh-token
+      output: t1
+  - set:
+      name: results.expiredStoredTokenReplayed
+      value: false
+  - conditions:
+      '{{t1.success}} and {{t1.status}} == 200 and {{t1.data.ok}} == 42':
+        - set:
+            name: results.expiredStoredTokenReplayed
+            value: true
+  - comment: A caller-supplied token is never refreshed. The scripted refresh would succeed here, so a success means the call was wrongly replayed.
+  - executeApiCall:
+      path: limits
+      method: GET
+      accessToken: caller-token
+      baseUrl: '{{_baseUrl}}'
+      operation: testExpiry
+      _testResponses:
+        validToken: fresh-token
+        accepted: '{{_ok200}}'
+        rejected: '{{_expired401}}'
+        freshAuth:
+          accessToken: fresh-token
+      output: t2
+  - set:
+      name: results.callerTokenNotRefreshed
+      value: false
+  - conditions:
+      '!{{t2.success}} and {{t2.status}} == 401':
+        - set:
+            name: results.callerTokenNotRefreshed
+            value: true
+  - comment: The refresh token was refused for good — the agent gets AUTH_EXPIRED with the provider's reason and `requiresOAuth`, not the generic 401 text.
+  - executeApiCall:
+      path: limits
+      method: GET
+      accessToken: '{{_storedToken}}'
+      baseUrl: '{{_baseUrl}}'
+      operation: testExpiry
+      _testResponses:
+        validToken: fresh-token
+        accepted: '{{_ok200}}'
+        rejected: '{{_expired401}}'
+        freshAuth:
+          error: '{{_revoked.message}}'
+          code: AUTH_EXPIRED
+          requiresOAuth: true
+      output: t3
+  - set:
+      name: results.refusedRefreshAsksToReconnect
+      value: false
+  - conditions:
+      '!{{t3.success}} and {{t3.status}} == 401 and {{t3.requiresOAuth}} and {{t3.error.isError}} and {{t3.error.content[0].text}} matches regex("^AUTH_EXPIRED:") and {{t3.error.content[0].text}} matches "invalid_grant"':
+        - set:
+            name: results.refusedRefreshAsksToReconnect
+            value: true
+  - comment: The token endpoint is down — the agent is told to retry, never to reconnect.
+  - executeApiCall:
+      path: limits
+      method: GET
+      accessToken: '{{_storedToken}}'
+      baseUrl: '{{_baseUrl}}'
+      operation: testExpiry
+      _testResponses:
+        validToken: fresh-token
+        accepted: '{{_ok200}}'
+        rejected: '{{_expired401}}'
+        freshAuth:
+          error: 'TEMPORARY: the Salesforce token endpoint is unavailable right now (HTTP 503). Retry in a moment — no reconnection needed.'
+          code: TEMPORARY
+          requiresOAuth: false
+          transient: true
+      output: t4
+  - set:
+      name: results.unavailableRefreshAsksToRetry
+      value: false
+  - conditions:
+      '!{{t4.success}} and {{t4.transient}} and !{{t4.requiresOAuth}} and {{t4.error.content[0].text}} matches regex("^TEMPORARY:") and {{t4.error.content[0].text}} not matches "AUTH_EXPIRED"':
+        - set:
+            name: results.unavailableRefreshAsksToRetry
+            value: true
+  - comment: A 401 that survives a freshly minted token is replayed once, not twice — it falls through to handleApiError.
+  - executeApiCall:
+      path: limits
+      method: GET
+      accessToken: '{{_storedToken}}'
+      baseUrl: '{{_baseUrl}}'
+      operation: testExpiry
+      _testResponses:
+        validToken: never-accepted
+        accepted: '{{_ok200}}'
+        rejected: '{{_expired401}}'
+        freshAuth:
+          accessToken: fresh-token
+      output: t5
+  - set:
+      name: results.secondRejectionNotReplayed
+      value: false
+  - conditions:
+      '!{{t5.success}} and {{t5.status}} == 401 and !{{t5.requiresOAuth}}':
+        - set:
+            name: results.secondRejectionNotReplayed
+            value: true
+  - set:
+      name: failed
+      value: []
+  - repeat:
+      'on': '{{results}}'
+      do:
+        - conditions:
+            '!{{item.value}}':
+              - set:
+                  name: failed
+                  type: push
+                  value: '{{item.key}}'
+  - set:
+      name: output
+      value:
+        passed: '{% !{{failed.length}} %}'
+        failed: '{{failed}}'
+        results: '{{results}}'
+output: '{{output}}'

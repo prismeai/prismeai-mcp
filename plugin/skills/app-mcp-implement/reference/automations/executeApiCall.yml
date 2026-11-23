@@ -30,6 +30,9 @@ arguments:
   operation:
     type: string
     description: Short description used in error messages.
+  _testResponses:
+    type: object
+    description: 'TEST-ONLY seam, inert in production (no tool or method layer forwards it). `{ validToken, accepted, rejected, freshAuth }`: each attempt answers `accepted` when the request carries `Bearer {validToken}` and `rejected` otherwise — a provider that only honours a live token — and the forced refresh returns `freshAuth` instead of running buildAppAuth. See tests-tokenExpiry.'
 do:
   - conditions:
       '!{{baseUrl}}':
@@ -67,44 +70,101 @@ do:
         - set:
             name: fetchHeaders.Content-Type
             value: '{% {{contentType}} || "application/json" %}'
-  - conditions:
-      '{{effectiveMethod}} == "GET" || {{effectiveMethod}} == "DELETE"':
-        - fetch:
-            url: '{{baseUrl}}/{{path}}{{qs}}'
-            method: '{{effectiveMethod}}'
-            headers: '{{fetchHeaders}}'
-            output: response
-            outputMode: detailed_response
-            emitErrors: false
-      default:
+  - comment: 'A 401 on a token served from the interactive store (an opaque `$secret:` ref — buildAppAuth tracks no expiry for it) means that token is dead: mint a fresh one (buildAppAuth forceRefresh, under the renewal lease) and replay the request ONCE, hence the two turns of this loop. Tokens minted on the spot (cron) or supplied by the caller are not retried — a 401 there is not an expiry, and re-minting would only hide it. A second 401 falls through to the normal error path. Pattern of powerbi / google-workspaces executeApiCall.'
+  - repeat:
+      until: 2
+      do:
         - conditions:
-            '{{rawBody}}':
+            '{{_testResponses}}':
+              - comment: Test seam — see the `_testResponses` argument.
+              - set:
+                  name: testBearer
+                  value: Bearer {{_testResponses.validToken}}
+              - conditions:
+                  '{{fetchHeaders.Authorization}} == {{testBearer}}':
+                    - set:
+                        name: response
+                        value: '{{_testResponses.accepted}}'
+                  default:
+                    - set:
+                        name: response
+                        value: '{{_testResponses.rejected}}'
+            '{{effectiveMethod}} == "GET" || {{effectiveMethod}} == "DELETE"':
               - fetch:
                   url: '{{baseUrl}}/{{path}}{{qs}}'
                   method: '{{effectiveMethod}}'
                   headers: '{{fetchHeaders}}'
-                  body: '{{rawBody}}'
-                  output: response
-                  outputMode: detailed_response
-                  emitErrors: false
-            '{{body}}':
-              - fetch:
-                  url: '{{baseUrl}}/{{path}}{{qs}}'
-                  method: '{{effectiveMethod}}'
-                  headers: '{{fetchHeaders}}'
-                  body: '{{body}}'
                   output: response
                   outputMode: detailed_response
                   emitErrors: false
             default:
-              - fetch:
-                  url: '{{baseUrl}}/{{path}}{{qs}}'
-                  method: '{{effectiveMethod}}'
-                  headers: '{{fetchHeaders}}'
-                  body: {}
-                  output: response
-                  outputMode: detailed_response
-                  emitErrors: false
+              - conditions:
+                  '{{rawBody}}':
+                    - fetch:
+                        url: '{{baseUrl}}/{{path}}{{qs}}'
+                        method: '{{effectiveMethod}}'
+                        headers: '{{fetchHeaders}}'
+                        body: '{{rawBody}}'
+                        output: response
+                        outputMode: detailed_response
+                        emitErrors: false
+                  '{{body}}':
+                    - fetch:
+                        url: '{{baseUrl}}/{{path}}{{qs}}'
+                        method: '{{effectiveMethod}}'
+                        headers: '{{fetchHeaders}}'
+                        body: '{{body}}'
+                        output: response
+                        outputMode: detailed_response
+                        emitErrors: false
+                  default:
+                    - fetch:
+                        url: '{{baseUrl}}/{{path}}{{qs}}'
+                        method: '{{effectiveMethod}}'
+                        headers: '{{fetchHeaders}}'
+                        body: {}
+                        output: response
+                        outputMode: detailed_response
+                        emitErrors: false
+        - conditions:
+            '{{response.status}} == 401 and {{$index}} == 0 and {{accessToken}} matches "$secret:"':
+              - conditions:
+                  '{{_testResponses}}':
+                    - set:
+                        name: freshAuth
+                        value: '{{_testResponses.freshAuth}}'
+                  default:
+                    - buildAppAuth:
+                        forceRefresh: true
+                        output: freshAuth
+              - conditions:
+                  '{{freshAuth.accessToken}} and {{freshAuth.accessToken}} != {{accessToken}}':
+                    - set:
+                        name: fetchHeaders.Authorization
+                        value: Bearer {{freshAuth.accessToken}}
+                  default:
+                    - break:
+                        scope: repeat
+            default:
+              - break:
+                  scope: repeat
+  - comment: The replay could not get a fresh token. buildAppAuth already says why, with the provider's reason — AUTH_EXPIRED (sign in again, `requiresOAuth`), TEMPORARY (retry) or OAUTH_CLIENT_MISCONFIGURED (an administrator must act) — whereas the generic 401 text of handleApiError would tell the agent to "check the credentials" whatever the cause. The text starts with the code, which is what agent-factory reads to raise the connect card.
+  - conditions:
+      '{{response.status}} == 401 and {{freshAuth.error}}':
+        - set:
+            name: result
+            value:
+              success: false
+              error:
+                isError: true
+                content:
+                  - type: text
+                    text: '{{freshAuth.error}}'
+              code: '{{freshAuth.code}}'
+              requiresOAuth: '{{freshAuth.requiresOAuth}}'
+              transient: '{{freshAuth.transient}}'
+              status: 401
+        - break: {}
   - handleApiError:
       response: '{{response}}'
       operation: '{{operation}}'

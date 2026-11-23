@@ -4,6 +4,7 @@ authorizations:
     # run. Never grant it to a person and never give it an `auth` block: anything
     # holding it reads and overwrites every credential in the family below.
     tokenResolver: {}
+    tokenDepositor: {}
     editor: {}
     viewer: {}
     workspace:
@@ -105,13 +106,36 @@ authorizations:
       subject: secure_secrets
       conditions:
         name:
-          $regex: '^<pfx>Refresh_${user.id}$'
-      reason: A member connecting their own account deposits the refresh token.
+          $regex: '^<pfx>Refresh_[a-f0-9]{24}_${user.id}$'
+      reason: |
+        A member connecting their own account deposits the refresh token that a
+        scheduled run will later replay. The name carries the 24-hex config
+        fingerprint of makeTokenSecretName: one fixed-width class, BEFORE
+        `${user.id}`, as the platform requires.
+    - role: tokenDepositor
+      action:
+        - read
+        - create
+        - update
+        - delete
+      subject: secure_secrets
+      conditions:
+        name:
+          $regex: '^<pfx>Refresh_[a-f0-9]{24}_${user.id}$'
+      reason: |
+        A connecting member storing, rotating and removing their own workspace
+        mirror, from an app instance. Assumed for one call by the automation
+        doing it (oauthCallback, buildAppAuth, oauthDisconnect); bound to the
+        acting user by the name, and never granted to a person. In an installed
+        app, this file is not read: the same rule goes to `requiredAuthorizations`
+        in index.yml, and the platform stores the secret as
+        `app:<source workspace id>:<name>` — the name tokenResolver reads.
     - role: tokenResolver
       action:
         - read
         - create
         - update
+        - delete
       subject: secure_secrets
       conditions:
         name:
@@ -120,4 +144,8 @@ authorizations:
         The same credentials, resolved for a member who is not there. Names the
         FAMILY rather than one person: `${user.id}` binds to nobody in a run
         nobody drives. The write is here too because providers rotate refresh
-        tokens, and the new one must be stored for that absent member.
+        tokens, and the new one must be stored for that absent member. `update`
+        also covers `secrets.acquireRenewal` / `releaseRenewal` (holding the
+        renewal lease means writing the secret next). `delete` drops a token
+        the provider refused for good (invalid_grant) — a member rule can never
+        grant it.

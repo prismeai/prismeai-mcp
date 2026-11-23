@@ -6,6 +6,31 @@ labels:
 photo: <uploaded-logo-url>
 customDomains: []
 repositories: {}
+requiredAuthorizations:
+  rules:
+    - role: tokenDepositor
+      action:
+        - read
+        - create
+        - update
+        - delete
+      subject: secure_secrets
+      conditions:
+        name:
+          $regex: ^<pfx>Refresh_[a-f0-9]{24}_${user.id}$
+      reason: A connecting member stores, rotates and removes their own refresh token. The name is bound to the member.
+    - role: tokenResolver
+      action:
+        - read
+        - create
+        - update
+        - delete
+      subject: secure_secrets
+      conditions:
+        name:
+          $regex: ^<pfx>Refresh_
+      reason: Scheduled runs, with no member present, renew and use the refresh tokens the members deposited.
+
 config:
   # Inline config UI (Gotcha 31): point `block` at the SAME bundle ref as
   # config.value.bundles[<slug>].bundle so the one-product builder renders the
