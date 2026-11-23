@@ -65,7 +65,12 @@ config:
         if (!u || !k || u.indexOf('{' + '{') >= 0 || k.indexOf('{' + '{') >= 0) {
           return { error: 'invalid_token_cache_context' };
         }
-        return { name: 'sfnRefresh_' + u + '_' + k.slice(0, 24) };
+        // One fingerprinted name per token: the refresh token (`name`, user scope,
+        // mirrored in workspace scope for cron) and the access token
+        // (`accessName`, user scope only). A config change yields other names, so
+        // a token minted for another client or scope set is never served.
+        var suffix = u + '_' + k.slice(0, 24);
+        return { name: 'sfnRefresh_' + suffix, accessName: 'sfnAccess_' + suffix };
 
     makeTokenCacheKey:
       parameters:
@@ -119,18 +124,72 @@ config:
           }
         }
         return parts.length ? '?' + parts.join('&') : '';
-    generatePkce:
-      parameters: {}
+    signOAuthState:
+      parameters:
+        uid:
+          type: string
+        secret:
+          type: string
+        now:
+          type: number
       code: |
+        // Stateless, signed OAuth state (powerbi `packOAuthState`). Nothing is
+        // stored, so the callback does not depend on reading back a user-context
+        // slot written a second earlier on another worker (the `invalid_state`
+        // race), and a second Connect click no longer invalidates the first popup.
+        // Format `p1.<payload>.<sig>`: payload = base64url JSON { uid, n, iat },
+        // sig = HMAC-SHA256(secret, 'state:' + payload). The PKCE verifier is
+        // DERIVED from the nonce (HMAC(secret, 'pkce:' + n)), so the callback
+        // recomputes it instead of storing it.
         const crypto = require('crypto');
-        const codeVerifier = crypto.randomBytes(32).toString('base64url');
+        const key = String(secret || '');
+        const u = String(uid || '');
+        if (!key || !u || key.indexOf('{' + '{') >= 0) return { error: 'missing_secret_or_uid' };
+        const n = crypto.randomBytes(16).toString('base64url');
+        const iat = Number(now) > 0 ? Number(now) : Date.now();
+        const payload = Buffer.from(JSON.stringify({ uid: u, n: n, iat: iat }), 'utf8').toString('base64url');
+        const sig = crypto.createHmac('sha256', key).update('state:' + payload).digest('base64url');
+        const codeVerifier = crypto.createHmac('sha256', key).update('pkce:' + n).digest('base64url');
         const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
-        return { codeVerifier, codeChallenge };
-    generateState:
-      parameters: {}
+        return { state: 'p1.' + payload + '.' + sig, codeChallenge: codeChallenge };
+    verifyOAuthState:
+      parameters:
+        state:
+          type: string
+        secret:
+          type: string
+        uid:
+          type: string
+        now:
+          type: number
+        maxAgeMs:
+          type: number
       code: |
+        // Reverse of signOAuthState (powerbi `unpackOAuthState`).
+        // { signed: false, valid: false } for an unsigned state, which the caller
+        // refuses. Otherwise { signed: true, valid, reason, codeVerifier }: the
+        // signature must verify (timing-safe), the payload uid must be the
+        // callback user, and the state must be younger than maxAgeMs (10 min).
         const crypto = require('crypto');
-        return { state: crypto.randomBytes(16).toString('base64url') };
+        const s = String(state || '');
+        if (s.indexOf('p1.') !== 0) return { signed: false, valid: false };
+        const key = String(secret || '');
+        if (!key) return { signed: true, valid: false, reason: 'invalid_state' };
+        const parts = s.split('.');
+        if (parts.length !== 3) return { signed: true, valid: false, reason: 'invalid_state' };
+        const payload = parts[1];
+        const expected = crypto.createHmac('sha256', key).update('state:' + payload).digest('base64url');
+        const a = Buffer.from(parts[2]), b = Buffer.from(expected);
+        if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return { signed: true, valid: false, reason: 'invalid_state' };
+        let obj;
+        try { obj = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch (e) { return { signed: true, valid: false, reason: 'invalid_state' }; }
+        if (!obj || !obj.uid || String(obj.uid) !== String(uid || '')) return { signed: true, valid: false, reason: 'invalid_state' };
+        const t = Number(now) > 0 ? Number(now) : Date.now();
+        const maxAge = Number(maxAgeMs) > 0 ? Number(maxAgeMs) : 600000;
+        const iat = Number(obj.iat);
+        if (!(iat > 0) || t - iat > maxAge || iat - t > 60000) return { signed: true, valid: false, reason: 'state_expired' };
+        const codeVerifier = crypto.createHmac('sha256', key).update('pkce:' + String(obj.n || '')).digest('base64url');
+        return { signed: true, valid: true, codeVerifier: codeVerifier };
     buildAuthorizeUrl:
       parameters:
         authorizeUrl:

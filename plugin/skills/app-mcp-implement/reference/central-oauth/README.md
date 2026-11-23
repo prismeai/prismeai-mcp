@@ -52,12 +52,29 @@ With the central client, the authorize `redirect_uri` is ALWAYS the **core**
 callback (`{{global.apiUrl}}/workspaces/slug:<slug>/webhooks/oauthCallback`) —
 the only URI to register at the provider. `oauthConnect` packs the tenant
 instance's callback into the OAuth `state` (`packOAuthState`:
-`<random>.<b64url(url)>`); the core `oauthCallback` PROXY role 302s code+state
+`<nonce>.<b64url(url)>`); the core `oauthCallback` PROXY role 302s code+state
 to that callback (`unpackOAuthState` validates the target is an
-`*oauthCallback` webhook on OUR api host — anti open-redirect). The PKCE
-`code_verifier` lives in the tenant user-scope `oauthPending` and the exchange
-happens tenant-side via `tokenUrl` — a malicious workspace receiving a stray
-code cannot exchange it (no verifier).
+`*oauthCallback` webhook on OUR api host — anti open-redirect — and flags
+`isSelf` when it is the running instance's own). The PKCE `code_verifier` lives
+in a **user-scoped secret named after the state's nonce** (`<pfx>Pending_<nonce>`,
+`ttl: 900`, deleted after one exchange) — never in the user context, which is a
+per-worker cache that made the callback fail with `invalid_state` and let a
+second Connect click overwrite the first. The exchange happens tenant-side via
+`tokenUrl` — a malicious workspace receiving a stray code cannot exchange it (no
+verifier), and only the user who started the sign-in can read that secret.
+Pattern of google-workspaces (`newOAuthPending` / `makePendingSecretName` /
+`parseOAuthPending`).
+
+## Tokens
+
+Tokens live in secrets only, as in `reference/automations/` (SKILL.md Phase 6,
+"OAuth token storage and failure semantics"): `<pfx>Access_<userId>_<fp>` and
+`<pfx>Refresh_<userId>_<fp>` in `scope: user`, plus a best-effort workspace
+mirror of the refresh token for cron. The fingerprint `<fp>` comes from
+`makeTokenCacheKey(tenantId, clientId, scopes)`: in central mode, compute it
+from `oc.oauthClientId` / `oc.scopes` (resolveOAuthClient) — the field-level
+`config.oauthClientId` is empty there — **in the callback, `buildAppAuth`,
+`oauthStatus` and `oauthDisconnect` alike**, or each computes another name.
 
 ## Wiring checklist (placeholders: `google-workspaces` → `<slug>`, `googleWorkspaces` → `<camel>`, `gws` → `<pfx>`)
 
@@ -69,13 +86,19 @@ code cannot exchange it (no verifier).
 2. Copy the 7 automations; provider token/authorize URLs and scopes come only
    from the central secrets or the tenant auth secrets, never from template
    literals.
-3. Custom Code: add `packOAuthState`/`unpackOAuthState` (see
-   `customcode-packOAuthState.yml.snippet`).
+3. Custom Code: add `packOAuthState`/`unpackOAuthState` and the pending
+   sign-in helpers `newOAuthPending`/`makePendingSecretName`/`parseOAuthPending`
+   (see `customcode-packOAuthState.yml.snippet`). They replace the signed-state
+   helpers (`signOAuthState`/`verifyOAuthState`) of the tenant-client template:
+   in central mode the tenant holds no client secret to sign with.
 4. `buildAppAuth`: alias `oauthCentral` → `oauth` early; `resolveOAuthClient`
-   at the top of the oauth branch; both refresh fetches use
-   `url: '{% {{oc.tokenUrl}} || {{tokenUri}} %}'` + `oc.oauthClientId/Secret`.
+   at the top of the oauth branch; both refresh fetches (cron and interactive,
+   both under the renewal lease) use `url: '{% {{oc.tokenUrl}} || {{tokenUri}} %}'`
+   + `oc.oauthClientId/Secret`, and the fingerprint uses `oc` (see Tokens).
+   `centralTokenExchange` passes the provider's status and body through, so
+   `classifyTokenError` still sees `invalid_grant`.
 5. `oauthStatus`: exclude BOTH `oauth` and `oauthCentral` from the non-oauth
-   fast path.
+   fast path (the reference already does), and fingerprint with `oc`.
 6. SPA: `oauthCentral` mode (first + default, FIELDS = scopes only),
    `isOAuthMode()` gating, MaintainerSetup view on `!readParam('workspaceId')`
    (see `MaintainerSetup-excerpt.tsx`) — **gated on `maintainerStatus` (Gotcha 28):

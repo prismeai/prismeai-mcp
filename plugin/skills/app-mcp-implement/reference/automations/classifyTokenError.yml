@@ -1,0 +1,89 @@
+slug: classifyTokenError
+name: /Helpers/classifyTokenError
+description: |-
+  Classify a failed answer of the Salesforce token endpoint (or of the core centralTokenExchange proxy, which passes the provider's status and body through) and build the message the tools hand to the agent. Only `invalid_grant` means this user's refresh token is dead; everything else leaves the connection alone.
+  Returns `{ kind, code, message, requiresOAuth, transient, providerError, providerErrorDescription, status }` where `kind` is:
+  - `revoked`: invalid_grant — the caller drops the stored credential; `AUTH_EXPIRED`, `requiresOAuth: true`.
+  - `client`: invalid_client / unauthorized_client — the connector's OAuth client is misconfigured, for every user at once; nobody is disconnected; `OAUTH_CLIENT_MISCONFIGURED`.
+  - `transient`: network failure, 408, 429 or 5xx; `TEMPORARY`, `transient: true`.
+  - `rejected`: any other 4xx (invalid_request, invalid_scope, …) — an operator problem, not a revocation; nobody is disconnected; `OAUTH_TOKEN_REJECTED`.
+  The provider's `error` and `error_description` are kept in the message: they tell the user or an administrator why. They never carry a token.
+  Pattern of google-workspaces `classifyTokenError`.
+private: true
+arguments:
+  response:
+    secret: true
+    type: object
+    description: The detailed_response of the token fetch ({ status, body, headers }).
+do:
+  - set:
+      name: _status
+      value: '{% {{response.status}} || 0 %}'
+  - set:
+      name: _err
+      value: '{% {{response.body.error}} || "" %}'
+  - set:
+      name: _desc
+      value: '{% {{response.body.error_description}} || "" %}'
+  - set:
+      name: _detail
+      value: HTTP {{_status}}
+  - conditions:
+      '{{_err}}':
+        - set:
+            name: _detail
+            value: HTTP {{_status}} {{_err}}
+  - conditions:
+      '{{_desc}}':
+        - set:
+            name: _detail
+            value: '{{_detail}}: {{_desc}}'
+  - conditions:
+      '{{_err}} == "invalid_grant"':
+        - set:
+            name: output
+            value:
+              kind: revoked
+              code: AUTH_EXPIRED
+              requiresOAuth: true
+              transient: false
+              message: 'AUTH_EXPIRED: the Salesforce sign-in of this user has expired or was revoked ({{_detail}}). Ask the user to reconnect Salesforce (connect card, or Connexion in the connector config app), then retry.'
+      '{{_err}} == "invalid_client" or {{_err}} == "unauthorized_client"':
+        - set:
+            name: output
+            value:
+              kind: client
+              event: OAuthClientRejected
+              code: OAUTH_CLIENT_MISCONFIGURED
+              requiresOAuth: false
+              transient: false
+              message: 'OAUTH_CLIENT_MISCONFIGURED: Salesforce rejected the OAuth client of the connector ({{_detail}}). This affects every user and is not fixed by reconnecting — do not ask the user to sign in again. An administrator must check the OAuth client ID and secret of the connector. Users stay connected.'
+      '{{_status}} == 0 or {{_status}} == 408 or {{_status}} == 429 or {{_status}} >= 500':
+        - set:
+            name: output
+            value:
+              kind: transient
+              code: TEMPORARY
+              requiresOAuth: false
+              transient: true
+              message: 'TEMPORARY: the Salesforce token endpoint is unavailable right now ({{_detail}}). Retry in a moment — no reconnection needed.'
+      default:
+        - set:
+            name: output
+            value:
+              kind: rejected
+              event: OAuthTokenRejected
+              code: OAUTH_TOKEN_REJECTED
+              requiresOAuth: false
+              transient: false
+              message: 'OAUTH_TOKEN_REJECTED: Salesforce refused to renew the access token ({{_detail}}). This is a connector configuration problem, not an expired sign-in — do not ask the user to reconnect; an administrator should check the OAuth client and its scopes.'
+  - set:
+      name: output.providerError
+      value: '{{_err}}'
+  - set:
+      name: output.providerErrorDescription
+      value: '{{_desc}}'
+  - set:
+      name: output.status
+      value: '{{_status}}'
+output: '{{output}}'

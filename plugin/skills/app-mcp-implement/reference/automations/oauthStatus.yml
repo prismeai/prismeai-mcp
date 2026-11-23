@@ -1,14 +1,17 @@
 slug: oauthStatus
 name: OAuth/oauthStatus
 description: >-
-  Returns the per-user Salesforce OAuth connection status for the current user.
-  Used by the config app and by agent-factory's capability `status_url`.
-  Authoritative: when the cached access token is expired it attempts the
-  refresh via buildAppAuth — a dead refresh token invalidates the stored
-  connection (done by buildAppAuth) and reports connected:false, so
-  agent-factory raises auth_pending and proposes the OAuth connect flow
-  BEFORE any failing tool call. Transient provider errors (5xx) stay
-  connected:true to avoid wrongly gating tools during an outage.
+  Returns the per-user Salesforce OAuth connection status for the current user
+  ({ connected, perUser, … }). Used by the config app and by agent-factory's
+  capability `status_url`, which calls it BEFORE every tool call. It therefore
+  NEVER mints a token: a status that renews runs a token exchange per tool call
+  and races the call itself for a rotating refresh token. The connection is
+  judged on the presence of the authoritative user-scoped refresh-token secret
+  (fingerprinted with the tenant/client/scopes, so a config change reads as
+  disconnected). A dead refresh token is detected by the first real call —
+  buildAppAuth drops the secrets on a confirmed invalid_grant — so the next poll
+  reports connected:false and agent-factory proposes the connect flow.
+  Pattern of powerbi `oauthStatus`.
 private: true
 when:
   endpoint: true
@@ -17,12 +20,13 @@ do:
       name: output
       value:
         connected: false
+        perUser: true
   - comment: Non-oauth tenants (jwt / clientCredentials / accessToken) have no per-user connection — report connected so a wrongly-wired status_url never gates their tools.
   - set:
       name: statusMode
       value: '{% {{config.authMode}} || "jwt" %}'
   - conditions:
-      '{{statusMode}} != "oauth"':
+      '{{statusMode}} != "oauth" and {{statusMode}} != "oauthCentral"':
         - set:
             name: output
             value:
@@ -31,7 +35,7 @@ do:
               perUser: false
         - break: {}
   - conditions:
-      '!{{user.salesforceNext.oauth.accessToken}}':
+      '!{{user.id}}':
         - break: {}
   - Custom Code.run:
       function: makeTokenCacheKey
@@ -41,38 +45,41 @@ do:
         scopes: '{{config.oauthScopes}}'
       output: tokenCache
   - conditions:
-      '{{tokenCache.error}} or {{user.salesforceNext.oauth.cacheKey}} != {{tokenCache.key}}':
-        - delete:
-            name: user.salesforceNext.oauth
-            scope: user
+      '{{tokenCache.error}}':
         - break: {}
-  - comment: Fast path — cached access token still valid (120s skew), no provider round-trip.
+  - Custom Code.run:
+      function: makeTokenSecretName
+      parameters:
+        userId: '{{user.id}}'
+        cacheKey: '{{tokenCache.key}}'
+      output: rtName
   - conditions:
-      '{{user.salesforceNext.oauth.expiresAt}} > {% date({{run.date}}).ts + 120000 %}':
+      '{{rtName.error}}':
+        - break: {}
+  - comment: Presence of the refresh-token secret IS the connection. Reading it costs a DB lookup and returns an opaque ref — no provider round-trip, no rotation. Only a `$secret:` ref counts; a caught failure (read through `$error`) must never pass for one.
+  - try:
+      do:
+        - run:
+            module: secrets
+            function: get
+            parameters:
+              name: '{{rtName.name}}'
+              scope: user
+            output: rtSecret
+      catch:
+        - set:
+            name: rtSecret
+            value:
+              error: '{{$error.message}}'
+  - conditions:
+      '{{rtSecret}} matches "$secret:"':
         - set:
             name: output
             value:
               connected: true
+              perUser: true
               instanceUrl: '{{user.salesforceNext.oauth.instanceUrl}}'
               scopes: '{{user.salesforceNext.oauth.scopes}}'
               connectedAt: '{{user.salesforceNext.oauth.connectedAt}}'
-        - break: {}
-  - comment: Token expired — probe the refresh. buildAppAuth re-caches the token on success and deletes the user-scope connection on permanent (4xx) failure.
-  - buildAppAuth:
-      output: probe
-  - conditions:
-      '{{probe.error}} and !{{probe.transient}}':
-        - set:
-            name: output
-            value:
-              connected: false
-              reason: '{{probe.error}}'
-        - break: {}
-  - set:
-      name: output
-      value:
-        connected: true
-        instanceUrl: '{{user.salesforceNext.oauth.instanceUrl}}'
-        scopes: '{{user.salesforceNext.oauth.scopes}}'
-        connectedAt: '{{user.salesforceNext.oauth.connectedAt}}'
+  - comment: No secret means not connected — deliberately no fallback on the user context, which buildAppAuth cannot clear from inside an MCP dispatch and would keep reporting a dead connection as live.
 output: '{{output}}'

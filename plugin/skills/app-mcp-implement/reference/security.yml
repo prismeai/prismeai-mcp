@@ -105,13 +105,18 @@ authorizations:
       subject: secure_secrets
       conditions:
         name:
-          $regex: '^<pfx>Refresh_${user.id}$'
-      reason: A member connecting their own account deposits the refresh token.
+          $regex: '^<pfx>Refresh_${user.id}_[a-f0-9]{24}$'
+      reason: |
+        A member connecting their own account deposits the refresh token that a
+        scheduled run will later replay. The name carries the 24-hex config
+        fingerprint of makeTokenSecretName (one fixed-width class, as the
+        platform requires).
     - role: tokenResolver
       action:
         - read
         - create
         - update
+        - delete
       subject: secure_secrets
       conditions:
         name:
@@ -120,4 +125,8 @@ authorizations:
         The same credentials, resolved for a member who is not there. Names the
         FAMILY rather than one person: `${user.id}` binds to nobody in a run
         nobody drives. The write is here too because providers rotate refresh
-        tokens, and the new one must be stored for that absent member.
+        tokens, and the new one must be stored for that absent member. `update`
+        also covers `secrets.acquireRenewal` / `releaseRenewal` (holding the
+        renewal lease means writing the secret next). `delete` drops a token
+        the provider refused for good (invalid_grant) — a member rule can never
+        grant it.

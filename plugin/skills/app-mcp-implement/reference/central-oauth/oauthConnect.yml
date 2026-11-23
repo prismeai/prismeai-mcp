@@ -1,9 +1,12 @@
 slug: oauthConnect
 name: OAuth/oauthConnect
-description: Per-user OAuth2 (authorization-code + PKCE) connect endpoint. Resolves the OAuth client from field-level tenant values or the central platform client, stores PKCE + state + redirectUri in user scope, and redirects to Google's authorize endpoint.
+description: Per-user OAuth2 (authorization-code + PKCE) connect endpoint. Resolves the OAuth client from field-level tenant values or the central platform client, stores the PKCE verifier in a user-scoped secret named after a fresh nonce (the state carries the nonce — nothing in the user context), and redirects to the provider's authorize endpoint. With the central client, the redirect_uri is the CORE callback and this instance's callback is packed into the state (the core proxies back). Pattern of google-workspaces `oauthConnect`.
 private: true
 when:
   endpoint: true
+schemas:
+  - output:
+      redact: true
 do:
   - conditions:
       '!{{user.id}}':
@@ -27,13 +30,74 @@ do:
             name: output
             value: '{{oc.error}}'
         - break: {}
+  - comment: |
+      Nothing of this sign-in is kept in the user context. The callback may run
+      on another worker whose cached user context does not hold a value written
+      here yet — the intermittent `invalid_state` — and a second Connect click
+      used to overwrite the first popup's pending entry. The PKCE verifier goes
+      into a user-scoped secret named after a fresh nonce (DB-backed, read the
+      same way by every worker, only by this user); the state carries the nonce.
+      It expires after 15 minutes (`ttl`) and the callback deletes it after a
+      single use. No signing key is needed: in central mode the tenant holds no
+      client secret to sign with.
   - Custom Code.run:
-      function: generatePkce
-      output: pkce
+      function: newOAuthPending
+      parameters:
+        userId: '{{user.id}}'
+      output: pending
   - Custom Code.run:
-      function: generateState
-      output: stateResult
-  - comment: 'Central client — Google redirects to the CORE callback (single registered URI); pack THIS instance''s callback into the state so the core proxies code+state back here. Tenant client — plain state, direct callback.'
+      function: makePendingSecretName
+      parameters:
+        nonce: '{{pending.nonce}}'
+      output: _pendingRef
+  - comment: The verifier is drawn by the runtime crypto module, not by Custom Code, whose results are recorded in the Activity Feed. It only ever exists here and in the secret.
+  - run:
+      module: crypto
+      function: randomBytes
+      parameters:
+        length: 32
+        encoding: base64url
+      output: _verifier
+  - run:
+      module: crypto
+      function: sha256
+      parameters:
+        data: '{{_verifier}}'
+        encoding: base64url
+      output: _challenge
+  - set:
+      name: _pendingSaved
+      value: false
+  - conditions:
+      '!{{pending.error}} and !{{_pendingRef.error}} and {{_verifier}}':
+        - try:
+            do:
+              - run:
+                  module: secrets
+                  function: set
+                  parameters:
+                    name: '{{_pendingRef.name}}'
+                    scope: user
+                    value: '{{_verifier}}'
+                    ttl: 900
+              - set:
+                  name: _pendingSaved
+                  value: true
+            catch:
+              - set:
+                  name: _pendingErr
+                  value: '{{$error.message}}'
+  - conditions:
+      '!{{_pendingSaved}}':
+        - set:
+            name: $http
+            value:
+              status: 500
+        - set:
+            name: output
+            value: Could not start the sign-in. Please retry.
+        - break: {}
+  - comment: 'Central client — the provider redirects to the CORE callback (single registered URI); pack THIS instance''s callback into the state so the core proxies code+state back here. Tenant client — no packed callback, direct callback.'
   - set:
       name: packCallbackUrl
       value: ''
@@ -45,17 +109,9 @@ do:
   - Custom Code.run:
       function: packOAuthState
       parameters:
-        state: '{{stateResult.state}}'
+        state: '{{pending.state}}'
         callbackUrl: '{{packCallbackUrl}}'
       output: packed
-  - set:
-      name: user.googleWorkspaces.oauthPending
-      scope: user
-      value:
-        codeVerifier: '{{pkce.codeVerifier}}'
-        state: '{{packed.packed}}'
-        redirectUri: '{{oc.redirectUri}}'
-        createdAt: '{{run.date}}'
   - Custom Code.run:
       function: buildAuthorizeUrl
       parameters:
@@ -64,7 +120,7 @@ do:
         redirectUri: '{{oc.redirectUri}}'
         scopes: '{{oc.scopes}}'
         state: '{{packed.packed}}'
-        codeChallenge: '{{pkce.codeChallenge}}'
+        codeChallenge: '{{_challenge}}'
         accessType: offline
         prompt: consent
       output: urlResult
@@ -75,5 +131,5 @@ do:
           Content-Type: text/html
   - set:
       name: output
-      value: <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={{urlResult.url}}"><title>Redirecting to Google…</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting to Google… <a href="{{urlResult.url}}">continue</a></body></html>
+      value: <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={{urlResult.url}}"><title>Redirecting…</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting to the sign-in page… <a href="{{urlResult.url}}">continue</a></body></html>
 output: '{{output}}'
