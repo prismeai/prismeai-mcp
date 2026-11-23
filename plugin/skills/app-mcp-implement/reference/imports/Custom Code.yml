@@ -69,7 +69,9 @@ config:
         // mirrored in workspace scope for cron) and the access token
         // (`accessName`, user scope only). A config change yields other names, so
         // a token minted for another client or scope set is never served.
-        var suffix = u + '_' + k.slice(0, 24);
+        // The fixed-width fingerprint sits BEFORE the user id: the platform
+        // refuses a member rule whose class follows `${user.id}`.
+        var suffix = k.slice(0, 24) + '_' + u;
         return { name: 'sfnRefresh_' + suffix, accessName: 'sfnAccess_' + suffix };
 
     makeTokenCacheKey:

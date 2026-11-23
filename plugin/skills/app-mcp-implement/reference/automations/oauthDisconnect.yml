@@ -83,13 +83,13 @@ do:
                     - set:
                         name: _atDelErr
                         value: '{{$error.message}}'
-              - comment: The workspace mirror (cron store). A member rule can never grant `delete`, so it takes the tokenResolver role — best-effort.
+              - comment: The workspace mirror (cron store). A member rule can never grant `delete`, so it takes the tokenDepositor role (bound to this user's own name) — best-effort.
               - try:
                   do:
                     - run:
                         module: secrets
                         function: delete
-                        assumeRole: tokenResolver
+                        assumeRole: tokenDepositor
                         parameters:
                           name: '{{tokName.name}}'
                           scope: workspace

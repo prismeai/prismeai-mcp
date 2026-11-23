@@ -43,6 +43,9 @@ arguments:
       from the refresh token. Set by executeApiCall when Salesforce answered 401
       on a stored token — no expiry is tracked, so that rejection is the signal
       that the token is dead.
+schemas:
+  - output:
+      redact: true
 do:
   - set:
       name: auth
@@ -154,6 +157,7 @@ do:
                           name: '{{tokName.name}}'
                           scope: workspace
                           reuseWindow: 0
+                          ttl: 60
                         output: renewal
                   catch:
                     - set:
@@ -172,6 +176,7 @@ do:
                                 name: '{{tokName.name}}'
                                 scope: workspace
                                 reuseWindow: 0
+                                ttl: 60
                                 wait: 0
                               output: renewal
                         catch:
@@ -213,11 +218,11 @@ do:
                           requiresOAuth: false
                           transient: true
                     - break: {}
-              - comment: 'Sent once (`maxRetries: 0`) and bounded well under the 30 s lease (`timeout`) — a retried or late exchange would present the same refresh token again after the provider rotated it.'
+              - comment: 'Sent once (`maxRetries: 0`) and bounded well under the lease (`timeout` 10 s + up to 10 s to connect + the writes, inside `ttl: 60`) — a retried or late exchange would present the same refresh token again after the provider rotated it.'
               - fetch:
                   url: '{{auth.oauthTokenUrl}}'
                   method: POST
-                  timeout: 20000
+                  timeout: 10000
                   maxRetries: 0
                   headers:
                     Content-Type: application/x-www-form-urlencoded
@@ -398,6 +403,7 @@ do:
                   parameters:
                     name: '{{rtName.name}}'
                     scope: user
+                    ttl: 60
                   output: renewal
             catch:
               - set:
@@ -455,11 +461,11 @@ do:
                     requiresOAuth: false
                     transient: true
               - break: {}
-        - comment: 'Sent once (`maxRetries: 0`) and bounded well under the 30 s lease (`timeout`) — see the platform doc "Renewing a rotating token once".'
+        - comment: 'Sent once (`maxRetries: 0`) and bounded well under the lease (`timeout` 10 s + up to 10 s to connect + the writes, inside `ttl: 60`) — see the platform doc "Renewing a rotating token once".'
         - fetch:
             url: '{{auth.oauthTokenUrl}}'
             method: POST
-            timeout: 20000
+            timeout: 10000
             maxRetries: 0
             headers:
               Content-Type: application/x-www-form-urlencoded
@@ -500,12 +506,13 @@ do:
                                 error: '{{$error.message}}'
                     - conditions:
                         '{{_rtSet.error}} != "version_conflict"':
-                          - comment: Workspace mirror for cron — best-effort (the member rule in security.yml allows a member to write their own name).
+                          - comment: Workspace mirror for cron — best-effort, under the `tokenDepositor` role (security.yml, and `requiredAuthorizations` in index.yml for an installed app — where the platform stores it as `app:<source id>:<name>`, the name tokenResolver reads).
                           - try:
                               do:
                                 - run:
                                     module: secrets
                                     function: set
+                                    assumeRole: tokenDepositor
                                     parameters:
                                       name: '{{rtName.name}}'
                                       scope: workspace
@@ -582,7 +589,7 @@ do:
                           transient: true
                           message: 'TEMPORARY: this Salesforce connection was replaced while its token was being renewed. Retry — no reconnection needed.'
                   default:
-                    - comment: The access token and the workspace mirror hold the same dead grant. The mirror delete needs a role (a member rule can never grant `delete`), hence `tokenResolver`, best-effort.
+                    - comment: The access token and the workspace mirror hold the same dead grant. The mirror delete needs a role (a member rule can never grant `delete`), hence `tokenDepositor` (bound to this user's own name), best-effort.
                     - try:
                         do:
                           - run:
@@ -600,7 +607,7 @@ do:
                           - run:
                               module: secrets
                               function: delete
-                              assumeRole: tokenResolver
+                              assumeRole: tokenDepositor
                               parameters:
                                 name: '{{rtName.name}}'
                                 scope: workspace

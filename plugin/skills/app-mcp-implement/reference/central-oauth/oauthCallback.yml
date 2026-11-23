@@ -205,12 +205,13 @@ do:
                   name: redirectTo
                   value: '{{spaBase}}&status=error&message=token_store_failed'
               - break: {}
-        - comment: Best-effort workspace mirror for cron (buildAppAuth targetUserId), written under the member rule of security.yml. An RBAC denial MUST NOT abort the callback.
+        - comment: Best-effort workspace mirror for cron (buildAppAuth targetUserId), written under the tokenDepositor role (bound to the member's own name). A denial MUST NOT abort the callback.
         - try:
             do:
               - run:
                   module: secrets
                   function: set
+                  assumeRole: tokenDepositor
                   parameters:
                     name: '{{tokName.name}}'
                     scope: workspace
@@ -232,6 +233,47 @@ do:
                   value:
                     error: '{{$error.error}}'
                     message: '{{$error.message}}'
+      default:
+        - comment: No refresh token in the answer (re-consent, or a scope set without offline access). Without one already stored, nothing could ever renew this connection, and oauthStatus — which judges on that secret — would report it disconnected before every tool call, looping on the connect card. Fail the sign-in instead.
+        - try:
+            do:
+              - run:
+                  module: secrets
+                  function: get
+                  parameters:
+                    name: '{{tokName.name}}'
+                    scope: user
+                  output: _rtExisting
+            catch:
+              - set:
+                  name: _rtExisting
+                  value: ''
+        - set:
+            name: _rtExistingOk
+            value: false
+        - conditions:
+            '{{_rtExisting}} matches "$secret:"':
+              - set:
+                  name: _rtExistingOk
+                  value: true
+        - conditions:
+            '!{{_rtExistingOk}}':
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: delete
+                        parameters:
+                          name: '{{tokName.accessName}}'
+                          scope: user
+                  catch:
+                    - set:
+                        name: _atDelErr
+                        value: '{{$error.message}}'
+              - set:
+                  name: redirectTo
+                  value: '{{spaBase}}&status=error&message=no_refresh_token'
+              - break: {}
   - comment: Non-credential metadata only (shown by oauthStatus / the config app).
   - set:
       name: user.<camel>.oauth

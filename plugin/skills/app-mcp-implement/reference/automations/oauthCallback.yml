@@ -163,15 +163,17 @@ do:
               - break: {}
         - comment: >-
             Best-effort workspace mirror so cron / autonomous automations can
-            resolve this user via buildAppAuth(targetUserId). The member rule of
-            security.yml lets every member write their own name; if it is
-            missing, the RBAC denial MUST NOT abort the callback — it is
-            reported to the activity feed, and the interactive path works.
+            resolve this user via buildAppAuth(targetUserId), under the
+            tokenDepositor role (bound to the member's own name; granted through
+            `requiredAuthorizations` in an installed app). If it is missing, the
+            denial MUST NOT abort the callback — it is reported to the activity
+            feed, and the interactive path works.
         - try:
             do:
               - run:
                   module: secrets
                   function: set
+                  assumeRole: tokenDepositor
                   parameters:
                     name: '{{tokName.name}}'
                     scope: workspace
@@ -193,6 +195,47 @@ do:
                   value:
                     error: '{{$error.error}}'
                     message: '{{$error.message}}'
+      default:
+        - comment: No refresh token in the answer (re-consent, or a scope set without offline access). Without one already stored, nothing could ever renew this connection, and oauthStatus — which judges on that secret — would report it disconnected before every tool call, looping on the connect card. Fail the sign-in instead.
+        - try:
+            do:
+              - run:
+                  module: secrets
+                  function: get
+                  parameters:
+                    name: '{{tokName.name}}'
+                    scope: user
+                  output: _rtExisting
+            catch:
+              - set:
+                  name: _rtExisting
+                  value: ''
+        - set:
+            name: _rtExistingOk
+            value: false
+        - conditions:
+            '{{_rtExisting}} matches "$secret:"':
+              - set:
+                  name: _rtExistingOk
+                  value: true
+        - conditions:
+            '!{{_rtExistingOk}}':
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: delete
+                        parameters:
+                          name: '{{tokName.accessName}}'
+                          scope: user
+                  catch:
+                    - set:
+                        name: _atDelErr
+                        value: '{{$error.message}}'
+              - set:
+                  name: redirectTo
+                  value: '{{spaBase}}&status=error&message=no_refresh_token'
+              - break: {}
   - comment: Non-credential metadata only (shown by oauthStatus / the config app). The instance URL is where the API lives for this user.
   - set:
       name: user.salesforceNext.oauth
@@ -205,4 +248,4 @@ do:
       name: redirectTo
       value: '{{spaBase}}&status=connected'
 output: |
-  <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={{redirectTo}}"><title>Salesforce</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting… <a href="{{redirectTo}}">continue</a></body></html>
+  <!doctype html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={% sanitize({{redirectTo}}) %}"><title>Salesforce</title></head><body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:48px">Redirecting… <a href="{% sanitize({{redirectTo}}) %}">continue</a></body></html>
