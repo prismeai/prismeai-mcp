@@ -118,9 +118,9 @@ do:
       is read-only (every `set user.*` is dropped silently), and it is a
       per-worker cache that can hand out a refresh token another worker already
       burnt. The secrets module is DB-backed and writable from there.
-        - `<pfx>Access_<userId>_<fp>`  (scope user)      — access token, read first.
-        - `<pfx>Refresh_<userId>_<fp>` (scope user)      — refresh token, source of truth.
-        - `<pfx>Refresh_<userId>_<fp>` (scope workspace) — mirror for cron (targetUserId).
+        - `<pfx>Access_<fp>_<userId>`  (scope user)      — access token, read first.
+        - `<pfx>Refresh_<fp>_<userId>` (scope user)      — refresh token, source of truth.
+        - `<pfx>Refresh_<fp>_<userId>` (scope workspace) — mirror for cron (targetUserId).
       No expiry is tracked: executeApiCall replays ONCE with `forceRefresh` when
       the provider answers 401, which is authoritative where an expiry guess is not.
       Only ONE call renews a given refresh token at a time
@@ -184,6 +184,31 @@ do:
                               name: renewal
                               value:
                                 error: '{{$error.message}}'
+              - comment: '`unavailable` with no `error`: the lease cannot be taken. A runtime older than v27.10.0, or a self-hosted PostgreSQL whose `workspaces` service has not added the lease columns yet, answers it on EVERY call while plain get/set/delete keep working — answering TEMPORARY there would stop renewals for good. So, as salesforce does when its limiter cannot be reached, renew without the lease: read the token plainly and write without `ifRef` (which answers `version_conflict` on such a store). If the store really is down, that read fails too and the call answers TEMPORARY without calling the provider.'
+              - conditions:
+                  '{{renewal.status}} == "unavailable"':
+                    - try:
+                        do:
+                          - run:
+                              module: secrets
+                              function: get
+                              assumeRole: tokenResolver
+                              parameters:
+                                name: '{{tokName.name}}'
+                                scope: workspace
+                              output: _plainRt
+                        catch:
+                          - set:
+                              name: _plainRt
+                              value: ''
+                    - conditions:
+                        '{{_plainRt}} matches "$secret:"':
+                          - set:
+                              name: renewal
+                              value:
+                                status: acquired
+                                ref: '{{_plainRt}}'
+                                noLease: true
               - conditions:
                   '{{renewal.status}} == "not_found" or {{renewal.error}}':
                     - comment: The platform's reason goes to the activity feed, for whoever administers the workspace. The caller gets the plain answer below, which can reach the member or the model.
@@ -241,36 +266,50 @@ do:
                           - comment: The provider rotated the refresh token — store the new one over the version this lease read only (`ifRef`). `version_conflict` means the member reconnected meanwhile; their newer token stays.
                           - try:
                               do:
-                                - run:
-                                    module: secrets
-                                    function: set
-                                    assumeRole: tokenResolver
-                                    parameters:
-                                      name: '{{tokName.name}}'
-                                      scope: workspace
-                                      value: '{{refResp.body.refresh_token}}'
-                                      ifRef: '{{renewal.ref}}'
-                                    output: _tokRotate
+                                - conditions:
+                                    '{{renewal.noLease}}':
+                                      - run:
+                                          module: secrets
+                                          function: set
+                                          assumeRole: tokenResolver
+                                          parameters:
+                                            name: '{{tokName.name}}'
+                                            scope: workspace
+                                            value: '{{refResp.body.refresh_token}}'
+                                          output: _tokRotate
+                                    default:
+                                      - run:
+                                          module: secrets
+                                          function: set
+                                          assumeRole: tokenResolver
+                                          parameters:
+                                            name: '{{tokName.name}}'
+                                            scope: workspace
+                                            value: '{{refResp.body.refresh_token}}'
+                                            ifRef: '{{renewal.ref}}'
+                                          output: _tokRotate
                               catch:
                                 - set:
                                     name: _tokRotate
                                     value:
                                       error: '{{$error.message}}'
-                    - try:
-                        do:
-                          - run:
-                              module: secrets
-                              function: releaseRenewal
-                              assumeRole: tokenResolver
-                              parameters:
-                                name: '{{tokName.name}}'
-                                scope: workspace
-                                leaseId: '{{renewal.leaseId}}'
-                                renewed: true
-                        catch:
-                          - set:
-                              name: _releaseErr
-                              value: '{{$error.message}}'
+                    - conditions:
+                        '!{{renewal.noLease}}':
+                          - try:
+                              do:
+                                - run:
+                                    module: secrets
+                                    function: releaseRenewal
+                                    assumeRole: tokenResolver
+                                    parameters:
+                                      name: '{{tokName.name}}'
+                                      scope: workspace
+                                      leaseId: '{{renewal.leaseId}}'
+                                      renewed: true
+                              catch:
+                                - set:
+                                    name: _releaseErr
+                                    value: '{{$error.message}}'
                     - set:
                         name: output
                         value:
@@ -285,15 +324,26 @@ do:
                     - comment: Confirmed refusal (invalid_grant) — drop only the token that was sent. If the member reconnected during the exchange, `ifRef` leaves the newer secret in place and the next run uses it.
                     - try:
                         do:
-                          - run:
-                              module: secrets
-                              function: delete
-                              assumeRole: tokenResolver
-                              parameters:
-                                name: '{{tokName.name}}'
-                                scope: workspace
-                                ifRef: '{{renewal.ref}}'
-                              output: tokDel
+                          - conditions:
+                              '{{renewal.noLease}}':
+                                - run:
+                                    module: secrets
+                                    function: delete
+                                    assumeRole: tokenResolver
+                                    parameters:
+                                      name: '{{tokName.name}}'
+                                      scope: workspace
+                                    output: tokDel
+                              default:
+                                - run:
+                                    module: secrets
+                                    function: delete
+                                    assumeRole: tokenResolver
+                                    parameters:
+                                      name: '{{tokName.name}}'
+                                      scope: workspace
+                                      ifRef: '{{renewal.ref}}'
+                                    output: tokDel
                         catch:
                           - set:
                               name: tokDel
@@ -321,21 +371,23 @@ do:
                             providerError: '{{_tokErr.providerError}}'
                             providerErrorDescription: '{{_tokErr.providerErrorDescription}}'
                             path: delegated
-              - try:
-                  do:
-                    - run:
-                        module: secrets
-                        function: releaseRenewal
-                        assumeRole: tokenResolver
-                        parameters:
-                          name: '{{tokName.name}}'
-                          scope: workspace
-                          leaseId: '{{renewal.leaseId}}'
-                          renewed: false
-                  catch:
-                    - set:
-                        name: _releaseErr
-                        value: '{{$error.message}}'
+              - conditions:
+                  '!{{renewal.noLease}}':
+                    - try:
+                        do:
+                          - run:
+                              module: secrets
+                              function: releaseRenewal
+                              assumeRole: tokenResolver
+                              parameters:
+                                name: '{{tokName.name}}'
+                                scope: workspace
+                                leaseId: '{{renewal.leaseId}}'
+                                renewed: false
+                        catch:
+                          - set:
+                              name: _releaseErr
+                              value: '{{$error.message}}'
               - set:
                   name: output
                   value:
@@ -360,13 +412,13 @@ do:
                     code: AUTH_EXPIRED
                     requiresOAuth: true
               - break: {}
-        - comment: The instance URL is not a credential — oauthCallback keeps it in the user context (written from a webhook, where the context is writable).
+        - comment: 'The instance URL is not a credential — oauthCallback keeps it in the user context (written from a webhook, where the context is writable), as the fleet salesforce connector does. A worker whose cached context lacks it must never build a host-less `baseUrl` (`/services/data/vXX` passes the `!baseUrl` guard of executeApiCall): the fast path and the reuse of a renewal are skipped then, and the refresh answer, which carries `instance_url`, decides.'
         - set:
             name: userInstanceUrl
             value: '{% {{user.salesforceNext.oauth.instanceUrl}} || {{auth.instanceUrl}} %}'
         - comment: Fast path — the stored access token. A read is accepted only when it is a `$secret:` ref; a failure caught as an object must never pass for a token (the catches read `$error`, never `error`).
         - conditions:
-            '!{{forceRefresh}}':
+            '!{{forceRefresh}} and {{userInstanceUrl}}':
               - try:
                   do:
                     - run:
@@ -410,6 +462,30 @@ do:
                   name: renewal
                   value:
                     error: '{{$error.message}}'
+        - comment: '`unavailable` with no `error`: the lease cannot be taken. A runtime older than v27.10.0, or a self-hosted PostgreSQL whose `workspaces` service has not added the lease columns yet, answers it on EVERY call while plain get/set/delete keep working — answering TEMPORARY there would stop renewals for good. So, as salesforce does when its limiter cannot be reached, renew without the lease: read the token plainly and write without `ifRef` (which answers `version_conflict` on such a store). If the store really is down, that read fails too and the call answers TEMPORARY without calling the provider.'
+        - conditions:
+            '{{renewal.status}} == "unavailable"':
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: get
+                        parameters:
+                          name: '{{rtName.name}}'
+                          scope: user
+                        output: _plainRt
+                  catch:
+                    - set:
+                        name: _plainRt
+                        value: ''
+              - conditions:
+                  '{{_plainRt}} matches "$secret:"':
+                    - set:
+                        name: renewal
+                        value:
+                          status: acquired
+                          ref: '{{_plainRt}}'
+                          noLease: true
         - conditions:
             '{{renewal.status}} == "renewed"':
               - comment: Another call renewed it a moment ago — read the access token it stored, without calling the provider.
@@ -428,7 +504,7 @@ do:
                         value:
                           error: '{{$error.message}}'
               - conditions:
-                  '{{atRenewed}} matches "$secret:"':
+                  '{{atRenewed}} matches "$secret:" and {{userInstanceUrl}}':
                     - set:
                         name: output
                         value:
@@ -490,15 +566,26 @@ do:
                     - comment: 'Rotated refresh token: written only over the version this lease read (`ifRef`). `version_conflict` = the user reconnected meanwhile — keep the newer connection whole, write no access token either; the token just obtained still serves this call.'
                     - try:
                         do:
-                          - run:
-                              module: secrets
-                              function: set
-                              parameters:
-                                name: '{{rtName.name}}'
-                                scope: user
-                                value: '{{userRefResp.body.refresh_token}}'
-                                ifRef: '{{renewal.ref}}'
-                              output: _rtSet
+                          - conditions:
+                              '{{renewal.noLease}}':
+                                - run:
+                                    module: secrets
+                                    function: set
+                                    parameters:
+                                      name: '{{rtName.name}}'
+                                      scope: user
+                                      value: '{{userRefResp.body.refresh_token}}'
+                                    output: _rtSet
+                              default:
+                                - run:
+                                    module: secrets
+                                    function: set
+                                    parameters:
+                                      name: '{{rtName.name}}'
+                                      scope: user
+                                      value: '{{userRefResp.body.refresh_token}}'
+                                      ifRef: '{{renewal.ref}}'
+                                    output: _rtSet
                         catch:
                           - set:
                               name: _rtSet
@@ -537,20 +624,39 @@ do:
                               name: _atSetErr
                               value: '{{$error.message}}'
               - comment: Released last, so the calls waiting on the lease find every new token in place.
-              - try:
-                  do:
-                    - run:
-                        module: secrets
-                        function: releaseRenewal
-                        parameters:
-                          name: '{{rtName.name}}'
-                          scope: user
-                          leaseId: '{{renewal.leaseId}}'
-                          renewed: true
-                  catch:
+              - conditions:
+                  '!{{renewal.noLease}}':
+                    - try:
+                        do:
+                          - run:
+                              module: secrets
+                              function: releaseRenewal
+                              parameters:
+                                name: '{{rtName.name}}'
+                                scope: user
+                                leaseId: '{{renewal.leaseId}}'
+                                renewed: true
+                        catch:
+                          - set:
+                              name: _releaseErr
+                              value: '{{$error.message}}'
+              - comment: Best-effort mirror of the instance URL — dropped silently inside an MCP dispatch, kept when the call runs from a webhook.
+              - conditions:
+                  '{{userRefResp.body.instance_url}}':
                     - set:
-                        name: _releaseErr
-                        value: '{{$error.message}}'
+                        name: user.salesforceNext.oauth.instanceUrl
+                        scope: user
+                        value: '{{userRefResp.body.instance_url}}'
+              - conditions:
+                  '!{{refInstance}}':
+                    - set:
+                        name: output
+                        value:
+                          error: 'TEMPORARY: Salesforce renewed the sign-in but did not say which instance serves this user. Retry — no reconnection needed.'
+                          code: TEMPORARY
+                          requiresOAuth: false
+                          transient: true
+                    - break: {}
               - set:
                   name: output
                   value:
@@ -565,14 +671,24 @@ do:
               - comment: Confirmed refusal (invalid_grant) — the only case that disconnects. The refresh token goes first, and only if it is still the version that was sent (`ifRef`); `version_conflict` = a reconnection landed during the exchange, so everything stays for the next call.
               - try:
                   do:
-                    - run:
-                        module: secrets
-                        function: delete
-                        parameters:
-                          name: '{{rtName.name}}'
-                          scope: user
-                          ifRef: '{{renewal.ref}}'
-                        output: rtDel
+                    - conditions:
+                        '{{renewal.noLease}}':
+                          - run:
+                              module: secrets
+                              function: delete
+                              parameters:
+                                name: '{{rtName.name}}'
+                                scope: user
+                              output: rtDel
+                        default:
+                          - run:
+                              module: secrets
+                              function: delete
+                              parameters:
+                                name: '{{rtName.name}}'
+                                scope: user
+                                ifRef: '{{renewal.ref}}'
+                              output: rtDel
                   catch:
                     - set:
                         name: rtDel
@@ -589,7 +705,7 @@ do:
                           transient: true
                           message: 'TEMPORARY: this Salesforce connection was replaced while its token was being renewed. Retry — no reconnection needed.'
                   default:
-                    - comment: The access token and the workspace mirror hold the same dead grant. The mirror delete needs a role (a member rule can never grant `delete`), hence `tokenDepositor` (bound to this user's own name), best-effort.
+                    - comment: 'The access token goes with the refused grant. The workspace mirror is NOT deleted here: this call never read it, so it has no `ifRef` for it, and with a rotating provider the mirror may hold the one token still valid (a cron run just rotated it). The cron path purges it itself, with its own `ifRef`, when the provider refuses it.'
                     - try:
                         do:
                           - run:
@@ -601,19 +717,6 @@ do:
                         catch:
                           - set:
                               name: _atDelErr
-                              value: '{{$error.message}}'
-                    - try:
-                        do:
-                          - run:
-                              module: secrets
-                              function: delete
-                              assumeRole: tokenDepositor
-                              parameters:
-                                name: '{{rtName.name}}'
-                                scope: workspace
-                        catch:
-                          - set:
-                              name: _rtWsDelErr
                               value: '{{$error.message}}'
             '{{_tokErr.kind}} == "client" or {{_tokErr.kind}} == "rejected"':
               - emit:
@@ -627,20 +730,22 @@ do:
                       providerError: '{{_tokErr.providerError}}'
                       providerErrorDescription: '{{_tokErr.providerErrorDescription}}'
                       path: interactive
-        - try:
-            do:
-              - run:
-                  module: secrets
-                  function: releaseRenewal
-                  parameters:
-                    name: '{{rtName.name}}'
-                    scope: user
-                    leaseId: '{{renewal.leaseId}}'
-                    renewed: false
-            catch:
-              - set:
-                  name: _releaseErr
-                  value: '{{$error.message}}'
+        - conditions:
+            '!{{renewal.noLease}}':
+              - try:
+                  do:
+                    - run:
+                        module: secrets
+                        function: releaseRenewal
+                        parameters:
+                          name: '{{rtName.name}}'
+                          scope: user
+                          leaseId: '{{renewal.leaseId}}'
+                          renewed: false
+                  catch:
+                    - set:
+                        name: _releaseErr
+                        value: '{{$error.message}}'
         - set:
             name: output
             value:

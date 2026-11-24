@@ -292,36 +292,76 @@ config:
             - tree
             description: Operation to perform on composite.
           allOrNone:
-            type: object
-            additionalProperties: true
-            description: Body field `allOrNone` (shape varies per action).
+            type: boolean
+            description: "`request` only. true rolls back every sub-request when one fails. Default false."
           collateSubrequests:
-            type: object
-            additionalProperties: true
-            description: Body field `collateSubrequests` (shape varies per action).
+            type: boolean
+            description: "`request` only. true lets Salesforce group independent sub-requests for speed. Default false."
           compositeRequest:
-            type: object
-            additionalProperties: true
-            description: Body field `compositeRequest` (shape varies per action).
+            type: array
+            description: "`request` only. The sub-requests, run in order (25 at most). A later one can reuse an earlier result with `@{referenceId.id}`."
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                method:
+                  type: string
+                  description: GET, POST, PATCH, PUT or DELETE.
+                url:
+                  type: string
+                  description: Full resource path, e.g. /services/data/v62.0/sobjects/Account.
+                referenceId:
+                  type: string
+                  description: Name of this sub-request, unique in the call.
+                body:
+                  type: object
+                  additionalProperties: true
+                  description: Record fields, for a write.
           haltOnError:
-            type: object
-            additionalProperties: true
-            description: Body field `haltOnError` (shape varies per action).
+            type: boolean
+            description: "`batch` only. true stops at the first failed sub-request. Default false."
           batchRequests:
-            type: object
-            additionalProperties: true
-            description: Body field `batchRequests` (shape varies per action).
+            type: array
+            description: "`batch` only. Independent sub-requests (25 at most), with no references between them."
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                method:
+                  type: string
+                  description: GET, POST, PATCH or DELETE.
+                url:
+                  type: string
+                  description: Path relative to /services/data, e.g. v62.0/sobjects/Account/001xx000003DGb2AAG.
+                richInput:
+                  type: object
+                  additionalProperties: true
+                  description: Record fields, for a write.
           graphs:
-            type: object
-            additionalProperties: true
-            description: Body field `graphs` (shape varies per action).
+            type: array
+            description: "`graph` only. The graphs to run; each one succeeds or fails as a whole."
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                graphId:
+                  type: string
+                  description: Name of the graph, unique in the call.
+                compositeRequest:
+                  type: array
+                  description: Sub-requests of the graph, same shape as the `request` action.
+                  items:
+                    type: object
+                    additionalProperties: true
           sObjectName:
             type: string
             description: Salesforce path parameter `sObjectName`.
           records:
-            type: object
-            additionalProperties: true
-            description: Body field `records` (shape varies per action).
+            type: array
+            description: '`tree` only. The parent records, each with `attributes` (`type`, `referenceId`) and its fields; children go under their relationship name as `{"records": [...]}`.'
+            items:
+              type: object
+              additionalProperties: true
           outputFormat:
             type: string
             enum:
@@ -369,13 +409,14 @@ config:
             type: string
             description: Query parameter `fields`.
           allOrNone:
-            type: object
-            additionalProperties: true
-            description: Body field `allOrNone` (shape varies per action).
+            type: boolean
+            description: true rolls back the whole call when one record fails. Default false.
           records:
-            type: object
-            additionalProperties: true
-            description: Body field `records` (shape varies per action).
+            type: array
+            description: 'The records (200 at most). Each carries `attributes: {"type": "<sObject>"}` and its fields; `updateMany` also needs `Id`, `upsertManyForType` the external ID field.'
+            items:
+              type: object
+              additionalProperties: true
           sObjectName:
             type: string
             description: Salesforce path parameter `sObjectName`.
@@ -445,40 +486,53 @@ config:
             type: string
             description: Query parameter `queryLocator`.
           object:
-            type: object
-            additionalProperties: true
-            description: Body field `object` (shape varies per action).
+            type: string
+            description: "`create` only. sObject the job writes to, e.g. Account."
           operation:
-            type: object
-            additionalProperties: true
-            description: Body field `operation` (shape varies per action).
+            type: string
+            description: "`create` only. Write operation of the job."
+            enum:
+            - insert
+            - delete
+            - hardDelete
+            - update
+            - upsert
           externalIdFieldName:
-            type: object
-            additionalProperties: true
-            description: Body field `externalIdFieldName` (shape varies per action).
+            type: string
+            description: "`create` only. External ID field used to match records, required for upsert."
           contentType:
-            type: object
-            additionalProperties: true
-            description: Body field `contentType` (shape varies per action).
+            type: string
+            description: "`create` only. Format of the data. Only CSV is supported."
+            enum:
+            - CSV
           lineEnding:
-            type: object
-            additionalProperties: true
-            description: Body field `lineEnding` (shape varies per action).
+            type: string
+            description: "`create` only. Line ending of the CSV. Default LF."
+            enum:
+            - LF
+            - CRLF
           columnDelimiter:
-            type: object
-            additionalProperties: true
-            description: Body field `columnDelimiter` (shape varies per action).
+            type: string
+            description: "`create` only. Column delimiter of the CSV. Default COMMA."
+            enum:
+            - BACKQUOTE
+            - CARET
+            - COMMA
+            - PIPE
+            - SEMICOLON
+            - TAB
           assignmentRuleId:
-            type: object
-            additionalProperties: true
-            description: Body field `assignmentRuleId` (shape varies per action).
+            type: string
+            description: "`create` only. ID of the assignment rule applied to Case or Lead records."
           jobId:
             type: string
             description: Salesforce path parameter `jobId`.
           state:
-            type: object
-            additionalProperties: true
-            description: Body field `state` (shape varies per action).
+            type: string
+            description: "`update` only. UploadComplete once the data is uploaded, or Aborted to cancel the job."
+            enum:
+            - UploadComplete
+            - Aborted
           rawBody:
             type: string
             description: 'Raw request body (CSV / other text). Content-Type: text/csv.'
@@ -538,32 +592,44 @@ config:
             - Parallel
             - Serial
           operation:
-            type: object
-            additionalProperties: true
-            description: Body field `operation` (shape varies per action).
+            type: string
+            description: "`create` only. query, or queryAll to include deleted and archived records."
+            enum:
+            - query
+            - queryAll
           query:
-            type: object
-            additionalProperties: true
-            description: Body field `query` (shape varies per action).
+            redact: true
+            type: string
+            description: "`create` only. The SOQL query."
           contentType:
-            type: object
-            additionalProperties: true
-            description: Body field `contentType` (shape varies per action).
+            type: string
+            description: "`create` only. Format of the results. Only CSV is supported."
+            enum:
+            - CSV
           lineEnding:
-            type: object
-            additionalProperties: true
-            description: Body field `lineEnding` (shape varies per action).
+            type: string
+            description: "`create` only. Line ending of the results. Default LF."
+            enum:
+            - LF
+            - CRLF
           columnDelimiter:
-            type: object
-            additionalProperties: true
-            description: Body field `columnDelimiter` (shape varies per action).
+            type: string
+            description: "`create` only. Column delimiter of the results. Default COMMA."
+            enum:
+            - BACKQUOTE
+            - CARET
+            - COMMA
+            - PIPE
+            - SEMICOLON
+            - TAB
           jobId:
             type: string
             description: Salesforce path parameter `jobId`.
           state:
-            type: object
-            additionalProperties: true
-            description: Body field `state` (shape varies per action).
+            type: string
+            description: "`update` only. Aborted cancels the job."
+            enum:
+            - Aborted
           locator:
             type: string
             description: Query parameter `locator`.
@@ -635,33 +701,42 @@ config:
             type: string
             description: Query parameter `anonymousBody`.
           classNames:
-            type: object
-            additionalProperties: true
-            description: Body field `classNames` (shape varies per action).
+            type: string
+            description: "`runTestsAsync` only. Comma-separated Apex test class names."
           classids:
-            type: object
-            additionalProperties: true
-            description: Body field `classids` (shape varies per action).
+            type: string
+            description: "`runTestsAsync` only. Comma-separated Apex test class IDs."
           suiteNames:
-            type: object
-            additionalProperties: true
-            description: Body field `suiteNames` (shape varies per action).
+            type: string
+            description: "`runTestsAsync` only. Comma-separated test suite names."
           suiteids:
-            type: object
-            additionalProperties: true
-            description: Body field `suiteids` (shape varies per action).
+            type: string
+            description: "`runTestsAsync` only. Comma-separated test suite IDs."
           maxFailedTests:
-            type: object
-            additionalProperties: true
-            description: Body field `maxFailedTests` (shape varies per action).
+            type: number
+            description: "`runTestsAsync` only. Stop the run after this many failures; -1 means no limit."
           testLevel:
-            type: object
-            additionalProperties: true
-            description: Body field `testLevel` (shape varies per action).
+            type: string
+            description: "`runTestsAsync` only. Which tests run."
+            enum:
+            - RunSpecifiedTests
+            - RunLocalTests
+            - RunAllTestsInOrg
           tests:
-            type: object
-            additionalProperties: true
-            description: Body field `tests` (shape varies per action).
+            type: array
+            description: "`runTestsAsync` and `runTestsSync`. Test classes to run, optionally limited to some methods."
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                className:
+                  type: string
+                classId:
+                  type: string
+                testMethods:
+                  type: array
+                  items:
+                    type: string
           type:
             type: string
             description: Query parameter `type`.
@@ -713,9 +788,28 @@ config:
             - triggerRule
             description: Operation to perform on process.
           requests:
-            type: object
-            additionalProperties: true
-            description: Body field `requests` (shape varies per action).
+            type: array
+            description: "`submitApproval` only. One entry per record to submit, approve or reject."
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                actionType:
+                  type: string
+                  description: Submit, Approve or Reject.
+                contextId:
+                  type: string
+                  description: ID of the record (Submit) or of the work item (Approve, Reject).
+                comments:
+                  type: string
+                nextApproverIds:
+                  type: array
+                  items:
+                    type: string
+                processDefinitionNameOrId:
+                  type: string
+                skipEntryCriteria:
+                  type: boolean
           sObjectName:
             type: string
             description: Salesforce path parameter `sObjectName`.
@@ -723,9 +817,10 @@ config:
             type: string
             description: Salesforce path parameter `ruleId`.
           contextIds:
-            type: object
-            additionalProperties: true
-            description: Body field `contextIds` (shape varies per action).
+            type: array
+            description: "`triggerRule` only. IDs of the records the rule runs on."
+            items:
+              type: string
           outputFormat:
             type: string
             enum:
@@ -860,11 +955,10 @@ config:
           deployOptions:
             type: object
             additionalProperties: true
-            description: Body field `deployOptions` (shape varies per action).
+            description: '`deploy` only. Deploy options, e.g. `{"checkOnly": true, "testLevel": "RunLocalTests"}`.'
           file:
-            type: object
-            additionalProperties: true
-            description: Body field `file` (shape varies per action).
+            type: string
+            description: "`deploy` only. The zipped metadata package."
           requestId:
             type: string
             description: Salesforce path parameter `requestId`.

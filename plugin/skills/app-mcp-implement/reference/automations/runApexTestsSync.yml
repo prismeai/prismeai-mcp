@@ -3,9 +3,20 @@ name: runApexTestsSync
 description: Run Apex tests synchronously (small scope only) (POST /tooling/runTestsSynchronous). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.runApexTestsSync:` directly from their own automations.
 arguments:
   tests:
-    type: object
-    additionalProperties: true
-    description: Body field `tests`.
+    type: array
+    description: Test classes to run, optionally limited to some methods.
+    items:
+      type: object
+      additionalProperties: true
+      properties:
+        className:
+          type: string
+        classId:
+          type: string
+        testMethods:
+          type: array
+          items:
+            type: string
 do:
   - buildAppAuth:
       output: auth

@@ -6,9 +6,11 @@ arguments:
     type: string
     description: Path param `jobId` (required).
   state:
-    type: object
-    additionalProperties: true
-    description: Body field `state`.
+    type: string
+    description: UploadComplete once the data is uploaded, or Aborted to cancel the job.
+    enum:
+    - UploadComplete
+    - Aborted
 do:
   - buildAppAuth:
       output: auth

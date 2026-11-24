@@ -3,9 +3,28 @@ name: submitApproval
 description: Submit a record into an approval process or act on an existing one (POST /process/approvals). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.submitApproval:` directly from their own automations.
 arguments:
   requests:
-    type: object
-    additionalProperties: true
-    description: Body field `requests`.
+    type: array
+    description: One entry per record to submit, approve or reject.
+    items:
+      type: object
+      additionalProperties: true
+      properties:
+        actionType:
+          type: string
+          description: Submit, Approve or Reject.
+        contextId:
+          type: string
+          description: ID of the record (Submit) or of the work item (Approve, Reject).
+        comments:
+          type: string
+        nextApproverIds:
+          type: array
+          items:
+            type: string
+        processDefinitionNameOrId:
+          type: string
+        skipEntryCriteria:
+          type: boolean
 do:
   - buildAppAuth:
       output: auth

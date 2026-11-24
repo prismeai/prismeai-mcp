@@ -3,17 +3,31 @@ name: runComposite
 description: Execute up to 25 sub-requests in order, with refs between them (POST /composite). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.runComposite:` directly from their own automations.
 arguments:
   allOrNone:
-    type: object
-    additionalProperties: true
-    description: Body field `allOrNone`.
+    type: boolean
+    description: true rolls back every sub-request when one fails. Default false.
   collateSubrequests:
-    type: object
-    additionalProperties: true
-    description: Body field `collateSubrequests`.
+    type: boolean
+    description: true lets Salesforce group independent sub-requests for speed. Default false.
   compositeRequest:
-    type: object
-    additionalProperties: true
-    description: Body field `compositeRequest`.
+    type: array
+    description: The sub-requests, run in order (25 at most). A later one can reuse an earlier result with `@{referenceId.id}`.
+    items:
+      type: object
+      additionalProperties: true
+      properties:
+        method:
+          type: string
+          description: GET, POST, PATCH, PUT or DELETE.
+        url:
+          type: string
+          description: Full resource path, e.g. /services/data/v62.0/sobjects/Account.
+        referenceId:
+          type: string
+          description: Name of this sub-request, unique in the call.
+        body:
+          type: object
+          additionalProperties: true
+          description: Record fields, for a write.
 do:
   - buildAppAuth:
       output: auth

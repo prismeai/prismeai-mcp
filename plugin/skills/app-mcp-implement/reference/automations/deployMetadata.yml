@@ -5,11 +5,10 @@ arguments:
   deployOptions:
     type: object
     additionalProperties: true
-    description: Body field `deployOptions`.
+    description: 'Deploy options, e.g. `{"checkOnly": true, "testLevel": "RunLocalTests"}`.'
   file:
-    type: object
-    additionalProperties: true
-    description: Body field `file`.
+    type: string
+    description: The zipped metadata package.
 do:
   - buildAppAuth:
       output: auth

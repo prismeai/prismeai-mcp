@@ -1,0 +1,136 @@
+slug: tests-bodyTypes
+name: Tests/bodyTypes
+description: 'Guards how an operation of the registry turns into the body sent to the API, through the `bodyTypes` it declares (prisme.ai-bugs#3046). A model that follows an old or mismatched schema sends a list as a JSON string and a boolean as "true" (seen with Claude on the Salesforce composite tool): the API then answers a parser error. Such values must reach the API as a real list and a real boolean; a real list passes unchanged; a field with no declared type, or a string that is not JSON, is sent as received. Runs on the pure builder: no token, no network. Adapted from the fleet salesforce tests-buildRequest.'
+private: true
+schemas:
+  - output:
+      redact: true
+do:
+  - comment: The failing call of the ticket — the sub-request list as a JSON string, allOrNone as the string "true", collateSubrequests as "false".
+  - Custom Code.run:
+      function: buildSalesforceRequest
+      parameters:
+        operationName: runComposite
+        args:
+          allOrNone: 'true'
+          collateSubrequests: 'false'
+          compositeRequest: ' [{"method":"GET","url":"/services/data/v62.0/sobjects/Account/001TEST000000001?fields=Name","referenceId":"acc"}]'
+      output: r1
+  - set:
+      name: testStringListParsed
+      value: false
+  - conditions:
+      '{{r1.body.compositeRequest.length}} == 1 and {{r1.body.compositeRequest[0].referenceId}} == "acc"':
+        - set:
+            name: testStringListParsed
+            value: true
+  - set:
+      name: testStringBooleanConverted
+      value: false
+  - conditions:
+      '{{r1.body.allOrNone}} === true and {{r1.body.collateSubrequests}} === false':
+        - set:
+            name: testStringBooleanConverted
+            value: true
+  - comment: The same call with real types, as other models send it, passes unchanged.
+  - Custom Code.run:
+      function: buildSalesforceRequest
+      parameters:
+        operationName: runComposite
+        args:
+          allOrNone: true
+          compositeRequest:
+            - method: POST
+              url: /services/data/v62.0/sobjects/Account
+              referenceId: acc
+              body:
+                Name: Acme
+            - method: POST
+              url: /services/data/v62.0/sobjects/Contact
+              referenceId: ct
+              body:
+                LastName: Doe
+                AccountId: '@{acc.id}'
+      output: r2
+  - set:
+      name: testRealListUnchanged
+      value: false
+  - conditions:
+      '{{r2.body.compositeRequest.length}} == 2 and {{r2.body.compositeRequest[1].body.AccountId}} == "@{acc.id}" and {{r2.body.allOrNone}} === true':
+        - set:
+            name: testRealListUnchanged
+            value: true
+  - comment: A field with no declared type keeps its string (createQueryJob `operation`), and a string that is not JSON is sent as received for a list field — the API reports them, nothing is guessed.
+  - Custom Code.run:
+      function: buildSalesforceRequest
+      parameters:
+        operationName: createQueryJob
+        args:
+          operation: 'true'
+          query: SELECT Id FROM Account
+      output: r3
+  - Custom Code.run:
+      function: buildSalesforceRequest
+      parameters:
+        operationName: runComposite
+        args:
+          compositeRequest: '[not json'
+      output: r3b
+  - set:
+      name: testUntypedAndInvalidKept
+      value: false
+  - conditions:
+      '{{r3.body.operation}} === "true" and {{r3.body.query}} == "SELECT Id FROM Account" and {{r3b.body.compositeRequest}} === "[not json"':
+        - set:
+            name: testUntypedAndInvalidKept
+            value: true
+  - comment: A number received as a string is converted (runApexTestsAsync `maxFailedTests`), and a JSON object string is parsed for an object field (deployMetadata `deployOptions`).
+  - Custom Code.run:
+      function: buildSalesforceRequest
+      parameters:
+        operationName: runApexTestsAsync
+        args:
+          maxFailedTests: '2'
+      output: r4
+  - Custom Code.run:
+      function: buildSalesforceRequest
+      parameters:
+        operationName: deployMetadata
+        args:
+          deployOptions: '{"checkOnly":true}'
+      output: r4b
+  - set:
+      name: testNumberAndObjectConverted
+      value: false
+  - conditions:
+      '{{r4.body.maxFailedTests}} === 2 and {{r4b.body.deployOptions.checkOnly}} === true':
+        - set:
+            name: testNumberAndObjectConverted
+            value: true
+  - set:
+      name: results
+      value:
+        stringListParsed: '{{testStringListParsed}}'
+        stringBooleanConverted: '{{testStringBooleanConverted}}'
+        realListUnchanged: '{{testRealListUnchanged}}'
+        untypedAndInvalidKept: '{{testUntypedAndInvalidKept}}'
+        numberAndObjectConverted: '{{testNumberAndObjectConverted}}'
+  - set:
+      name: failed
+      value: []
+  - repeat:
+      'on': '{{results}}'
+      do:
+        - conditions:
+            '!{{item.value}}':
+              - set:
+                  name: failed
+                  type: push
+                  value: '{{item.key}}'
+  - set:
+      name: output
+      value:
+        passed: '{% !{{failed.length}} %}'
+        failed: '{{failed}}'
+        results: '{{results}}'
+output: '{{output}}'

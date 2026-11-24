@@ -68,8 +68,8 @@ Pattern of google-workspaces (`newOAuthPending` / `makePendingSecretName` /
 ## Tokens
 
 Tokens live in secrets only, as in `reference/automations/` (SKILL.md Phase 6,
-"OAuth token storage and failure semantics"): `<pfx>Access_<userId>_<fp>` and
-`<pfx>Refresh_<userId>_<fp>` in `scope: user`, plus a best-effort workspace
+"OAuth token storage and failure semantics"): `<pfx>Access_<fp>_<userId>` and
+`<pfx>Refresh_<fp>_<userId>` in `scope: user`, plus a best-effort workspace
 mirror of the refresh token for cron. The fingerprint `<fp>` comes from
 `makeTokenCacheKey(tenantId, clientId, scopes)`: in central mode, compute it
 from `oc.oauthClientId` / `oc.scopes` (resolveOAuthClient) — the field-level

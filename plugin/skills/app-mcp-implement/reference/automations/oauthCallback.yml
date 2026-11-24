@@ -29,11 +29,15 @@ do:
   - set:
       name: redirectTo
       value: '{{spaBase}}&status=error&message=unknown'
+  - comment: This page is served by an anonymous webhook and puts the redirect URL in HTML attributes, so only a symbolic error code may reach it (safeOAuthErrorCode, as in every fleet connector) — a raw `error` would let a crafted link show any text on the platform's domain.
   - conditions:
       '{{query.error}}':
+        - safeOAuthErrorCode:
+            value: '{{query.error}}'
+            output: errCode
         - set:
             name: redirectTo
-            value: '{{spaBase}}&status=error&message={{query.error}}'
+            value: '{{spaBase}}&status=error&message={{errCode}}'
         - break: {}
   - conditions:
       '!{{user.id}} or !{{query.code}} or !{{query.state}}':
@@ -62,6 +66,16 @@ do:
             name: redirectTo
             value: '{{spaBase}}&status=error&message={% {{st.reason}} || "invalid_state" %}'
         - break: {}
+  - comment: The PKCE verifier is derived by the runtime crypto module, not returned by Custom Code (whose results are recorded in the Activity Feed) — same derivation as signOAuthState.
+  - run:
+      module: crypto
+      function: hmac
+      parameters:
+        data: pkce:{{st.nonce}}
+        key: '{{a.oauthClientSecret}}'
+        algorithm: sha256
+        encoding: base64url
+      output: codeVerifier
   - Custom Code.run:
       function: makeTokenCacheKey
       parameters:
@@ -98,7 +112,7 @@ do:
         client_id: '{{a.oauthClientId}}'
         client_secret: '{{a.oauthClientSecret}}'
         redirect_uri: '{{config.oauthCallbackUrl}}'
-        code_verifier: '{{st.codeVerifier}}'
+        code_verifier: '{{codeVerifier}}'
       output: tokenResp
       outputMode: detailed_response
       emitErrors: false
