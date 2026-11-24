@@ -6,9 +6,10 @@ arguments:
     type: string
     description: Path param `jobId` (required).
   state:
-    type: object
-    additionalProperties: true
-    description: Body field `state`.
+    type: string
+    description: Aborted cancels the job.
+    enum:
+    - Aborted
 do:
   - buildAppAuth:
       output: auth

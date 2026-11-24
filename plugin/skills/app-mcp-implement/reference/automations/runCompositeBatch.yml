@@ -3,13 +3,25 @@ name: runCompositeBatch
 description: Execute up to 25 independent sub-requests (no refs) (POST /composite/batch). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.runCompositeBatch:` directly from their own automations.
 arguments:
   haltOnError:
-    type: object
-    additionalProperties: true
-    description: Body field `haltOnError`.
+    type: boolean
+    description: true stops at the first failed sub-request. Default false.
   batchRequests:
-    type: object
-    additionalProperties: true
-    description: Body field `batchRequests`.
+    type: array
+    description: Independent sub-requests (25 at most), with no references between them.
+    items:
+      type: object
+      additionalProperties: true
+      properties:
+        method:
+          type: string
+          description: GET, POST, PATCH or DELETE.
+        url:
+          type: string
+          description: Path relative to /services/data, e.g. v62.0/sobjects/Account/001xx000003DGb2AAG.
+        richInput:
+          type: object
+          additionalProperties: true
+          description: Record fields, for a write.
 do:
   - buildAppAuth:
       output: auth

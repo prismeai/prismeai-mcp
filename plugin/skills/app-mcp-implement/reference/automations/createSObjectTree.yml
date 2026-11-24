@@ -6,9 +6,11 @@ arguments:
     type: string
     description: Path param `sObjectName` (required).
   records:
-    type: object
-    additionalProperties: true
-    description: Body field `records`.
+    type: array
+    description: 'The parent records, each with `attributes` (`type`, `referenceId`) and its fields; children go under their relationship name as `{"records": [...]}`.'
+    items:
+      type: object
+      additionalProperties: true
 do:
   - buildAppAuth:
       output: auth

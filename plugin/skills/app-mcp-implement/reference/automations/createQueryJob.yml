@@ -3,25 +3,36 @@ name: createQueryJob
 description: Create a bulk SOQL query job (returns jobId for polling) (POST /jobs/query). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.createQueryJob:` directly from their own automations.
 arguments:
   operation:
-    type: object
-    additionalProperties: true
-    description: Body field `operation`.
+    type: string
+    description: query, or queryAll to include deleted and archived records.
+    enum:
+    - query
+    - queryAll
   query:
-    type: object
-    additionalProperties: true
-    description: Body field `query`.
+    redact: true
+    type: string
+    description: The SOQL query.
   contentType:
-    type: object
-    additionalProperties: true
-    description: Body field `contentType`.
+    type: string
+    description: Format of the results. Only CSV is supported.
+    enum:
+    - CSV
   lineEnding:
-    type: object
-    additionalProperties: true
-    description: Body field `lineEnding`.
+    type: string
+    description: Line ending of the results. Default LF.
+    enum:
+    - LF
+    - CRLF
   columnDelimiter:
-    type: object
-    additionalProperties: true
-    description: Body field `columnDelimiter`.
+    type: string
+    description: Column delimiter of the results. Default COMMA.
+    enum:
+    - BACKQUOTE
+    - CARET
+    - COMMA
+    - PIPE
+    - SEMICOLON
+    - TAB
 do:
   - buildAppAuth:
       output: auth

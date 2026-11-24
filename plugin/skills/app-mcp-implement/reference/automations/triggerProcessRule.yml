@@ -9,9 +9,10 @@ arguments:
     type: string
     description: Path param `ruleId` (required).
   contextIds:
-    type: object
-    additionalProperties: true
-    description: Body field `contextIds`.
+    type: array
+    description: IDs of the records the rule runs on.
+    items:
+      type: string
 do:
   - buildAppAuth:
       output: auth

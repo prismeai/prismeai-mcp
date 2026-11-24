@@ -3,13 +3,14 @@ name: createRecords
 description: Create up to 200 records (mixed sObjects) in one call (POST /composite/sobjects). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.createRecords:` directly from their own automations.
 arguments:
   allOrNone:
-    type: object
-    additionalProperties: true
-    description: Body field `allOrNone`.
+    type: boolean
+    description: true rolls back the whole call when one record fails. Default false.
   records:
-    type: object
-    additionalProperties: true
-    description: Body field `records`.
+    type: array
+    description: 'The records (200 at most). Each carries `attributes: {"type": "<sObject>"}` and its fields; `updateMany` also needs `Id`, `upsertManyForType` the external ID field.'
+    items:
+      type: object
+      additionalProperties: true
 do:
   - buildAppAuth:
       output: auth

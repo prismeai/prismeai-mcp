@@ -36,6 +36,16 @@ jobs:
       - name: Validate skills
         run: npm run validate:skills
 
+      - name: Reject placeholder body-field types in skill templates
+        # prisme.ai-bugs#3046: a body field typed `object` "shape varies per
+        # action" makes schema-following models (Claude) send lists and booleans
+        # as strings. Every body field takes its OpenAPI requestBody type.
+        run: |
+          if grep -rn --include='*.yml' 'shape varies per action' plugin/skills/*/reference; then
+            echo "::error::Body fields must take their OpenAPI type, never a placeholder object (see app-mcp-implement SKILL.md, Phase 5 item 4)."
+            exit 1
+          fi
+
       - name: Validate release versions
         run: npm run validate:versions
 

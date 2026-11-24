@@ -3,9 +3,21 @@ name: runCompositeGraph
 description: Execute multiple composite graphs in a single transaction (POST /composite/graph). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.runCompositeGraph:` directly from their own automations.
 arguments:
   graphs:
-    type: object
-    additionalProperties: true
-    description: Body field `graphs`.
+    type: array
+    description: The graphs to run; each one succeeds or fails as a whole.
+    items:
+      type: object
+      additionalProperties: true
+      properties:
+        graphId:
+          type: string
+          description: Name of the graph, unique in the call.
+        compositeRequest:
+          type: array
+          description: Sub-requests of the graph, same shape as the `request` action.
+          items:
+            type: object
+            additionalProperties: true
 do:
   - buildAppAuth:
       output: auth

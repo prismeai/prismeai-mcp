@@ -3,33 +3,42 @@ name: runApexTestsAsync
 description: Schedule async Apex test execution (POST /tooling/runTestsAsynchronous). Calls the Salesforce REST API via the resolved per-user OAuth session (or JWT Bearer fallback). Public App-mode automation — tenants call `Salesforce.runApexTestsAsync:` directly from their own automations.
 arguments:
   classNames:
-    type: object
-    additionalProperties: true
-    description: Body field `classNames`.
+    type: string
+    description: Comma-separated Apex test class names.
   classids:
-    type: object
-    additionalProperties: true
-    description: Body field `classids`.
+    type: string
+    description: Comma-separated Apex test class IDs.
   suiteNames:
-    type: object
-    additionalProperties: true
-    description: Body field `suiteNames`.
+    type: string
+    description: Comma-separated test suite names.
   suiteids:
-    type: object
-    additionalProperties: true
-    description: Body field `suiteids`.
+    type: string
+    description: Comma-separated test suite IDs.
   maxFailedTests:
-    type: object
-    additionalProperties: true
-    description: Body field `maxFailedTests`.
+    type: number
+    description: Stop the run after this many failures; -1 means no limit.
   testLevel:
-    type: object
-    additionalProperties: true
-    description: Body field `testLevel`.
+    type: string
+    description: Which tests run.
+    enum:
+    - RunSpecifiedTests
+    - RunLocalTests
+    - RunAllTestsInOrg
   tests:
-    type: object
-    additionalProperties: true
-    description: Body field `tests`.
+    type: array
+    description: Test classes to run, optionally limited to some methods.
+    items:
+      type: object
+      additionalProperties: true
+      properties:
+        className:
+          type: string
+        classId:
+          type: string
+        testMethods:
+          type: array
+          items:
+            type: string
 do:
   - buildAppAuth:
       output: auth
