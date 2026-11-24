@@ -7,7 +7,7 @@ arguments:
     description: true rolls back the whole call when one record fails. Default false.
   records:
     type: array
-    description: 'The records (200 at most). Each carries `attributes: {"type": "<sObject>"}` and its fields; `updateMany` also needs `Id`, `upsertManyForType` the external ID field.'
+    description: 'The records (200 at most). Each carries `attributes: {"type": "<sObject>"}` and its fields.'
     items:
       type: object
       additionalProperties: true

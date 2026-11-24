@@ -41,7 +41,16 @@ jobs:
         # action" makes schema-following models (Claude) send lists and booleans
         # as strings. Every body field takes its OpenAPI requestBody type.
         run: |
+          status=0
           if grep -rn --include='*.yml' 'shape varies per action' plugin/skills/*/reference; then
+            status=1
+          fi
+          # The App-mode wrappers carried the same placeholder as `type: object`
+          # followed by `description: Body field \`x\`.`
+          if grep -rn -B2 --include='*.yml' 'description: Body field `' plugin/skills/*/reference | grep 'type: object'; then
+            status=1
+          fi
+          if [ "$status" -ne 0 ]; then
             echo "::error::Body fields must take their OpenAPI type, never a placeholder object (see app-mcp-implement SKILL.md, Phase 5 item 4)."
             exit 1
           fi
