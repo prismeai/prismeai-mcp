@@ -93,7 +93,7 @@ For a local checkout — maintainers, or testing an unreleased branch — skip t
 
 **What loads.** The `prisme-ai-builder` tools and the bundled skills, which Copilot loads on demand rather than as `/prisme-ai:*` slash commands. The `prisme-code-review` agent is Claude Code-specific and is not exposed.
 
-**Config directory.** VS Code expands `${CLAUDE_PLUGIN_ROOT}` but not `${PLUGIN_DATA}` for Claude-format plugins. The server detects the unexpanded value and falls back to `~/.prisme-ai-mcp`, so register tokens against that directory — see [Authenticate](#authenticate).
+**Config directory.** VS Code expands `${CLAUDE_PLUGIN_ROOT}` but not `${CLAUDE_PLUGIN_DATA}` for Claude-format plugins. The server detects the unexpanded value and falls back to `~/.prisme-ai-mcp`, so register tokens against that directory — see [Authenticate](#authenticate).
 
 ## Authenticate
 
