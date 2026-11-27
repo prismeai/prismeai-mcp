@@ -1,8 +1,6 @@
 import axios from "axios";
-import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { dirname, isAbsolute, join, resolve } from "path";
-import { fileURLToPath } from "url";
+import { isAbsolute, join, resolve } from "path";
 import { createInterface } from "readline";
 import {
   getConfigDir,
@@ -13,9 +11,8 @@ import {
   type StoredTopology,
   type StoredEnvironment,
 } from "./auth/persist.js";
+import { loadEnvironmentCatalog } from "./environments.js";
 import { createExtraCaAgent } from "./tls.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface ParsedArgs {
   positional: string[];
@@ -96,22 +93,32 @@ function cleanExtraCaCertsPath(value: string): string {
   return isAbsolute(expanded) ? expanded : resolve(expanded);
 }
 
-/** Read the default topology shipped with the plugin (bundled or tsc layout). */
-function loadShippedDefaults(): StoredTopology | undefined {
-  const candidates = [
-    join(__dirname, "..", "config", "default-environments.json"),
-    join(__dirname, "..", "plugin", "config", "default-environments.json"),
-  ];
-  for (const path of candidates) {
-    if (existsSync(path)) {
-      try {
-        return JSON.parse(readFileSync(path, "utf-8")) as StoredTopology;
-      } catch {
-        // ignore and fall through
-      }
-    }
+/**
+ * The environment a call without `environment` reaches, by the server's
+ * rules: a `default: true` entry, else `defaultEnvironment`, else the only
+ * configured environment. PRISME_DEFAULT_ENVIRONMENT is the server's own
+ * variable and cannot be seen from here.
+ */
+function effectiveDefault(topology: StoredTopology): string | undefined {
+  const names = Object.keys(topology.environments);
+  const flagged = names.filter((name) => topology.environments[name].default === true);
+  if (flagged.length > 0) return flagged[flagged.length - 1];
+  if (topology.defaultEnvironment && topology.environments[topology.defaultEnvironment]) {
+    return topology.defaultEnvironment;
   }
-  return undefined;
+  return names.length === 1 ? names[0] : undefined;
+}
+
+function printDefaultStatus(topology: StoredTopology): void {
+  const names = Object.keys(topology.environments);
+  if (names.length === 0) return;
+  const current = effectiveDefault(topology);
+  console.log(
+    current
+      ? `Default environment: ${current} (configured: ${names.join(", ")}).`
+      : `No default environment: each request must name one of ${names.join(", ")}. ` +
+          `Run set-token <environment> --default to choose one.`
+  );
 }
 
 /**
@@ -196,11 +203,13 @@ function printUsage(): void {
       "Registers (or rotates) an API token for an environment WITHOUT sending it",
       "through the chat / to the LLM provider. The token is validated against the",
       "API before being saved to the config dir (credentials.json, mode 600).",
+      "Only this environment is added to config.json.",
       "",
       "Options:",
       "  --api-url <url>                   API base URL (optional; prompts if missing)",
       "  --studio-url <url>                Studio origin (optional; prompts interactively)",
       "  --node-extra-ca-certs <pem-path>  Extra trusted CA bundle for this environment",
+      "  --default                         Make this environment the default one",
       "  --config-dir <dir>                Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
       "",
       "The token is read from an interactive hidden prompt, or from the PRISME_TOKEN",
@@ -240,24 +249,39 @@ export async function runCli(argv: string[]): Promise<number> {
     process.env.PRISME_CONFIG_DIR = configDir;
   }
 
-  // Resolve the environment topology. Shipped defaults are used as examples and
-  // fallback metadata, but fresh interactive setup still asks for the API URL.
-  let storedTopology: StoredTopology | undefined;
-  let shippedDefaults: StoredTopology | undefined;
-  let topology: StoredTopology;
-  try {
-    storedTopology = loadTopologySync();
-    shippedDefaults = loadShippedDefaults();
-    topology = storedTopology ?? shippedDefaults ?? { environments: {} };
-  } catch (error) {
+  return setToken(environment, flags);
+}
+
+async function setToken(
+  environment: string,
+  flags: Record<string, string | true>
+): Promise<number> {
+  const makeDefault = flags.default === true;
+  if (flags.default !== undefined && !makeDefault) {
     console.error(
-      `Could not read existing config: ${error instanceof Error ? error.message : String(error)}`
+      `--default takes no value. Put it after the environment name, e.g. set-token ${environment} --default`
     );
-    topology = { environments: {} };
+    return 1;
   }
 
+  // Only registered environments go to config.json. The shipped catalog
+  // (sandbox, staging, prod) lends its URLs as examples and defaults for an
+  // environment of the same name; fresh interactive setup still asks for the
+  // API URL.
+  let storedTopology: StoredTopology | undefined;
+  try {
+    storedTopology = loadTopologySync();
+  } catch (error) {
+    console.error(
+      `Could not read config.json: ${error instanceof Error ? error.message : String(error)}. ` +
+        `Fix or delete it, then try again. Nothing was saved.`
+    );
+    return 1;
+  }
+  const topology: StoredTopology = storedTopology ?? { environments: {} };
+
   const existing = storedTopology?.environments[environment];
-  const fallbackExisting = existing ?? shippedDefaults?.environments[environment];
+  const fallbackExisting = existing ?? loadEnvironmentCatalog()[environment];
   const exampleApiUrl =
     fallbackExisting?.apiUrl ?? "https://api.sandbox.prisme.ai/v2";
   const apiUrlFlag = flagString(flags, "api-url");
@@ -389,6 +413,12 @@ export async function runCli(argv: string[]): Promise<number> {
     ...(nodeExtraCaCerts ? { nodeExtraCaCerts } : {}),
   };
   topology.environments[environment] = merged;
+  if (makeDefault) {
+    for (const env of Object.values(topology.environments)) {
+      delete env.default;
+    }
+    topology.defaultEnvironment = environment;
+  }
 
   try {
     await persistTopology(topology);
@@ -397,6 +427,7 @@ export async function runCli(argv: string[]): Promise<number> {
     console.log(
       `Saved token for "${environment}" (validated as ${who}) to ${credentialsPath}.`
     );
+    printDefaultStatus(topology);
     console.log("Re-run your request in Claude Code / Codex — no restart needed.");
     return 0;
   } catch (error) {

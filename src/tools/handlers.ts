@@ -5,13 +5,21 @@ import AdmZip from "adm-zip";
 import axios from "axios";
 import yaml from "js-yaml";
 import { PrismeApiClient, AIKnowledgeQueryParams, AIKnowledgeCompletionParams, AIKnowledgeDocumentParams, AIKnowledgeProjectParams, AIKnowledgeAuth, AppInstance } from "../api-client.js";
-import { resolveWorkspaceAndEnvironment, environmentsConfig, PRISME_API_BASE_URL, PRISME_FORCE_READONLY } from "../config.js";
 import {
+  resolveWorkspaceAndEnvironment,
+  environmentsConfig,
+  PRISME_API_BASE_URL,
+  PRISME_FORCE_READONLY,
+  type EnvironmentConfig,
+} from "../config.js";
+import {
+  loadTopologySync,
   persistToken,
   persistTopology,
   deriveTokenUrl,
   type StoredTopology,
 } from "../auth/persist.js";
+import { loadEnvironmentCatalog } from "../environments.js";
 import { enforceReadonlyMode, truncateJsonOutput } from "../utils.js";
 import { lintAutomation, type AutomationLintResult } from "../../linter/dist/index.js";
 
@@ -2236,7 +2244,8 @@ export async function handleToolCall(
         throw new Error("`token` is required");
       }
 
-      const existing = environmentsConfig[environment];
+      // A known Prisme.ai environment (sandbox, staging, prod) only lends its URLs.
+      const existing = environmentsConfig[environment] ?? loadEnvironmentCatalog()[environment];
       if (!existing && !apiUrl) {
         const available = Object.keys(environmentsConfig).join(", ") || "(none)";
         throw new Error(
@@ -2245,12 +2254,17 @@ export async function handleToolCall(
         );
       }
 
-      const envCfg = {
+      const envCfg: EnvironmentConfig = {
         ...(existing ?? {}),
         apiUrl: apiUrl ?? existing!.apiUrl,
         ...(studioUrl ? { studioUrl } : {}),
         ...(nodeExtraCaCerts ? { nodeExtraCaCerts } : {}),
       };
+      delete envCfg.apiKey;
+
+      // Read config.json before anything is written, so that an unreadable file
+      // fails this call instead of being overwritten.
+      const topology: StoredTopology = loadTopologySync() ?? { environments: {} };
 
       // Probe-validate the token before persisting anything: an invalid token
       // must fail here and persist nothing.
@@ -2275,13 +2289,11 @@ export async function handleToolCall(
       environmentsConfig[environment] = { ...envCfg, apiKey: token };
       apiClient.upsertEnvironment(environment, { ...envCfg, apiKey: token });
 
-      // Persist: token to credentials.json (600), topology (no tokens) to config.json
+      // Persist: token to credentials.json (600), then this environment alone to
+      // config.json (no token). The file keeps its other entries and fields
+      // (defaultEnvironment) and never receives an environment nobody registered.
       const credentialsPath = await persistToken(environment, token);
-      const topology: StoredTopology = { environments: {} };
-      for (const [envName, env] of Object.entries(environmentsConfig)) {
-        const { apiKey: _omit, ...rest } = env;
-        topology.environments[envName] = rest;
-      }
+      topology.environments[environment] = envCfg;
       await persistTopology(topology);
 
       const summary = {

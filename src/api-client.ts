@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import FormData from 'form-data';
 import { createExtraCaAgent } from './tls.js';
+import { noEnvironmentSelectedError } from './environments.js';
 
 export interface EnvironmentConfig {
     apiUrl: string;
@@ -364,12 +365,16 @@ export class PrismeApiClient {
             throw this.missingTokenError(environment);
         }
         if (this.apiKey) return this.apiKey;
-        if (this.defaultEnvironment) {
-            const reloaded = this.reloadTokens?.(this.defaultEnvironment);
-            if (reloaded) {
-                this.apiKey = reloaded;
-                return reloaded;
-            }
+        if (!this.defaultEnvironment) {
+            throw noEnvironmentSelectedError(Object.keys(this.environments), {
+                scriptPath: this.serverScriptPath,
+                configDir: this.configDir,
+            });
+        }
+        const reloaded = this.reloadTokens?.(this.defaultEnvironment);
+        if (reloaded) {
+            this.apiKey = reloaded;
+            return reloaded;
         }
         throw this.missingTokenError(environment);
     }

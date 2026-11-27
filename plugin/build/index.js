@@ -15670,8 +15670,59 @@ var init_persist = __esm({
   }
 });
 
+// src/environments.ts
+import { existsSync, readFileSync as readFileSync2 } from "fs";
+import { dirname, join as join2 } from "path";
+import { fileURLToPath } from "url";
+function loadEnvironmentCatalog() {
+  const candidates = [
+    join2(__dirname, "..", "config", "default-environments.json"),
+    join2(__dirname, "..", "plugin", "config", "default-environments.json")
+  ];
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync2(path, "utf-8"));
+      const catalog = {};
+      for (const [name, env] of Object.entries(parsed.environments ?? {})) {
+        if (typeof env?.apiUrl !== "string") continue;
+        const { default: _default2, workspaces: _workspaces, ...urls } = env;
+        catalog[name] = urls;
+      }
+      return catalog;
+    } catch {
+    }
+  }
+  return {};
+}
+function setTokenCommand(environment, context, apiUrl) {
+  const script = context.scriptPath ?? "<plugin>/build/index.js";
+  return `node "${script}" set-token ${environment}` + (apiUrl ? ` --api-url ${apiUrl}` : "") + (context.configDir ? ` --config-dir "${context.configDir}"` : "");
+}
+function noEnvironmentSelectedError(available, context) {
+  if (available.length === 0) {
+    return new Error(
+      `No Prisme.ai environment is configured yet. Ask the user which environment to use and its API URL, then have them create an API token in its studio and run this in their own terminal as one shell command (copy it exactly; do not insert line breaks inside quoted paths):
+
+   ${setTokenCommand("<environment>", context, "<api-url>")}
+
+Agents should use the /prisme-ai:setup skill for the setup workflow.`
+    );
+  }
+  return new Error(
+    `No environment given, and no default environment is configured. Pass \`environment\` with one of: ${available.join(", ")}. If the request does not say which one, ask the user.`
+  );
+}
+var __dirname;
+var init_environments = __esm({
+  "src/environments.ts"() {
+    "use strict";
+    __dirname = dirname(fileURLToPath(import.meta.url));
+  }
+});
+
 // src/tls.ts
-import { readFileSync as readFileSync2 } from "fs";
+import { readFileSync as readFileSync3 } from "fs";
 import { Agent } from "https";
 import { createSecureContext, rootCertificates } from "tls";
 function createExtraCaAgent(nodeExtraCaCerts) {
@@ -15680,7 +15731,7 @@ function createExtraCaAgent(nodeExtraCaCerts) {
   if (cached) return cached;
   let extraCa;
   try {
-    extraCa = readFileSync2(nodeExtraCaCerts, "utf8");
+    extraCa = readFileSync3(nodeExtraCaCerts, "utf8");
   } catch (error) {
     throw new Error(
       `Could not read NODE_EXTRA_CA_CERTS file "${nodeExtraCaCerts}": ${error instanceof Error ? error.message : String(error)}`
@@ -15717,10 +15768,8 @@ var cli_exports = {};
 __export(cli_exports, {
   runCli: () => runCli
 });
-import { existsSync, readFileSync as readFileSync3 } from "fs";
 import { homedir as homedir2 } from "os";
-import { dirname, isAbsolute, join as join2, resolve } from "path";
-import { fileURLToPath } from "url";
+import { isAbsolute, join as join3, resolve } from "path";
 import { createInterface } from "readline";
 function parseArgs(argv) {
   const positional = [];
@@ -15781,23 +15830,25 @@ function deriveStudioUrl(value) {
 }
 function cleanExtraCaCertsPath(value) {
   const unquoted = value.trim().replace(/^(["'])(.*)\1$/, "$2");
-  const expanded = unquoted === "~" ? homedir2() : unquoted.startsWith("~/") ? join2(homedir2(), unquoted.slice(2)) : unquoted;
+  const expanded = unquoted === "~" ? homedir2() : unquoted.startsWith("~/") ? join3(homedir2(), unquoted.slice(2)) : unquoted;
   return isAbsolute(expanded) ? expanded : resolve(expanded);
 }
-function loadShippedDefaults() {
-  const candidates = [
-    join2(__dirname, "..", "config", "default-environments.json"),
-    join2(__dirname, "..", "plugin", "config", "default-environments.json")
-  ];
-  for (const path of candidates) {
-    if (existsSync(path)) {
-      try {
-        return JSON.parse(readFileSync3(path, "utf-8"));
-      } catch {
-      }
-    }
+function effectiveDefault(topology) {
+  const names = Object.keys(topology.environments);
+  const flagged = names.filter((name) => topology.environments[name].default === true);
+  if (flagged.length > 0) return flagged[flagged.length - 1];
+  if (topology.defaultEnvironment && topology.environments[topology.defaultEnvironment]) {
+    return topology.defaultEnvironment;
   }
-  return void 0;
+  return names.length === 1 ? names[0] : void 0;
+}
+function printDefaultStatus(topology) {
+  const names = Object.keys(topology.environments);
+  if (names.length === 0) return;
+  const current2 = effectiveDefault(topology);
+  console.log(
+    current2 ? `Default environment: ${current2} (configured: ${names.join(", ")}).` : `No default environment: each request must name one of ${names.join(", ")}. Run set-token <environment> --default to choose one.`
+  );
 }
 function promptHidden(question) {
   return new Promise((resolve3) => {
@@ -15868,11 +15919,13 @@ function printUsage() {
       "Registers (or rotates) an API token for an environment WITHOUT sending it",
       "through the chat / to the LLM provider. The token is validated against the",
       "API before being saved to the config dir (credentials.json, mode 600).",
+      "Only this environment is added to config.json.",
       "",
       "Options:",
       "  --api-url <url>                   API base URL (optional; prompts if missing)",
       "  --studio-url <url>                Studio origin (optional; prompts interactively)",
       "  --node-extra-ca-certs <pem-path>  Extra trusted CA bundle for this environment",
+      "  --default                         Make this environment the default one",
       "  --config-dir <dir>                Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
       "",
       "The token is read from an interactive hidden prompt, or from the PRISME_TOKEN",
@@ -15905,21 +15958,28 @@ async function runCli(argv) {
   if (configDir) {
     process.env.PRISME_CONFIG_DIR = configDir;
   }
+  return setToken(environment, flags);
+}
+async function setToken(environment, flags) {
+  const makeDefault = flags.default === true;
+  if (flags.default !== void 0 && !makeDefault) {
+    console.error(
+      `--default takes no value. Put it after the environment name, e.g. set-token ${environment} --default`
+    );
+    return 1;
+  }
   let storedTopology;
-  let shippedDefaults;
-  let topology;
   try {
     storedTopology = loadTopologySync();
-    shippedDefaults = loadShippedDefaults();
-    topology = storedTopology ?? shippedDefaults ?? { environments: {} };
   } catch (error) {
     console.error(
-      `Could not read existing config: ${error instanceof Error ? error.message : String(error)}`
+      `Could not read config.json: ${error instanceof Error ? error.message : String(error)}. Fix or delete it, then try again. Nothing was saved.`
     );
-    topology = { environments: {} };
+    return 1;
   }
+  const topology = storedTopology ?? { environments: {} };
   const existing = storedTopology?.environments[environment];
-  const fallbackExisting = existing ?? shippedDefaults?.environments[environment];
+  const fallbackExisting = existing ?? loadEnvironmentCatalog()[environment];
   const exampleApiUrl = fallbackExisting?.apiUrl ?? "https://api.sandbox.prisme.ai/v2";
   const apiUrlFlag = flagString(flags, "api-url");
   const studioUrlFlag = flagString(flags, "studio-url");
@@ -16024,6 +16084,12 @@ async function runCli(argv) {
     ...nodeExtraCaCerts ? { nodeExtraCaCerts } : {}
   };
   topology.environments[environment] = merged;
+  if (makeDefault) {
+    for (const env of Object.values(topology.environments)) {
+      delete env.default;
+    }
+    topology.defaultEnvironment = environment;
+  }
   try {
     await persistTopology(topology);
     const credentialsPath = await persistToken(environment, token);
@@ -16031,6 +16097,7 @@ async function runCli(argv) {
     console.log(
       `Saved token for "${environment}" (validated as ${who}) to ${credentialsPath}.`
     );
+    printDefaultStatus(topology);
     console.log("Re-run your request in Claude Code / Codex \u2014 no restart needed.");
     return 0;
   } catch (error) {
@@ -16040,14 +16107,13 @@ async function runCli(argv) {
     return 1;
   }
 }
-var __dirname;
 var init_cli = __esm({
   "src/cli.ts"() {
     "use strict";
     init_axios2();
     init_persist();
+    init_environments();
     init_tls();
-    __dirname = dirname(fileURLToPath(import.meta.url));
   }
 });
 
@@ -28778,6 +28844,7 @@ var init_api_client = __esm({
     init_axios2();
     import_form_data2 = __toESM(require_form_data(), 1);
     init_tls();
+    init_environments();
     PrismeApiClient = class _PrismeApiClient {
       constructor(config) {
         this.workspaceId = config.workspaceId;
@@ -28862,22 +28929,26 @@ Agents should use the /prisme-ai:setup skill for the setup workflow.`
         if (environment) {
           let key = this.environments[environment].apiKey;
           if (!key) {
-            const reloaded = this.reloadTokens?.(environment);
-            if (reloaded) {
-              this.environments[environment].apiKey = reloaded;
-              key = reloaded;
+            const reloaded2 = this.reloadTokens?.(environment);
+            if (reloaded2) {
+              this.environments[environment].apiKey = reloaded2;
+              key = reloaded2;
             }
           }
           if (key) return key;
           throw this.missingTokenError(environment);
         }
         if (this.apiKey) return this.apiKey;
-        if (this.defaultEnvironment) {
-          const reloaded = this.reloadTokens?.(this.defaultEnvironment);
-          if (reloaded) {
-            this.apiKey = reloaded;
-            return reloaded;
-          }
+        if (!this.defaultEnvironment) {
+          throw noEnvironmentSelectedError(Object.keys(this.environments), {
+            scriptPath: this.serverScriptPath,
+            configDir: this.configDir
+          });
+        }
+        const reloaded = this.reloadTokens?.(this.defaultEnvironment);
+        if (reloaded) {
+          this.apiKey = reloaded;
+          return reloaded;
         }
         throw this.missingTokenError(environment);
       }
@@ -29913,9 +29984,6 @@ var require_main = __commonJS({
 });
 
 // src/config.ts
-import { existsSync as existsSync2, readFileSync as readFileSync4 } from "fs";
-import { join as join3, dirname as dirname2 } from "path";
-import { fileURLToPath as fileURLToPath2 } from "url";
 function validateEnvironments(parsed) {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error("Environments config must be a JSON object");
@@ -29964,23 +30032,6 @@ function loadEnvironments() {
   } catch (error) {
     console.error(
       `Warning: invalid config.json in ${getConfigDir()}: ${error instanceof Error ? error.message : "Unknown error"}`
-    );
-  }
-  const shippedDefault = [
-    join3(__dirname2, "..", "config", "default-environments.json"),
-    join3(__dirname2, "..", "plugin", "config", "default-environments.json")
-  ].find((p) => existsSync2(p)) ?? "";
-  try {
-    if (shippedDefault && existsSync2(shippedDefault)) {
-      const parsed = JSON.parse(readFileSync4(shippedDefault, "utf-8"));
-      return {
-        environments: validateEnvironments(parsed.environments),
-        defaultName: parsed.defaultEnvironment
-      };
-    }
-  } catch (error) {
-    console.error(
-      `Warning: invalid default-environments.json: ${error instanceof Error ? error.message : "Unknown error"}`
     );
   }
   return { environments: {} };
@@ -30070,14 +30121,13 @@ function resolveWorkspaceAndEnvironment(params) {
     source: "default"
   };
 }
-var import_dotenv, __dirname2, PRISME_FORCE_READONLY, PRISME_DISABLE_FEEDBACK_TOOLS, PRISME_WORKSPACES, PRISME_DEFAULT_ENVIRONMENT, ENV_PRISME_API_KEY, ENV_PRISME_WORKSPACE_ID, ENV_PRISME_API_BASE_URL, PRISME_API_KEY, PRISME_WORKSPACE_ID, PRISME_API_BASE_URL, workspaceMappings, environmentsConfig, defaultEnvironmentName, loaded, storedCredentials;
+var import_dotenv, PRISME_FORCE_READONLY, PRISME_DISABLE_FEEDBACK_TOOLS, PRISME_WORKSPACES, PRISME_DEFAULT_ENVIRONMENT, ENV_PRISME_API_KEY, ENV_PRISME_WORKSPACE_ID, ENV_PRISME_API_BASE_URL, PRISME_API_KEY, PRISME_WORKSPACE_ID, PRISME_API_BASE_URL, workspaceMappings, environmentsConfig, defaultEnvironmentName, loaded, storedCredentials;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     import_dotenv = __toESM(require_main(), 1);
     init_persist();
     import_dotenv.default.config();
-    __dirname2 = dirname2(fileURLToPath2(import.meta.url));
     PRISME_FORCE_READONLY = process.env.PRISME_FORCE_READONLY === "true";
     PRISME_DISABLE_FEEDBACK_TOOLS = process.env.PRISME_DISABLE_FEEDBACK_TOOLS === "true";
     PRISME_WORKSPACES = process.env.PRISME_WORKSPACES;
@@ -30112,7 +30162,7 @@ var init_config = __esm({
     if (!defaultEnvironmentName && PRISME_DEFAULT_ENVIRONMENT && environmentsConfig[PRISME_DEFAULT_ENVIRONMENT]) {
       defaultEnvironmentName = PRISME_DEFAULT_ENVIRONMENT;
     }
-    if (!defaultEnvironmentName && Object.keys(environmentsConfig).length > 0) {
+    if (!defaultEnvironmentName && Object.keys(environmentsConfig).length === 1) {
       defaultEnvironmentName = Object.keys(environmentsConfig)[0];
     }
     if (defaultEnvironmentName && environmentsConfig[defaultEnvironmentName]) {
@@ -51200,9 +51250,9 @@ var init_dist = __esm({
 });
 
 // src/tools/handlers.ts
-import { readFileSync as readFileSync5, writeFileSync, existsSync as existsSync3, mkdirSync, readdirSync, statSync } from "fs";
-import { fileURLToPath as fileURLToPath3 } from "url";
-import { basename, dirname as dirname3, join as join4, resolve as resolve2, extname } from "path";
+import { readFileSync as readFileSync4, writeFileSync, existsSync as existsSync2, mkdirSync, readdirSync, statSync } from "fs";
+import { fileURLToPath as fileURLToPath2 } from "url";
+import { basename, dirname as dirname2, join as join4, resolve as resolve2, extname } from "path";
 function formatLintErrors(result) {
   const lines = [];
   if (result.valid) {
@@ -51229,7 +51279,7 @@ ${warningLines.join("\n")}`);
   return lines.join("\n");
 }
 function loadAutomationFile(filePath) {
-  const content = readFileSync5(filePath, "utf-8");
+  const content = readFileSync4(filePath, "utf-8");
   return filePath.toLowerCase().endsWith(".json") ? JSON.parse(content) : jsYaml.load(content);
 }
 function resolveAutomationInput(automation, inputPath) {
@@ -51239,7 +51289,7 @@ function resolveAutomationInput(automation, inputPath) {
   }
   if (!inputPath) return { automation };
   const absPath = resolve2(inputPath);
-  if (!existsSync3(absPath) || !statSync(absPath).isFile()) {
+  if (!existsSync2(absPath) || !statSync(absPath).isFile()) {
     return { error: `File not found: ${absPath}` };
   }
   try {
@@ -51271,9 +51321,9 @@ function formatAutomationWriteResult(result, lintResult, action) {
 }
 function resolveLocalWorkspaceDirectory(resolvedPath) {
   const currentDir = join4(resolvedPath, "current");
-  if (basename(resolvedPath) !== "current" && existsSync3(currentDir) && statSync(currentDir).isDirectory()) {
+  if (basename(resolvedPath) !== "current" && existsSync2(currentDir) && statSync(currentDir).isDirectory()) {
     const looksLikeWorkspaceRoot = ["automations", "pages", "imports", "ux", "collections"].some(
-      (name) => existsSync3(join4(resolvedPath, name))
+      (name) => existsSync2(join4(resolvedPath, name))
     );
     if (!looksLikeWorkspaceRoot) {
       return currentDir;
@@ -51283,14 +51333,14 @@ function resolveLocalWorkspaceDirectory(resolvedPath) {
 }
 function getWorkspaceIndexLabels(workspaceDir) {
   const indexPath = join4(workspaceDir, "index.yml");
-  if (!existsSync3(indexPath)) {
+  if (!existsSync2(indexPath)) {
     return {
       labels: [],
       error: `Workspace index.yml not found at ${indexPath}; cannot verify protected workspace labels.`
     };
   }
   try {
-    const parsed = jsYaml.load(readFileSync5(indexPath, "utf-8"));
+    const parsed = jsYaml.load(readFileSync4(indexPath, "utf-8"));
     const labels = parsed && typeof parsed === "object" && "labels" in parsed ? parsed.labels : void 0;
     return {
       indexPath,
@@ -51893,11 +51943,11 @@ ${formatLintErrors(lintResult)}`
           };
         }
         const docCandidates = [
-          join4(__dirname3, "..", "llmDoc", fileName),
-          join4(__dirname3, "..", "..", "plugin", "llmDoc", fileName)
+          join4(__dirname2, "..", "llmDoc", fileName),
+          join4(__dirname2, "..", "..", "plugin", "llmDoc", fileName)
         ];
-        const docPath = docCandidates.find((p) => existsSync3(p)) ?? docCandidates[0];
-        const documentation = readFileSync5(docPath, "utf-8");
+        const docPath = docCandidates.find((p) => existsSync2(p)) ?? docCandidates[0];
+        const documentation = readFileSync4(docPath, "utf-8");
         return {
           content: [
             {
@@ -51949,7 +51999,7 @@ ${formatLintErrors(lintResult)}`
       };
       if (inputPath) {
         const resolvedPath = resolve2(inputPath);
-        if (!existsSync3(resolvedPath)) {
+        if (!existsSync2(resolvedPath)) {
           return {
             content: [{ type: "text", text: `Error: Path not found: ${resolvedPath}` }],
             isError: true
@@ -52180,7 +52230,7 @@ ${formatLintErrors(lintResult)}`
         resolved.environment
       );
       const zip = new import_adm_zip.default(zipBuffer);
-      if (!existsSync3(resolvedPath)) {
+      if (!existsSync2(resolvedPath)) {
         mkdirSync(resolvedPath, { recursive: true });
       }
       const extractedFiles = [];
@@ -52191,12 +52241,12 @@ ${formatLintErrors(lintResult)}`
           if (relativePath) {
             const targetFilePath = join4(resolvedPath, relativePath);
             if (entry.isDirectory) {
-              if (!existsSync3(targetFilePath)) {
+              if (!existsSync2(targetFilePath)) {
                 mkdirSync(targetFilePath, { recursive: true });
               }
             } else {
-              const fileDir = dirname3(targetFilePath);
-              if (!existsSync3(fileDir)) {
+              const fileDir = dirname2(targetFilePath);
+              if (!existsSync2(fileDir)) {
                 mkdirSync(fileDir, { recursive: true });
               }
               writeFileSync(targetFilePath, entry.getData());
@@ -52243,7 +52293,7 @@ ${formatLintErrors(lintResult)}`
         workspaceName,
         environment
       });
-      if (!existsSync3(resolvedPath)) {
+      if (!existsSync2(resolvedPath)) {
         return {
           content: [
             {
@@ -52397,7 +52447,7 @@ ${formatLintErrors(lintResult)}`
       let resolvedContentType = contentType;
       if (filePath) {
         const absPath = resolve2(filePath);
-        if (!existsSync3(absPath)) {
+        if (!existsSync2(absPath)) {
           return {
             content: [
               { type: "text", text: `Error: File not found: ${absPath}` }
@@ -52405,7 +52455,7 @@ ${formatLintErrors(lintResult)}`
             isError: true
           };
         }
-        buffer = readFileSync5(absPath);
+        buffer = readFileSync4(absPath);
         if (!resolvedFileName) resolvedFileName = basename(absPath);
         if (!resolvedContentType) resolvedContentType = guessContentType(absPath);
       } else if (fileUrl) {
@@ -52869,7 +52919,7 @@ ${formatLintErrors(lintResult)}`
       if (!token) {
         throw new Error("`token` is required");
       }
-      const existing = environmentsConfig[environment];
+      const existing = environmentsConfig[environment] ?? loadEnvironmentCatalog()[environment];
       if (!existing && !apiUrl) {
         const available = Object.keys(environmentsConfig).join(", ") || "(none)";
         throw new Error(
@@ -52882,6 +52932,8 @@ ${formatLintErrors(lintResult)}`
         ...studioUrl ? { studioUrl } : {},
         ...nodeExtraCaCerts ? { nodeExtraCaCerts } : {}
       };
+      delete envCfg.apiKey;
+      const topology = loadTopologySync() ?? { environments: {} };
       let me;
       try {
         me = await apiClient.probeToken(
@@ -52899,11 +52951,7 @@ ${formatLintErrors(lintResult)}`
       environmentsConfig[environment] = { ...envCfg, apiKey: token };
       apiClient.upsertEnvironment(environment, { ...envCfg, apiKey: token });
       const credentialsPath = await persistToken(environment, token);
-      const topology = { environments: {} };
-      for (const [envName, env] of Object.entries(environmentsConfig)) {
-        const { apiKey: _omit, ...rest } = env;
-        topology.environments[envName] = rest;
-      }
+      topology.environments[environment] = envCfg;
       await persistTopology(topology);
       const summary = {
         environment,
@@ -52926,7 +52974,7 @@ ${formatLintErrors(lintResult)}`
       throw new Error(`Unknown tool: ${name}`);
   }
 }
-var import_adm_zip, PROTECTED_WORKSPACE_LABEL, __filename, __dirname3, EXTENSION_MIME_MAP;
+var import_adm_zip, PROTECTED_WORKSPACE_LABEL, __filename, __dirname2, EXTENSION_MIME_MAP;
 var init_handlers = __esm({
   "src/tools/handlers.ts"() {
     "use strict";
@@ -52935,11 +52983,12 @@ var init_handlers = __esm({
     init_js_yaml();
     init_config();
     init_persist();
+    init_environments();
     init_utils3();
     init_dist();
     PROTECTED_WORKSPACE_LABEL = "one-product";
-    __filename = fileURLToPath3(import.meta.url);
-    __dirname3 = dirname3(__filename);
+    __filename = fileURLToPath2(import.meta.url);
+    __dirname2 = dirname2(__filename);
     EXTENSION_MIME_MAP = {
       ".pdf": "application/pdf",
       ".png": "image/png",
