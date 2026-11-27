@@ -6,11 +6,12 @@
 //                                               token without going through the
 //                                               chat (keeps it off the wire to
 //                                               the LLM provider)
+//   - `node build/index.js remove-env ...`   -> remove an environment and its token
 //
 // The server modules (and their config side effects) are loaded lazily so the
 // CLI path stays fast and side-effect free.
 
-const CLI_COMMANDS = new Set(["set-token", "help", "--help", "-h"]);
+const CLI_COMMANDS = new Set(["set-token", "remove-env", "help", "--help", "-h"]);
 
 async function main() {
   const command = process.argv[2];

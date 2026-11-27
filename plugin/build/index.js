@@ -15662,6 +15662,14 @@ async function persistToken(environment, token) {
   await writeJsonAtomic(path, creds);
   return path;
 }
+async function removeToken(environment) {
+  const path = join(getConfigDir(), CREDENTIALS_FILE);
+  const creds = readJsonSync(path);
+  if (!creds || !(environment in creds)) return false;
+  delete creds[environment];
+  await writeJsonAtomic(path, creds);
+  return true;
+}
 async function persistTopology(topology) {
   const path = join(getConfigDir(), CONFIG_FILE);
   await writeJsonAtomic(path, topology);
@@ -15962,11 +15970,15 @@ function printUsage() {
       "",
       "Usage:",
       "  node <plugin>/build/index.js set-token <environment> [options]",
+      "  node <plugin>/build/index.js remove-env <environment> [--config-dir <dir>]",
       "",
-      "Registers (or rotates) an API token for an environment WITHOUT sending it",
-      "through the chat / to the LLM provider. The token is validated against the",
-      "API before being saved to the config dir (credentials.json, mode 600).",
-      "Only this environment is added to config.json.",
+      "set-token registers (or rotates) an API token for an environment WITHOUT",
+      "sending it through the chat / to the LLM provider. The token is validated",
+      "against the API before being saved to the config dir (credentials.json,",
+      "mode 600). Only this environment is added to config.json.",
+      "",
+      "remove-env deletes an environment from config.json and its token from",
+      "credentials.json.",
       "",
       "Options:",
       "  --api-url <url>                   API base URL (optional; prompts if missing)",
@@ -15994,13 +16006,13 @@ async function runCli(argv) {
     printUsage();
     return command === void 0 ? 1 : 0;
   }
-  if (command !== "set-token") {
+  if (command !== "set-token" && command !== "remove-env") {
     console.error(`Unknown command "${command}". Run \`help\` for usage.`);
     return 1;
   }
   const environment = positional[1];
   if (!environment) {
-    console.error("Missing <environment>. Example: set-token sandbox");
+    console.error(`Missing <environment>. Example: ${command} sandbox`);
     return 1;
   }
   const { dir, origin: origin2 } = selectConfigDir(flags);
@@ -16010,7 +16022,46 @@ async function runCli(argv) {
       "If the MCP server does not pick this up, re-run with the --config-dir printed in its error message."
     );
   }
-  return setToken(environment, flags);
+  return command === "remove-env" ? removeEnvironment(environment, dir) : setToken(environment, flags);
+}
+async function removeEnvironment(environment, dir) {
+  let topology;
+  try {
+    topology = loadTopologySync();
+  } catch (error) {
+    console.error(
+      `Could not read config.json: ${error instanceof Error ? error.message : String(error)}. Nothing was removed.`
+    );
+    return 1;
+  }
+  const inTopology = Boolean(topology?.environments[environment]);
+  try {
+    if (topology && inTopology) {
+      delete topology.environments[environment];
+      if (topology.defaultEnvironment === environment) {
+        delete topology.defaultEnvironment;
+      }
+      await persistTopology(topology);
+    }
+    const hadToken = await removeToken(environment);
+    if (!inTopology && !hadToken) {
+      const configured = Object.keys(topology?.environments ?? {});
+      console.error(
+        `No environment "${environment}" in ${dir}. Configured: ${configured.length > 0 ? configured.join(", ") : "none"}.`
+      );
+      return 1;
+    }
+    const files = [inTopology && "config.json", hadToken && "credentials.json"].filter(Boolean);
+    console.log(`Removed "${environment}" from ${files.join(" and ")}.`);
+    console.log("Reconnect the MCP server (/mcp in Claude Code) so the running session forgets it.");
+    if (topology) printDefaultStatus(topology);
+    return 0;
+  } catch (error) {
+    console.error(
+      `Failed to write config: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return 1;
+  }
 }
 async function setToken(environment, flags) {
   const makeDefault = flags.default === true;
@@ -53227,7 +53278,7 @@ var init_server2 = __esm({
 });
 
 // src/index.ts
-var CLI_COMMANDS = /* @__PURE__ */ new Set(["set-token", "help", "--help", "-h"]);
+var CLI_COMMANDS = /* @__PURE__ */ new Set(["set-token", "remove-env", "help", "--help", "-h"]);
 async function main() {
   const command = process.argv[2];
   if (command && CLI_COMMANDS.has(command)) {

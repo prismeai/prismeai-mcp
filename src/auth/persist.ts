@@ -137,6 +137,19 @@ export async function persistToken(environment: string, token: string): Promise<
 }
 
 /**
+ * Remove the token of one environment from credentials.json.
+ * Returns false when no token was stored for it.
+ */
+export async function removeToken(environment: string): Promise<boolean> {
+  const path = join(getConfigDir(), CREDENTIALS_FILE);
+  const creds = readJsonSync<StoredCredentials>(path);
+  if (!creds || !(environment in creds)) return false;
+  delete creds[environment];
+  await writeJsonAtomic(path, creds);
+  return true;
+}
+
+/**
  * Persist the environment topology (no tokens) to config.json.
  * Returns the path written.
  */
