@@ -18,7 +18,7 @@ The connector workflow: scaffold a new SaaS connector, verify it through a durab
 |---|---|
 | `/prisme-ai:app-mcp-implement` | Scaffold a brand-new App + MCP workspace for a third-party SaaS (REST or GraphQL). Produces `index.yml`, `security.yml`, `.import.yml`, helpers, Custom Code, MCP Core, tool/method automations, and pushes to the target env. |
 | `/prisme-ai:prisme-app-mcp-test` | Create or update the matching `*-consumer` E2E workspace, run its App and MCP tests, and iterate on the consumer or approved connector fixes until the suite passes. |
-| `/prisme-ai:app-mcp-document` | Generate the public MDX documentation page for an existing connector in the `prismeai/docs` repo (Mintlify). Mirrors the layout of existing pages like `gryzzly.mdx`, `data-galaxy.mdx`. |
+| `/prisme-ai:app-mcp-document` | Generate the public MDX documentation page for an existing connector in the docs repo `gitlab.com/prisme.ai/docs` (Mintlify, MRs to `dev`). Mirrors the layout of existing pages like `gryzzly.mdx`, `data-galaxy.mdx`. |
 
 ---
 
