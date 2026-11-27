@@ -3,7 +3,9 @@ import { homedir } from "os";
 import { isAbsolute, join, resolve } from "path";
 import { createInterface } from "readline";
 import {
-  getConfigDir,
+  claudePluginDataDir,
+  configDirFromEnv,
+  homeConfigDir,
   loadTopologySync,
   persistToken,
   persistTopology,
@@ -91,6 +93,31 @@ function cleanExtraCaCertsPath(value: string): string {
         ? join(homedir(), unquoted.slice(2))
         : unquoted;
   return isAbsolute(expanded) ? expanded : resolve(expanded);
+}
+
+/**
+ * Choose the config dir and say where the choice comes from, so a token never
+ * lands unnoticed in a directory the server does not read. The CLI usually
+ * runs from the user's own terminal, without the PRISME_* variables the host
+ * gives the server, hence the Claude Code plugin data dir derived from this
+ * script's path before the ~/.prisme-ai-mcp fallback.
+ */
+function selectConfigDir(flags: Record<string, string | true>): { dir: string; origin: string } {
+  const fromFlag = flagString(flags, "config-dir");
+  if (fromFlag) {
+    process.env.PRISME_CONFIG_DIR = fromFlag;
+    return { dir: fromFlag, origin: "--config-dir" };
+  }
+  const fromEnv = configDirFromEnv();
+  if (fromEnv) {
+    return { dir: fromEnv, origin: "environment variable" };
+  }
+  const pluginData = claudePluginDataDir(process.argv[1]);
+  if (pluginData) {
+    process.env.PRISME_CONFIG_DIR = pluginData;
+    return { dir: pluginData, origin: "Claude Code plugin data dir" };
+  }
+  return { dir: homeConfigDir(), origin: "default" };
 }
 
 /**
@@ -210,7 +237,9 @@ function printUsage(): void {
       "  --studio-url <url>                Studio origin (optional; prompts interactively)",
       "  --node-extra-ca-certs <pem-path>  Extra trusted CA bundle for this environment",
       "  --default                         Make this environment the default one",
-      "  --config-dir <dir>                Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
+      "  --config-dir <dir>                Config dir to use (defaults to PRISME_CONFIG_DIR, then the",
+      "                                    Claude Code plugin data dir when run from the installed",
+      "                                    plugin, then ~/.prisme-ai-mcp)",
       "",
       "The token is read from an interactive hidden prompt, or from the PRISME_TOKEN",
       "env var if set. Avoid passing it as a plain argument (shell history leak).",
@@ -243,10 +272,12 @@ export async function runCli(argv: string[]): Promise<number> {
     return 1;
   }
 
-  // --config-dir overrides where we read/write (the server passes its own dir).
-  const configDir = flagString(flags, "config-dir");
-  if (configDir) {
-    process.env.PRISME_CONFIG_DIR = configDir;
+  const { dir, origin } = selectConfigDir(flags);
+  console.log(`Config dir: ${dir} (${origin})`);
+  if (origin === "default") {
+    console.log(
+      "If the MCP server does not pick this up, re-run with the --config-dir printed in its error message."
+    );
   }
 
   return setToken(environment, flags);

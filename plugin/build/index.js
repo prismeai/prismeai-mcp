@@ -11721,10 +11721,10 @@ var init_CanceledError = __esm({
 });
 
 // node_modules/axios/lib/core/settle.js
-function settle(resolve3, reject, response) {
+function settle(resolve4, reject, response) {
   const validateStatus2 = response.config.validateStatus;
   if (!response.status || !validateStatus2 || validateStatus2(response.status)) {
-    resolve3(response);
+    resolve4(response);
   } else {
     reject(new AxiosError_default(
       "Request failed with status code " + response.status,
@@ -13691,7 +13691,7 @@ var init_http = __esm({
     http2Sessions = new Http2Sessions();
     isHttpAdapterSupported = typeof process !== "undefined" && utils_default.kindOf(process) === "process";
     wrapAsync = (asyncExecutor) => {
-      return new Promise((resolve3, reject) => {
+      return new Promise((resolve4, reject) => {
         let onDone;
         let isDone;
         const done = (value, isRejected) => {
@@ -13701,7 +13701,7 @@ var init_http = __esm({
         };
         const _resolve = (value) => {
           done(value);
-          resolve3(value);
+          resolve4(value);
         };
         const _reject = (reason) => {
           done(reason, true);
@@ -13753,7 +13753,7 @@ var init_http = __esm({
       }
     };
     http_default = isHttpAdapterSupported && function httpAdapter(config) {
-      return wrapAsync(async function dispatchHttpRequest(resolve3, reject, onDone) {
+      return wrapAsync(async function dispatchHttpRequest(resolve4, reject, onDone) {
         let { data: data2, lookup, family, httpVersion = 1, http2Options } = config;
         const { responseType, responseEncoding } = config;
         const method = config.method.toUpperCase();
@@ -13838,7 +13838,7 @@ var init_http = __esm({
           }
           let convertedData;
           if (method !== "GET") {
-            return settle(resolve3, reject, {
+            return settle(resolve4, reject, {
               status: 405,
               statusText: "method not allowed",
               headers: {},
@@ -13860,7 +13860,7 @@ var init_http = __esm({
           } else if (responseType === "stream") {
             convertedData = stream3.Readable.from(convertedData);
           }
-          return settle(resolve3, reject, {
+          return settle(resolve4, reject, {
             data: convertedData,
             status: 200,
             statusText: "OK",
@@ -14079,7 +14079,7 @@ var init_http = __esm({
           };
           if (responseType === "stream") {
             response.data = responseStream;
-            settle(resolve3, reject, response);
+            settle(resolve4, reject, response);
           } else {
             const responseBuffer = [];
             let totalResponseBytes = 0;
@@ -14127,7 +14127,7 @@ var init_http = __esm({
               } catch (err) {
                 return reject(AxiosError_default.from(err, null, config, response.request, response));
               }
-              settle(resolve3, reject, response);
+              settle(resolve4, reject, response);
             });
           }
           abortEmitter.once("abort", (err) => {
@@ -14425,7 +14425,7 @@ var init_xhr = __esm({
     init_resolveConfig();
     isXHRAdapterSupported = typeof XMLHttpRequest !== "undefined";
     xhr_default = isXHRAdapterSupported && function(config) {
-      return new Promise(function dispatchXhrRequest(resolve3, reject) {
+      return new Promise(function dispatchXhrRequest(resolve4, reject) {
         const _config = resolveConfig_default(config);
         let requestData = _config.data;
         const requestHeaders = AxiosHeaders_default.from(_config.headers).normalize();
@@ -14459,7 +14459,7 @@ var init_xhr = __esm({
             request
           };
           settle(function _resolve(value) {
-            resolve3(value);
+            resolve4(value);
             done();
           }, function _reject(err) {
             reject(err);
@@ -14857,8 +14857,8 @@ var init_fetch = __esm({
           responseType = responseType || "text";
           let responseData = await resolvers[utils_default.findKey(resolvers, responseType) || "text"](response, config);
           !isStreamResponse && unsubscribe && unsubscribe();
-          return await new Promise((resolve3, reject) => {
-            settle(resolve3, reject, {
+          return await new Promise((resolve4, reject) => {
+            settle(resolve4, reject, {
               data: responseData,
               headers: AxiosHeaders_default.from(response.headers),
               status: response.status,
@@ -15304,8 +15304,8 @@ var init_CancelToken = __esm({
           throw new TypeError("executor must be a function.");
         }
         let resolvePromise;
-        this.promise = new Promise(function promiseExecutor(resolve3) {
-          resolvePromise = resolve3;
+        this.promise = new Promise(function promiseExecutor(resolve4) {
+          resolvePromise = resolve4;
         });
         const token = this;
         this.promise.then((cancel) => {
@@ -15318,9 +15318,9 @@ var init_CancelToken = __esm({
         });
         this.promise.then = (onfulfilled) => {
           let _resolve;
-          const promise = new Promise((resolve3) => {
-            token.subscribe(resolve3);
-            _resolve = resolve3;
+          const promise = new Promise((resolve4) => {
+            token.subscribe(resolve4);
+            _resolve = resolve4;
           }).then(onfulfilled);
           promise.cancel = function reject() {
             token.unsubscribe(_resolve);
@@ -15585,10 +15585,13 @@ var init_axios2 = __esm({
 });
 
 // src/auth/persist.ts
-import { promises as fs, readFileSync } from "fs";
+import { promises as fs, existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { join, resolve, sep } from "path";
 function getConfigDir() {
+  return configDirFromEnv() ?? homeConfigDir();
+}
+function configDirFromEnv() {
   const fromEnv = process.env.PRISME_CONFIG_DIR;
   if (fromEnv && !fromEnv.includes("${")) {
     return fromEnv;
@@ -15597,7 +15600,23 @@ function getConfigDir() {
   if (fromClaudeEnv && !fromClaudeEnv.includes("${")) {
     return fromClaudeEnv;
   }
+  return void 0;
+}
+function homeConfigDir() {
   return join(homedir(), ".prisme-ai-mcp");
+}
+function claudePluginDataDir(scriptPath) {
+  if (!scriptPath) return void 0;
+  const parts = resolve(scriptPath).split(sep);
+  const cache = parts.lastIndexOf("cache");
+  if (cache < 1 || parts[cache - 1] !== "plugins" || parts.length < cache + 6) {
+    return void 0;
+  }
+  const marketplace = parts[cache + 1];
+  const plugin = parts[cache + 2];
+  const id = `${plugin}@${marketplace}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const dir = [...parts.slice(0, cache), "data", id].join(sep);
+  return existsSync(dir) ? dir : void 0;
 }
 function readJsonSync(path) {
   let raw;
@@ -15671,7 +15690,7 @@ var init_persist = __esm({
 });
 
 // src/environments.ts
-import { existsSync, readFileSync as readFileSync2 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
 import { dirname, join as join2 } from "path";
 import { fileURLToPath } from "url";
 function loadEnvironmentCatalog() {
@@ -15680,7 +15699,7 @@ function loadEnvironmentCatalog() {
     join2(__dirname, "..", "plugin", "config", "default-environments.json")
   ];
   for (const path of candidates) {
-    if (!existsSync(path)) continue;
+    if (!existsSync2(path)) continue;
     try {
       const parsed = JSON.parse(readFileSync2(path, "utf-8"));
       const catalog = {};
@@ -15780,7 +15799,7 @@ __export(cli_exports, {
   runCli: () => runCli
 });
 import { homedir as homedir2 } from "os";
-import { isAbsolute, join as join3, resolve } from "path";
+import { isAbsolute, join as join3, resolve as resolve2 } from "path";
 import { createInterface } from "readline";
 function parseArgs(argv) {
   const positional = [];
@@ -15842,7 +15861,24 @@ function deriveStudioUrl(value) {
 function cleanExtraCaCertsPath(value) {
   const unquoted = value.trim().replace(/^(["'])(.*)\1$/, "$2");
   const expanded = unquoted === "~" ? homedir2() : unquoted.startsWith("~/") ? join3(homedir2(), unquoted.slice(2)) : unquoted;
-  return isAbsolute(expanded) ? expanded : resolve(expanded);
+  return isAbsolute(expanded) ? expanded : resolve2(expanded);
+}
+function selectConfigDir(flags) {
+  const fromFlag = flagString(flags, "config-dir");
+  if (fromFlag) {
+    process.env.PRISME_CONFIG_DIR = fromFlag;
+    return { dir: fromFlag, origin: "--config-dir" };
+  }
+  const fromEnv = configDirFromEnv();
+  if (fromEnv) {
+    return { dir: fromEnv, origin: "environment variable" };
+  }
+  const pluginData = claudePluginDataDir(process.argv[1]);
+  if (pluginData) {
+    process.env.PRISME_CONFIG_DIR = pluginData;
+    return { dir: pluginData, origin: "Claude Code plugin data dir" };
+  }
+  return { dir: homeConfigDir(), origin: "default" };
 }
 function effectiveDefault(topology) {
   const names = Object.keys(topology.environments);
@@ -15862,14 +15898,14 @@ function printDefaultStatus(topology) {
   );
 }
 function promptHidden(question) {
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     const input = process.stdin;
     const output = process.stderr;
     if (!input.isTTY) {
       let data2 = "";
       input.setEncoding("utf8");
       input.on("data", (chunk) => data2 += chunk);
-      input.on("end", () => resolve3(data2.split(/\r?\n/)[0]?.trim() ?? ""));
+      input.on("end", () => resolve4(data2.split(/\r?\n/)[0]?.trim() ?? ""));
       return;
     }
     const rl = createInterface({ input, output });
@@ -15884,22 +15920,22 @@ function promptHidden(question) {
     rl.question("", (answer) => {
       rl.close();
       output.write("\n");
-      resolve3(answer.trim());
+      resolve4(answer.trim());
     });
   });
 }
 function promptLine(question) {
-  return new Promise((resolve3) => {
+  return new Promise((resolve4) => {
     const input = process.stdin;
     const output = process.stdout;
     if (!input.isTTY) {
-      resolve3("");
+      resolve4("");
       return;
     }
     const rl = createInterface({ input, output });
     rl.question(question, (answer) => {
       rl.close();
-      resolve3(answer.trim());
+      resolve4(answer.trim());
     });
   });
 }
@@ -15937,7 +15973,9 @@ function printUsage() {
       "  --studio-url <url>                Studio origin (optional; prompts interactively)",
       "  --node-extra-ca-certs <pem-path>  Extra trusted CA bundle for this environment",
       "  --default                         Make this environment the default one",
-      "  --config-dir <dir>                Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
+      "  --config-dir <dir>                Config dir to use (defaults to PRISME_CONFIG_DIR, then the",
+      "                                    Claude Code plugin data dir when run from the installed",
+      "                                    plugin, then ~/.prisme-ai-mcp)",
       "",
       "The token is read from an interactive hidden prompt, or from the PRISME_TOKEN",
       "env var if set. Avoid passing it as a plain argument (shell history leak).",
@@ -15965,9 +16003,12 @@ async function runCli(argv) {
     console.error("Missing <environment>. Example: set-token sandbox");
     return 1;
   }
-  const configDir = flagString(flags, "config-dir");
-  if (configDir) {
-    process.env.PRISME_CONFIG_DIR = configDir;
+  const { dir, origin: origin2 } = selectConfigDir(flags);
+  console.log(`Config dir: ${dir} (${origin2})`);
+  if (origin2 === "default") {
+    console.log(
+      "If the MCP server does not pick this up, re-run with the --config-dir printed in its error message."
+    );
   }
   return setToken(environment, flags);
 }
@@ -21516,7 +21557,7 @@ var init_protocol = __esm({
        */
       request(request, resultSchema, options) {
         const { relatedRequestId, resumptionToken, onresumptiontoken } = options !== null && options !== void 0 ? options : {};
-        return new Promise((resolve3, reject) => {
+        return new Promise((resolve4, reject) => {
           var _a, _b, _c, _d, _e, _f;
           if (!this._transport) {
             reject(new Error("Not connected"));
@@ -21567,7 +21608,7 @@ var init_protocol = __esm({
             }
             try {
               const result = resultSchema.parse(response.result);
-              resolve3(result);
+              resolve4(result);
             } catch (error) {
               reject(error);
             }
@@ -24616,7 +24657,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref2];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve3.call(this, root, ref2);
+      let _sch = resolve4.call(this, root, ref2);
       if (_sch === void 0) {
         const schema2 = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref2];
         const { schemaId } = this.opts;
@@ -24643,7 +24684,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve3(root, ref2) {
+    function resolve4(root, ref2) {
       let sch;
       while (typeof (sch = this.refs[ref2]) == "string")
         ref2 = sch;
@@ -25218,7 +25259,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve3(baseURI, relativeURI, options) {
+    function resolve4(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -25445,7 +25486,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve3,
+      resolve: resolve4,
       resolveComponent,
       equal,
       serialize,
@@ -28820,12 +28861,12 @@ var init_stdio2 = __esm({
         (_a = this.onclose) === null || _a === void 0 ? void 0 : _a.call(this);
       }
       send(message) {
-        return new Promise((resolve3) => {
+        return new Promise((resolve4) => {
           const json2 = serializeMessage(message);
           if (this._stdout.write(json2)) {
-            resolve3();
+            resolve4();
           } else {
-            this._stdout.once("drain", resolve3);
+            this._stdout.once("drain", resolve4);
           }
         });
       }
@@ -33993,8 +34034,8 @@ var require_adm_zip = __commonJS({
         return null;
       }
       function fixPath(zipPath) {
-        const { join: join5, normalize, sep } = pth.posix;
-        return join5(".", normalize(sep + zipPath.split("\\").join(sep) + sep));
+        const { join: join5, normalize, sep: sep2 } = pth.posix;
+        return join5(".", normalize(sep2 + zipPath.split("\\").join(sep2) + sep2));
       }
       function filenameFilter(filterfn) {
         if (filterfn instanceof RegExp) {
@@ -34389,10 +34430,10 @@ var require_adm_zip = __commonJS({
          * @param {function|string} [props.namefix] - optional function to help fix filename
          */
         addLocalFolderPromise: function(localPath2, props) {
-          return new Promise((resolve3, reject) => {
+          return new Promise((resolve4, reject) => {
             this.addLocalFolderAsync2(Object.assign({ localPath: localPath2 }, props), (err, done) => {
               if (err) reject(err);
-              if (done) resolve3(this);
+              if (done) resolve4(this);
             });
           });
         },
@@ -34579,12 +34620,12 @@ var require_adm_zip = __commonJS({
           keepOriginalPermission = get_Bool(false, keepOriginalPermission);
           overwrite = get_Bool(false, overwrite);
           if (!callback) {
-            return new Promise((resolve3, reject) => {
+            return new Promise((resolve4, reject) => {
               this.extractAllToAsync(targetPath, overwrite, keepOriginalPermission, function(err) {
                 if (err) {
                   reject(err);
                 } else {
-                  resolve3(this);
+                  resolve4(this);
                 }
               });
             });
@@ -34682,11 +34723,11 @@ var require_adm_zip = __commonJS({
                  */
         writeZipPromise: function(targetFileName, props) {
           const { overwrite, perm } = Object.assign({ overwrite: true }, props);
-          return new Promise((resolve3, reject) => {
+          return new Promise((resolve4, reject) => {
             if (!targetFileName && opts.filename) targetFileName = opts.filename;
             if (!targetFileName) reject("ADM-ZIP: ZIP File Name Missing");
             this.toBufferPromise().then((zipData) => {
-              const ret = (done) => done ? resolve3(done) : reject("ADM-ZIP: Wasn't able to write zip file");
+              const ret = (done) => done ? resolve4(done) : reject("ADM-ZIP: Wasn't able to write zip file");
               filetools.writeFileToAsync(targetFileName, zipData, overwrite, perm, ret);
             }, reject);
           });
@@ -34695,8 +34736,8 @@ var require_adm_zip = __commonJS({
          * @returns {Promise<Buffer>} A promise to the Buffer.
          */
         toBufferPromise: function() {
-          return new Promise((resolve3, reject) => {
-            _zip.toAsyncBuffer(resolve3, reject);
+          return new Promise((resolve4, reject) => {
+            _zip.toAsyncBuffer(resolve4, reject);
           });
         },
         /**
@@ -40372,7 +40413,7 @@ var require_compile2 = __commonJS({
       const schOrFunc = root.refs[ref2];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve3.call(this, root, ref2);
+      let _sch = resolve4.call(this, root, ref2);
       if (_sch === void 0) {
         const schema2 = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref2];
         const { schemaId } = this.opts;
@@ -40399,7 +40440,7 @@ var require_compile2 = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve3(root, ref2) {
+    function resolve4(root, ref2) {
       let sch;
       while (typeof (sch = this.refs[ref2]) == "string")
         ref2 = sch;
@@ -40974,7 +41015,7 @@ var require_fast_uri2 = __commonJS({
       }
       return uri;
     }
-    function resolve3(baseURI, relativeURI, options) {
+    function resolve4(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse4(baseURI, schemelessOptions), parse4(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -41201,7 +41242,7 @@ var require_fast_uri2 = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve3,
+      resolve: resolve4,
       resolveComponent,
       equal,
       serialize,
@@ -51276,9 +51317,9 @@ var init_dist = __esm({
 });
 
 // src/tools/handlers.ts
-import { readFileSync as readFileSync4, writeFileSync, existsSync as existsSync2, mkdirSync, readdirSync, statSync } from "fs";
+import { readFileSync as readFileSync4, writeFileSync, existsSync as existsSync3, mkdirSync, readdirSync, statSync } from "fs";
 import { fileURLToPath as fileURLToPath2 } from "url";
-import { basename, dirname as dirname2, join as join4, resolve as resolve2, extname } from "path";
+import { basename, dirname as dirname2, join as join4, resolve as resolve3, extname } from "path";
 function formatLintErrors(result) {
   const lines = [];
   if (result.valid) {
@@ -51314,8 +51355,8 @@ function resolveAutomationInput(automation, inputPath) {
     return { error: "exactly one of `automation` or `path` must be provided." };
   }
   if (!inputPath) return { automation };
-  const absPath = resolve2(inputPath);
-  if (!existsSync2(absPath) || !statSync(absPath).isFile()) {
+  const absPath = resolve3(inputPath);
+  if (!existsSync3(absPath) || !statSync(absPath).isFile()) {
     return { error: `File not found: ${absPath}` };
   }
   try {
@@ -51347,9 +51388,9 @@ function formatAutomationWriteResult(result, lintResult, action) {
 }
 function resolveLocalWorkspaceDirectory(resolvedPath) {
   const currentDir = join4(resolvedPath, "current");
-  if (basename(resolvedPath) !== "current" && existsSync2(currentDir) && statSync(currentDir).isDirectory()) {
+  if (basename(resolvedPath) !== "current" && existsSync3(currentDir) && statSync(currentDir).isDirectory()) {
     const looksLikeWorkspaceRoot = ["automations", "pages", "imports", "ux", "collections"].some(
-      (name) => existsSync2(join4(resolvedPath, name))
+      (name) => existsSync3(join4(resolvedPath, name))
     );
     if (!looksLikeWorkspaceRoot) {
       return currentDir;
@@ -51359,7 +51400,7 @@ function resolveLocalWorkspaceDirectory(resolvedPath) {
 }
 function getWorkspaceIndexLabels(workspaceDir) {
   const indexPath = join4(workspaceDir, "index.yml");
-  if (!existsSync2(indexPath)) {
+  if (!existsSync3(indexPath)) {
     return {
       labels: [],
       error: `Workspace index.yml not found at ${indexPath}; cannot verify protected workspace labels.`
@@ -51972,7 +52013,7 @@ ${formatLintErrors(lintResult)}`
           join4(__dirname2, "..", "llmDoc", fileName),
           join4(__dirname2, "..", "..", "plugin", "llmDoc", fileName)
         ];
-        const docPath = docCandidates.find((p) => existsSync2(p)) ?? docCandidates[0];
+        const docPath = docCandidates.find((p) => existsSync3(p)) ?? docCandidates[0];
         const documentation = readFileSync4(docPath, "utf-8");
         return {
           content: [
@@ -52024,8 +52065,8 @@ ${formatLintErrors(lintResult)}`
         }
       };
       if (inputPath) {
-        const resolvedPath = resolve2(inputPath);
-        if (!existsSync2(resolvedPath)) {
+        const resolvedPath = resolve3(inputPath);
+        if (!existsSync3(resolvedPath)) {
           return {
             content: [{ type: "text", text: `Error: Path not found: ${resolvedPath}` }],
             isError: true
@@ -52244,7 +52285,7 @@ ${formatLintErrors(lintResult)}`
         workspaceName,
         environment
       } = args;
-      const resolvedPath = resolve2(targetPath);
+      const resolvedPath = resolve3(targetPath);
       const resolved = resolveWorkspaceAndEnvironment({
         workspaceId,
         workspaceName,
@@ -52256,7 +52297,7 @@ ${formatLintErrors(lintResult)}`
         resolved.environment
       );
       const zip = new import_adm_zip.default(zipBuffer);
-      if (!existsSync2(resolvedPath)) {
+      if (!existsSync3(resolvedPath)) {
         mkdirSync(resolvedPath, { recursive: true });
       }
       const extractedFiles = [];
@@ -52267,12 +52308,12 @@ ${formatLintErrors(lintResult)}`
           if (relativePath) {
             const targetFilePath = join4(resolvedPath, relativePath);
             if (entry.isDirectory) {
-              if (!existsSync2(targetFilePath)) {
+              if (!existsSync3(targetFilePath)) {
                 mkdirSync(targetFilePath, { recursive: true });
               }
             } else {
               const fileDir = dirname2(targetFilePath);
-              if (!existsSync2(fileDir)) {
+              if (!existsSync3(fileDir)) {
                 mkdirSync(fileDir, { recursive: true });
               }
               writeFileSync(targetFilePath, entry.getData());
@@ -52313,13 +52354,13 @@ ${formatLintErrors(lintResult)}`
         workspaceName,
         environment
       } = args;
-      const resolvedPath = resolve2(sourcePath);
+      const resolvedPath = resolve3(sourcePath);
       const resolved = resolveWorkspaceAndEnvironment({
         workspaceId,
         workspaceName,
         environment
       });
-      if (!existsSync2(resolvedPath)) {
+      if (!existsSync3(resolvedPath)) {
         return {
           content: [
             {
@@ -52472,8 +52513,8 @@ ${formatLintErrors(lintResult)}`
       let resolvedFileName = fileName;
       let resolvedContentType = contentType;
       if (filePath) {
-        const absPath = resolve2(filePath);
-        if (!existsSync2(absPath)) {
+        const absPath = resolve3(filePath);
+        if (!existsSync3(absPath)) {
           return {
             content: [
               { type: "text", text: `Error: File not found: ${absPath}` }

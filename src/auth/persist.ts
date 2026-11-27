@@ -1,6 +1,6 @@
-import { promises as fs, readFileSync } from "fs";
+import { promises as fs, existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { join, resolve, sep } from "path";
 
 export const CONFIG_FILE = "config.json";
 export const CREDENTIALS_FILE = "credentials.json";
@@ -36,6 +36,11 @@ export type StoredCredentials = Record<string, StoredCredential>;
  * runs keep working.
  */
 export function getConfigDir(): string {
+  return configDirFromEnv() ?? homeConfigDir();
+}
+
+/** The directory set by the host through PRISME_CONFIG_DIR / PRISME_CLAUDE_CONFIG_DIR, if any. */
+export function configDirFromEnv(): string | undefined {
   const fromEnv = process.env.PRISME_CONFIG_DIR;
   if (fromEnv && !fromEnv.includes("${")) {
     return fromEnv;
@@ -44,7 +49,35 @@ export function getConfigDir(): string {
   if (fromClaudeEnv && !fromClaudeEnv.includes("${")) {
     return fromClaudeEnv;
   }
+  return undefined;
+}
+
+export function homeConfigDir(): string {
   return join(homedir(), ".prisme-ai-mcp");
+}
+
+/**
+ * Claude Code runs the plugin from
+ *   <claude>/plugins/cache/<marketplace>/<plugin>/<version>/build/index.js
+ * and passes it <claude>/plugins/data/<plugin>-<marketplace> as
+ * CLAUDE_PLUGIN_DATA (the "plugin@marketplace" id with other characters
+ * replaced by "-"). A `set-token` started from the user's own terminal has no
+ * such variable, so derive the directory from the script path instead of
+ * writing to ~/.prisme-ai-mcp, which that server never reads. Only an existing
+ * directory is returned: a wrong guess must not create one.
+ */
+export function claudePluginDataDir(scriptPath: string | undefined): string | undefined {
+  if (!scriptPath) return undefined;
+  const parts = resolve(scriptPath).split(sep);
+  const cache = parts.lastIndexOf("cache");
+  if (cache < 1 || parts[cache - 1] !== "plugins" || parts.length < cache + 6) {
+    return undefined;
+  }
+  const marketplace = parts[cache + 1];
+  const plugin = parts[cache + 2];
+  const id = `${plugin}@${marketplace}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const dir = [...parts.slice(0, cache), "data", id].join(sep);
+  return existsSync(dir) ? dir : undefined;
 }
 
 function readJsonSync<T>(path: string): T | undefined {
