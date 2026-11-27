@@ -12,6 +12,7 @@ import {
   PRISME_DISABLE_FEEDBACK_TOOLS,
   environmentsConfig,
   defaultEnvironmentName,
+  loadEnvironmentFromDisk,
 } from "./config.js";
 import { getConfigDir, loadCredentialsSync } from "./auth/persist.js";
 import { tools } from "./tools/definitions.js";
@@ -37,6 +38,8 @@ export async function startServer(): Promise<void> {
       }
       return token;
     },
+    // Same for an environment the CLI added to config.json after startup.
+    reloadEnvironment: loadEnvironmentFromDisk,
   });
 
   // Create MCP server

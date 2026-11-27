@@ -1,21 +1,21 @@
 import axios from "axios";
-import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
-import { dirname, isAbsolute, join, resolve } from "path";
-import { fileURLToPath } from "url";
+import { isAbsolute, join, resolve } from "path";
 import { createInterface } from "readline";
 import {
-  getConfigDir,
+  claudePluginDataDir,
+  configDirFromEnv,
+  homeConfigDir,
   loadTopologySync,
   persistToken,
   persistTopology,
+  removeToken,
   deriveTokenUrl,
   type StoredTopology,
   type StoredEnvironment,
 } from "./auth/persist.js";
+import { loadEnvironmentCatalog } from "./environments.js";
 import { createExtraCaAgent } from "./tls.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface ParsedArgs {
   positional: string[];
@@ -96,22 +96,57 @@ function cleanExtraCaCertsPath(value: string): string {
   return isAbsolute(expanded) ? expanded : resolve(expanded);
 }
 
-/** Read the default topology shipped with the plugin (bundled or tsc layout). */
-function loadShippedDefaults(): StoredTopology | undefined {
-  const candidates = [
-    join(__dirname, "..", "config", "default-environments.json"),
-    join(__dirname, "..", "plugin", "config", "default-environments.json"),
-  ];
-  for (const path of candidates) {
-    if (existsSync(path)) {
-      try {
-        return JSON.parse(readFileSync(path, "utf-8")) as StoredTopology;
-      } catch {
-        // ignore and fall through
-      }
-    }
+/**
+ * Choose the config dir and say where the choice comes from, so a token never
+ * lands unnoticed in a directory the server does not read. The CLI usually
+ * runs from the user's own terminal, without the PRISME_* variables the host
+ * gives the server, hence the Claude Code plugin data dir derived from this
+ * script's path before the ~/.prisme-ai-mcp fallback.
+ */
+function selectConfigDir(flags: Record<string, string | true>): { dir: string; origin: string } {
+  const fromFlag = flagString(flags, "config-dir");
+  if (fromFlag) {
+    process.env.PRISME_CONFIG_DIR = fromFlag;
+    return { dir: fromFlag, origin: "--config-dir" };
   }
-  return undefined;
+  const fromEnv = configDirFromEnv();
+  if (fromEnv) {
+    return { dir: fromEnv, origin: "environment variable" };
+  }
+  const pluginData = claudePluginDataDir(process.argv[1]);
+  if (pluginData) {
+    process.env.PRISME_CONFIG_DIR = pluginData;
+    return { dir: pluginData, origin: "Claude Code plugin data dir" };
+  }
+  return { dir: homeConfigDir(), origin: "default" };
+}
+
+/**
+ * The environment a call without `environment` reaches, by the server's
+ * rules: a `default: true` entry, else `defaultEnvironment`, else the only
+ * configured environment. PRISME_DEFAULT_ENVIRONMENT is the server's own
+ * variable and cannot be seen from here.
+ */
+function effectiveDefault(topology: StoredTopology): string | undefined {
+  const names = Object.keys(topology.environments);
+  const flagged = names.filter((name) => topology.environments[name].default === true);
+  if (flagged.length > 0) return flagged[flagged.length - 1];
+  if (topology.defaultEnvironment && topology.environments[topology.defaultEnvironment]) {
+    return topology.defaultEnvironment;
+  }
+  return names.length === 1 ? names[0] : undefined;
+}
+
+function printDefaultStatus(topology: StoredTopology): void {
+  const names = Object.keys(topology.environments);
+  if (names.length === 0) return;
+  const current = effectiveDefault(topology);
+  console.log(
+    current
+      ? `Default environment: ${current} (configured: ${names.join(", ")}).`
+      : `No default environment: each request must name one of ${names.join(", ")}. ` +
+          `Run set-token <environment> --default to choose one.`
+  );
 }
 
 /**
@@ -192,16 +227,24 @@ function printUsage(): void {
       "",
       "Usage:",
       "  node <plugin>/build/index.js set-token <environment> [options]",
+      "  node <plugin>/build/index.js remove-env <environment> [--config-dir <dir>]",
       "",
-      "Registers (or rotates) an API token for an environment WITHOUT sending it",
-      "through the chat / to the LLM provider. The token is validated against the",
-      "API before being saved to the config dir (credentials.json, mode 600).",
+      "set-token registers (or rotates) an API token for an environment WITHOUT",
+      "sending it through the chat / to the LLM provider. The token is validated",
+      "against the API before being saved to the config dir (credentials.json,",
+      "mode 600). Only this environment is added to config.json.",
+      "",
+      "remove-env deletes an environment from config.json and its token from",
+      "credentials.json.",
       "",
       "Options:",
       "  --api-url <url>                   API base URL (optional; prompts if missing)",
       "  --studio-url <url>                Studio origin (optional; prompts interactively)",
       "  --node-extra-ca-certs <pem-path>  Extra trusted CA bundle for this environment",
-      "  --config-dir <dir>                Config dir to write to (defaults to PRISME_CONFIG_DIR or ~/.prisme-ai-mcp)",
+      "  --default                         Make this environment the default one",
+      "  --config-dir <dir>                Config dir to use (defaults to PRISME_CONFIG_DIR, then the",
+      "                                    Claude Code plugin data dir when run from the installed",
+      "                                    plugin, then ~/.prisme-ai-mcp)",
       "",
       "The token is read from an interactive hidden prompt, or from the PRISME_TOKEN",
       "env var if set. Avoid passing it as a plain argument (shell history leak).",
@@ -223,41 +266,104 @@ export async function runCli(argv: string[]): Promise<number> {
     return command === undefined ? 1 : 0;
   }
 
-  if (command !== "set-token") {
+  if (command !== "set-token" && command !== "remove-env") {
     console.error(`Unknown command "${command}". Run \`help\` for usage.`);
     return 1;
   }
 
   const environment = positional[1];
   if (!environment) {
-    console.error("Missing <environment>. Example: set-token sandbox");
+    console.error(`Missing <environment>. Example: ${command} sandbox`);
     return 1;
   }
 
-  // --config-dir overrides where we read/write (the server passes its own dir).
-  const configDir = flagString(flags, "config-dir");
-  if (configDir) {
-    process.env.PRISME_CONFIG_DIR = configDir;
+  const { dir, origin } = selectConfigDir(flags);
+  console.log(`Config dir: ${dir} (${origin})`);
+  if (origin === "default") {
+    console.log(
+      "If the MCP server does not pick this up, re-run with the --config-dir printed in its error message."
+    );
   }
 
-  // Resolve the environment topology. Shipped defaults are used as examples and
-  // fallback metadata, but fresh interactive setup still asks for the API URL.
-  let storedTopology: StoredTopology | undefined;
-  let shippedDefaults: StoredTopology | undefined;
-  let topology: StoredTopology;
+  return command === "remove-env"
+    ? removeEnvironment(environment, dir)
+    : setToken(environment, flags);
+}
+
+async function removeEnvironment(environment: string, dir: string): Promise<number> {
+  let topology: StoredTopology | undefined;
   try {
-    storedTopology = loadTopologySync();
-    shippedDefaults = loadShippedDefaults();
-    topology = storedTopology ?? shippedDefaults ?? { environments: {} };
+    topology = loadTopologySync();
   } catch (error) {
     console.error(
-      `Could not read existing config: ${error instanceof Error ? error.message : String(error)}`
+      `Could not read config.json: ${error instanceof Error ? error.message : String(error)}. Nothing was removed.`
     );
-    topology = { environments: {} };
+    return 1;
   }
 
+  const inTopology = Boolean(topology?.environments[environment]);
+  try {
+    if (topology && inTopology) {
+      delete topology.environments[environment];
+      if (topology.defaultEnvironment === environment) {
+        delete topology.defaultEnvironment;
+      }
+      await persistTopology(topology);
+    }
+    const hadToken = await removeToken(environment);
+
+    if (!inTopology && !hadToken) {
+      const configured = Object.keys(topology?.environments ?? {});
+      console.error(
+        `No environment "${environment}" in ${dir}. ` +
+          `Configured: ${configured.length > 0 ? configured.join(", ") : "none"}.`
+      );
+      return 1;
+    }
+
+    const files = [inTopology && "config.json", hadToken && "credentials.json"].filter(Boolean);
+    console.log(`Removed "${environment}" from ${files.join(" and ")}.`);
+    console.log("Reconnect the MCP server (/mcp in Claude Code) so the running session forgets it.");
+    if (topology) printDefaultStatus(topology);
+    return 0;
+  } catch (error) {
+    console.error(
+      `Failed to write config: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return 1;
+  }
+}
+
+async function setToken(
+  environment: string,
+  flags: Record<string, string | true>
+): Promise<number> {
+  const makeDefault = flags.default === true;
+  if (flags.default !== undefined && !makeDefault) {
+    console.error(
+      `--default takes no value. Put it after the environment name, e.g. set-token ${environment} --default`
+    );
+    return 1;
+  }
+
+  // Only registered environments go to config.json. The shipped catalog
+  // (sandbox, staging, prod) lends its URLs as examples and defaults for an
+  // environment of the same name; fresh interactive setup still asks for the
+  // API URL.
+  let storedTopology: StoredTopology | undefined;
+  try {
+    storedTopology = loadTopologySync();
+  } catch (error) {
+    console.error(
+      `Could not read config.json: ${error instanceof Error ? error.message : String(error)}. ` +
+        `Fix or delete it, then try again. Nothing was saved.`
+    );
+    return 1;
+  }
+  const topology: StoredTopology = storedTopology ?? { environments: {} };
+
   const existing = storedTopology?.environments[environment];
-  const fallbackExisting = existing ?? shippedDefaults?.environments[environment];
+  const fallbackExisting = existing ?? loadEnvironmentCatalog()[environment];
   const exampleApiUrl =
     fallbackExisting?.apiUrl ?? "https://api.sandbox.prisme.ai/v2";
   const apiUrlFlag = flagString(flags, "api-url");
@@ -389,6 +495,12 @@ export async function runCli(argv: string[]): Promise<number> {
     ...(nodeExtraCaCerts ? { nodeExtraCaCerts } : {}),
   };
   topology.environments[environment] = merged;
+  if (makeDefault) {
+    for (const env of Object.values(topology.environments)) {
+      delete env.default;
+    }
+    topology.defaultEnvironment = environment;
+  }
 
   try {
     await persistTopology(topology);
@@ -397,6 +509,7 @@ export async function runCli(argv: string[]): Promise<number> {
     console.log(
       `Saved token for "${environment}" (validated as ${who}) to ${credentialsPath}.`
     );
+    printDefaultStatus(topology);
     console.log("Re-run your request in Claude Code / Codex — no restart needed.");
     return 0;
   } catch (error) {

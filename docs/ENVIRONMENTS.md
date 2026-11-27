@@ -4,16 +4,41 @@ The MCP server supports multiple Prisme.ai environments with custom API URLs and
 
 ## Where configuration lives
 
-The server reads and writes its configuration in `PRISME_CONFIG_DIR` (set by the plugin to `${CLAUDE_PLUGIN_DATA}`; defaults to `~/.prisme-ai-mcp` when unset):
+The server reads and writes its configuration in `PRISME_CONFIG_DIR` (set by the plugin to `${CLAUDE_PLUGIN_DATA}`; defaults to `~/.prisme-ai-mcp` when unset).
+
+The `set-token` CLI usually runs from your own terminal, where that variable does not exist. It picks its directory in this order: `--config-dir`, `PRISME_CONFIG_DIR`, the Claude Code plugin data dir when the CLI runs from the installed plugin (`<claude>/plugins/data/prisme-ai-<marketplace>`), then `~/.prisme-ai-mcp`. It prints the directory it chose. VS Code Copilot reads `~/.prisme-ai-mcp`: pass `--config-dir` there explicitly.
 
 | File | Contents |
 |------|----------|
 | `config.json` | Environment topology: `{ "environments": { name: { apiUrl, studioUrl?, nodeExtraCaCerts?, workspaces? } }, "defaultEnvironment"? }` — no secrets |
 | `credentials.json` | Per-environment API tokens (`{ name: { token, updatedAt } }`), file mode 600 |
 
-A default topology (sandbox, staging, prod) ships with the plugin in `config/default-environments.json` and is used until you register your own environments.
+Only the environments you register exist. `config/default-environments.json` lists the Prisme.ai SaaS environments (`sandbox`, `staging`, `prod`) as a catalog: when you register one of these names, `set-token` offers its API URL as the example and reuses its Studio URL. They are never configured on their own, so a customer install contains only its own instances.
 
-If a tool call explicitly names an environment that is not configured, the MCP stops before any API call. It does not fall back to the default environment.
+If a tool call explicitly names an environment that is not configured, the MCP stops before any API call. It does not fall back to the default environment. An environment registered with the CLI while a session is running is picked up on the next call, without a restart.
+
+### Default environment
+
+A tool call without `environment` uses the default environment, chosen in this order:
+
+1. the environment marked `"default": true` in `config.json`;
+2. `defaultEnvironment` in `config.json`;
+3. the `PRISME_DEFAULT_ENVIRONMENT` variable of the server;
+4. the only configured environment, when there is just one.
+
+With several environments and none chosen, there is no default: a call without `environment` is refused with the list of configured names, rather than sent to whichever comes first. Choose one when registering its token:
+
+```bash
+node "<plugin>/build/index.js" set-token acme-hprd --default --config-dir "<config-dir>"
+```
+
+### Removing an environment
+
+```bash
+node "<plugin>/build/index.js" remove-env sandbox --config-dir "<config-dir>"
+```
+
+This deletes the environment from `config.json` and its token from `credentials.json`. Reconnect the MCP server afterwards (`/mcp` in Claude Code) so the running session forgets it. Up to 2.0.2, the first `set-token` copied `sandbox`, `staging` and `prod` into `config.json`, with `sandbox` as the default: remove the ones that do not belong on a customer workstation.
 
 ## Dynamic Environments
 
@@ -113,7 +138,7 @@ When resolving workspace and API URL:
 4. `environment` alone (uses default workspace ID)
 5. Fall back to default workspace and API URL
 
-When `environment` is present, that environment must exist in `config.json` or in the shipped default topology. Unknown explicit environments return a setup error instead of using another environment.
+When `environment` is present, that environment must exist in `config.json`. Unknown explicit environments return a setup error instead of using another environment.
 
 ## Environment Structure
 
@@ -141,7 +166,7 @@ Each environment in `config.json` contains:
 | `studioUrl` | No | Studio origin, used to build the token-creation URL. Derived from `apiUrl` when absent. |
 | `nodeExtraCaCerts` | No | Absolute path to a readable PEM CA bundle. The environment trusts it in addition to Node's built-in roots, matching `NODE_EXTRA_CA_CERTS` semantics. |
 | `workspaces` | No | Optional name-to-ID mappings |
-| `default` | No | Marks the default environment |
+| `default` | No | Marks the default environment (see [Default environment](#default-environment)) |
 
 Tokens are **not** stored in `config.json` — they live in `credentials.json`, written by the `set_token` tool.
 
@@ -184,7 +209,7 @@ This path never exposes the token to the chat / LLM provider:
    node "<plugin>/build/index.js" set-token custom --api-url https://api.custom.prisme.ai/v2 --studio-url https://custom.prisme.ai --node-extra-ca-certs /absolute/path/to/company-ca.pem --config-dir "<config-dir>"
    ```
 
-3. Re-run your request. The server re-reads `credentials.json` on the next call, so **no restart is needed**.
+3. Re-run your request. The server re-reads `config.json` and `credentials.json` on the next call, so **no restart is needed**, even for a new environment.
 
 ### Fallback: the `set_token` MCP tool
 

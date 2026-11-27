@@ -1,18 +1,13 @@
 import dotenv from "dotenv";
-import { existsSync, readFileSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import {
   getConfigDir,
   loadTopologySync,
   loadCredentialsSync,
-  type StoredTopology,
 } from "./auth/persist.js";
+import { unknownEnvironmentError } from "./environments.js";
 
 // Load environment variables
 dotenv.config();
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Environment variable exports
 export const PRISME_FORCE_READONLY = process.env.PRISME_FORCE_READONLY === "true";
@@ -126,12 +121,12 @@ function validateEnvironments(parsed: any): EnvironmentsConfig {
 }
 
 /**
- * Load the environment topology, in priority order:
- *   1. <PRISME_CONFIG_DIR>/config.json (the plugin data dir)
- *   2. The default topology shipped with the plugin (config/default-environments.json)
+ * Load the environment topology from <PRISME_CONFIG_DIR>/config.json (the
+ * plugin data dir). Only registered environments are loaded: the URLs shipped
+ * in config/default-environments.json are a catalog for `set-token`, never
+ * environments of their own (see environments.ts).
  */
 function loadEnvironments(): { environments: EnvironmentsConfig; defaultName?: string } {
-  // 1. Config dir
   try {
     const topology = loadTopologySync();
     if (topology) {
@@ -143,30 +138,6 @@ function loadEnvironments(): { environments: EnvironmentsConfig; defaultName?: s
   } catch (error) {
     console.error(
       `Warning: invalid config.json in ${getConfigDir()}: ${
-        error instanceof Error ? error.message : "Unknown error"
-      }`
-    );
-  }
-
-  // 2. Default topology shipped with the plugin. From the bundled layout
-  // (plugin/build/index.js) it is at ../config; from the tsc/tsx layouts
-  // (build/config.js, src/config.ts) it is at <repo>/plugin/config.
-  const shippedDefault =
-    [
-      join(__dirname, "..", "config", "default-environments.json"),
-      join(__dirname, "..", "plugin", "config", "default-environments.json"),
-    ].find((p) => existsSync(p)) ?? "";
-  try {
-    if (shippedDefault && existsSync(shippedDefault)) {
-      const parsed = JSON.parse(readFileSync(shippedDefault, "utf-8")) as StoredTopology;
-      return {
-        environments: validateEnvironments(parsed.environments),
-        defaultName: parsed.defaultEnvironment,
-      };
-    }
-  } catch (error) {
-    console.error(
-      `Warning: invalid default-environments.json: ${
         error instanceof Error ? error.message : "Unknown error"
       }`
     );
@@ -187,7 +158,10 @@ for (const [envName, cred] of Object.entries(storedCredentials)) {
 }
 
 // Determine default environment:
-// explicit default field > config.json defaultEnvironment > PRISME_DEFAULT_ENVIRONMENT > first
+// explicit default field > config.json defaultEnvironment > PRISME_DEFAULT_ENVIRONMENT
+// > the only configured environment. With several environments and none marked,
+// there is no default: a call must name its environment rather than reach
+// whichever one happens to be listed first.
 for (const [envName, env] of Object.entries(environmentsConfig)) {
   if (env.default === true) {
     if (defaultEnvironmentName) {
@@ -208,7 +182,7 @@ if (
 ) {
   defaultEnvironmentName = PRISME_DEFAULT_ENVIRONMENT;
 }
-if (!defaultEnvironmentName && Object.keys(environmentsConfig).length > 0) {
+if (!defaultEnvironmentName && Object.keys(environmentsConfig).length === 1) {
   defaultEnvironmentName = Object.keys(environmentsConfig)[0];
 }
 
@@ -290,26 +264,51 @@ if (Object.keys(environmentsConfig).length === 0 && !PRISME_API_KEY) {
 // Export the resolved default environment name
 export { defaultEnvironmentName };
 
+/**
+ * Load one environment registered after startup — typically by the `set-token`
+ * CLI, which writes config.json from the user's own terminal — so it can be
+ * used without restarting the server. Returns false when config.json does not
+ * declare it. The server and the API client share `environmentsConfig`, so
+ * both see the new entry.
+ */
+export function loadEnvironmentFromDisk(environment: string): boolean {
+  let stored;
+  try {
+    stored = loadTopologySync()?.environments[environment];
+    if (!stored) return false;
+    validateEnvironments({ [environment]: stored });
+  } catch (error) {
+    console.error(
+      `Warning: could not load environment "${environment}" from config.json: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
+    return false;
+  }
+  const token = loadCredentialsSync()[environment]?.token;
+  environmentsConfig[environment] = { ...stored, ...(token ? { apiKey: token } : {}) };
+  console.error(`Loaded environment "${environment}" registered after startup`);
+  return true;
+}
+
 // Workspace and environment resolution helper
 export function resolveWorkspaceAndEnvironment(
   params: WorkspaceResolutionParams
 ): WorkspaceResolutionResult {
   // Priority: workspaceId parameter > environment+workspaceName > workspaceName > default
+  if (
+    params.environment &&
+    !environmentsConfig[params.environment] &&
+    !loadEnvironmentFromDisk(params.environment)
+  ) {
+    throw unknownEnvironmentError(params.environment, Object.keys(environmentsConfig), {
+      scriptPath: process.argv[1],
+      configDir: getConfigDir(),
+    });
+  }
   const explicitEnvConfig = params.environment
     ? environmentsConfig[params.environment]
     : undefined;
-  if (params.environment && !explicitEnvConfig) {
-    const availableEnvs = Object.keys(environmentsConfig);
-    throw new Error(
-      `Unknown environment: "${params.environment}". ` +
-        `Available: ${
-          availableEnvs.length > 0
-            ? availableEnvs.join(", ")
-            : "none configured"
-        }. ` +
-        `If you meant "${params.environment}", configure it before retrying.`
-    );
-  }
 
   // 1. Direct workspaceId parameter (use environment's API URL if available, else default)
   if (params.workspaceId) {

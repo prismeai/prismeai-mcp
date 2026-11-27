@@ -2,8 +2,7 @@
   "environments": {
     "sandbox": {
       "apiUrl": "https://api.sandbox.prisme.ai/v2",
-      "studioUrl": "https://sandbox.prisme.ai",
-      "default": true
+      "studioUrl": "https://sandbox.prisme.ai"
     },
     "staging": {
       "apiUrl": "https://api.staging.prisme.ai/v2",
@@ -13,6 +12,5 @@
       "apiUrl": "https://api.studio.prisme.ai/v2",
       "studioUrl": "https://studio.prisme.ai"
     }
-  },
-  "defaultEnvironment": "sandbox"
+  }
 }
