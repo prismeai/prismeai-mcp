@@ -107,7 +107,9 @@ Credentials are user-created API tokens, registered per environment. The recomme
    ```
 
    It prompts for the token with hidden input, the API and Studio URLs, and an optional `NODE_EXTRA_CA_CERTS` PEM path. It probe-validates the token (using the extra CA when configured), then saves it to the plugin data dir (`credentials.json`, mode 600). An invalid token saves nothing.
-3. Re-run your request — the server picks up the new token automatically (no restart). Run `set-token` again anytime to rotate.
+3. Re-run your request — the server picks up the new token automatically (no restart), even for a new environment. Run `set-token` again anytime to rotate.
+
+A workstation only has the environments registered on it: `sandbox`, `staging` and `prod` are not preconfigured, so a customer install holds only its own instances. With several environments, mark one with `set-token <environment> --default` or name the environment in each request. Remove one with `remove-env <environment>`. See [Environments](docs/ENVIRONMENTS.md#default-environment).
 
 On VS Code Copilot the config dir is always `~/.prisme-ai-mcp` (see [VS Code Copilot](#vs-code-copilot)):
 

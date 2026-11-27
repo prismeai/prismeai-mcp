@@ -11,8 +11,11 @@ Use this procedure when a Prisme.ai MCP tool reports that an environment is unkn
 
 - Do not ask the user to paste an API token into the chat unless they explicitly choose that fallback after being warned that the token will be sent to the LLM provider.
 - Do not try another environment when the user specified one. The requested environment must be configured before retrying.
+- When several environments are configured and the MCP reports no default, ask the user which one to use. Never pick one yourself.
 - For a new environment, ask the user for the studio URL or API URL if it is not obvious.
 - Use the out-of-band `set-token` CLI as the default setup path.
+- Keep `--config-dir` exactly as the MCP error prints it. Without it, the CLI may write to a directory this server does not read.
+- To make an environment the default, add `--default` to its `set-token` command. To delete one, run `remove-env <environment>` with the same `--config-dir`, then reconnect the MCP server.
 
 ## Environment URLs
 
