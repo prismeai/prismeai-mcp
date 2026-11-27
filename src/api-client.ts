@@ -1,7 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import FormData from 'form-data';
 import { createExtraCaAgent } from './tls.js';
-import { noEnvironmentSelectedError } from './environments.js';
+import { noEnvironmentSelectedError, unknownEnvironmentError } from './environments.js';
 
 export interface EnvironmentConfig {
     apiUrl: string;
@@ -31,6 +31,9 @@ export interface PrismeConfig {
     // `set-token` command) so a freshly-registered token is picked up without
     // restarting the session. Returns the token if found.
     reloadTokens?: (environment: string) => string | undefined;
+    // Load an environment that `set-token` added to config.json after startup.
+    // Returns true when the environment is now known.
+    reloadEnvironment?: (environment: string) => boolean;
 }
 
 export interface Automation {
@@ -258,6 +261,7 @@ export class PrismeApiClient {
     private serverScriptPath?: string;
     private configDir?: string;
     private reloadTokens?: (environment: string) => string | undefined;
+    private reloadEnvironment?: (environment: string) => boolean;
 
     constructor(config: PrismeConfig) {
         this.workspaceId = config.workspaceId;
@@ -268,6 +272,7 @@ export class PrismeApiClient {
         this.serverScriptPath = config.serverScriptPath;
         this.configDir = config.configDir;
         this.reloadTokens = config.reloadTokens;
+        this.reloadEnvironment = config.reloadEnvironment;
         this.client = axios.create({
             baseURL: config.baseUrl,
             ...this.tlsOptions(config.baseUrl, config.defaultEnvironment),
@@ -329,27 +334,22 @@ export class PrismeApiClient {
     }
 
     private unknownEnvironmentError(environment: string): Error {
-        const available = Object.keys(this.environments);
-        return new Error(
-            `Unknown environment: "${environment}". ` +
-                `Available: ${available.length > 0 ? available.join(', ') : 'none configured'}. ` +
-                `If you meant "${environment}", configure it before retrying. ` +
-                `Create an API token in the target Prisme.ai studio, find the environment API URL ` +
-                `(for example https://studio.prisme.ai uses https://api.studio.prisme.ai/v2, ` +
-                `and https://sandbox.prisme.ai uses https://api.sandbox.prisme.ai/v2). Then run this as one shell command ` +
-                `(copy it exactly; do not insert line breaks inside quoted paths). You may also omit --api-url and enter the API URL when the CLI prompts:\n\n` +
-                `   node "${this.serverScriptPath ?? '<plugin>/build/index.js'}" set-token ${environment} --api-url <api-url>` +
-                `${this.configDir ? ` --config-dir "${this.configDir}"` : ''}\n\n` +
-                `Agents should use the /prisme-ai:setup skill for the setup workflow.`
-        );
+        return unknownEnvironmentError(environment, Object.keys(this.environments), {
+            scriptPath: this.serverScriptPath,
+            configDir: this.configDir,
+        });
     }
 
     // Get API key for a specific environment; throws an actionable error when
     // no token is stored for it. Before failing, attempt a lazy reload from
-    // credentials.json so a token just registered via the CLI is picked up
-    // without restarting the session.
+    // config.json / credentials.json so an environment or token just registered
+    // via the CLI is picked up without restarting the session.
     private getApiKeyForEnvironment(environment?: string): string {
-        if (environment && !this.environments[environment]) {
+        if (
+            environment &&
+            !this.environments[environment] &&
+            !this.reloadEnvironment?.(environment)
+        ) {
             throw this.unknownEnvironmentError(environment);
         }
         if (environment) {

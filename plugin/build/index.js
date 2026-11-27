@@ -15699,6 +15699,17 @@ function setTokenCommand(environment, context, apiUrl) {
   const script = context.scriptPath ?? "<plugin>/build/index.js";
   return `node "${script}" set-token ${environment}` + (apiUrl ? ` --api-url ${apiUrl}` : "") + (context.configDir ? ` --config-dir "${context.configDir}"` : "");
 }
+function unknownEnvironmentError(environment, available, context) {
+  const known = loadEnvironmentCatalog()[environment];
+  const guidance = known ? `"${environment}" is a known Prisme.ai environment (${known.apiUrl}) but it is not configured here. Create an API token in its studio, then run this as one shell command (copy it exactly; do not insert line breaks inside quoted paths):` : `If you meant "${environment}", configure it before retrying. Create an API token in the target Prisme.ai studio, find the environment API URL (for example https://studio.prisme.ai uses https://api.studio.prisme.ai/v2, and https://sandbox.prisme.ai uses https://api.sandbox.prisme.ai/v2). Then run this as one shell command (copy it exactly; do not insert line breaks inside quoted paths). You may also omit --api-url and enter the API URL when the CLI prompts:`;
+  return new Error(
+    `Unknown environment: "${environment}". Available: ${available.length > 0 ? available.join(", ") : "none configured"}. ${guidance}
+
+   ${setTokenCommand(environment, context, known?.apiUrl ?? "<api-url>")}
+
+Agents should use the /prisme-ai:setup skill for the setup workflow.`
+  );
+}
 function noEnvironmentSelectedError(available, context) {
   if (available.length === 0) {
     return new Error(
@@ -28855,6 +28866,7 @@ var init_api_client = __esm({
         this.serverScriptPath = config.serverScriptPath;
         this.configDir = config.configDir;
         this.reloadTokens = config.reloadTokens;
+        this.reloadEnvironment = config.reloadEnvironment;
         this.client = axios_default.create({
           baseURL: config.baseUrl,
           ...this.tlsOptions(config.baseUrl, config.defaultEnvironment),
@@ -28909,21 +28921,17 @@ Alternative: paste the token to me and I will call the \`set_token\` tool \u2014
         );
       }
       unknownEnvironmentError(environment) {
-        const available = Object.keys(this.environments);
-        return new Error(
-          `Unknown environment: "${environment}". Available: ${available.length > 0 ? available.join(", ") : "none configured"}. If you meant "${environment}", configure it before retrying. Create an API token in the target Prisme.ai studio, find the environment API URL (for example https://studio.prisme.ai uses https://api.studio.prisme.ai/v2, and https://sandbox.prisme.ai uses https://api.sandbox.prisme.ai/v2). Then run this as one shell command (copy it exactly; do not insert line breaks inside quoted paths). You may also omit --api-url and enter the API URL when the CLI prompts:
-
-   node "${this.serverScriptPath ?? "<plugin>/build/index.js"}" set-token ${environment} --api-url <api-url>${this.configDir ? ` --config-dir "${this.configDir}"` : ""}
-
-Agents should use the /prisme-ai:setup skill for the setup workflow.`
-        );
+        return unknownEnvironmentError(environment, Object.keys(this.environments), {
+          scriptPath: this.serverScriptPath,
+          configDir: this.configDir
+        });
       }
       // Get API key for a specific environment; throws an actionable error when
       // no token is stored for it. Before failing, attempt a lazy reload from
-      // credentials.json so a token just registered via the CLI is picked up
-      // without restarting the session.
+      // config.json / credentials.json so an environment or token just registered
+      // via the CLI is picked up without restarting the session.
       getApiKeyForEnvironment(environment) {
-        if (environment && !this.environments[environment]) {
+        if (environment && !this.environments[environment] && !this.reloadEnvironment?.(environment)) {
           throw this.unknownEnvironmentError(environment);
         }
         if (environment) {
@@ -30036,14 +30044,31 @@ function loadEnvironments() {
   }
   return { environments: {} };
 }
-function resolveWorkspaceAndEnvironment(params) {
-  const explicitEnvConfig = params.environment ? environmentsConfig[params.environment] : void 0;
-  if (params.environment && !explicitEnvConfig) {
-    const availableEnvs = Object.keys(environmentsConfig);
-    throw new Error(
-      `Unknown environment: "${params.environment}". Available: ${availableEnvs.length > 0 ? availableEnvs.join(", ") : "none configured"}. If you meant "${params.environment}", configure it before retrying.`
+function loadEnvironmentFromDisk(environment) {
+  let stored;
+  try {
+    stored = loadTopologySync()?.environments[environment];
+    if (!stored) return false;
+    validateEnvironments({ [environment]: stored });
+  } catch (error) {
+    console.error(
+      `Warning: could not load environment "${environment}" from config.json: ${error instanceof Error ? error.message : "Unknown error"}`
     );
+    return false;
   }
+  const token = loadCredentialsSync()[environment]?.token;
+  environmentsConfig[environment] = { ...stored, ...token ? { apiKey: token } : {} };
+  console.error(`Loaded environment "${environment}" registered after startup`);
+  return true;
+}
+function resolveWorkspaceAndEnvironment(params) {
+  if (params.environment && !environmentsConfig[params.environment] && !loadEnvironmentFromDisk(params.environment)) {
+    throw unknownEnvironmentError(params.environment, Object.keys(environmentsConfig), {
+      scriptPath: process.argv[1],
+      configDir: getConfigDir()
+    });
+  }
+  const explicitEnvConfig = params.environment ? environmentsConfig[params.environment] : void 0;
   if (params.workspaceId) {
     return {
       workspaceId: params.workspaceId,
@@ -30127,6 +30152,7 @@ var init_config = __esm({
     "use strict";
     import_dotenv = __toESM(require_main(), 1);
     init_persist();
+    init_environments();
     import_dotenv.default.config();
     PRISME_FORCE_READONLY = process.env.PRISME_FORCE_READONLY === "true";
     PRISME_DISABLE_FEEDBACK_TOOLS = process.env.PRISME_DISABLE_FEEDBACK_TOOLS === "true";
@@ -52919,7 +52945,8 @@ ${formatLintErrors(lintResult)}`
       if (!token) {
         throw new Error("`token` is required");
       }
-      const existing = environmentsConfig[environment] ?? loadEnvironmentCatalog()[environment];
+      const configured = environmentsConfig[environment] ?? (loadEnvironmentFromDisk(environment) ? environmentsConfig[environment] : void 0);
+      const existing = configured ?? loadEnvironmentCatalog()[environment];
       if (!existing && !apiUrl) {
         const available = Object.keys(environmentsConfig).join(", ") || "(none)";
         throw new Error(
@@ -53043,7 +53070,9 @@ async function startServer() {
         environmentsConfig[environment].apiKey = token;
       }
       return token;
-    }
+    },
+    // Same for an environment the CLI added to config.json after startup.
+    reloadEnvironment: loadEnvironmentFromDisk
   });
   const server = new Server(
     {

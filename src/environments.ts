@@ -59,6 +59,35 @@ export function setTokenCommand(
 }
 
 /**
+ * Error for a call naming an environment that is not configured. It lists the
+ * configured names and the exact command that registers the requested one.
+ */
+export function unknownEnvironmentError(
+  environment: string,
+  available: string[],
+  context: SetupCommandContext
+): Error {
+  const known = loadEnvironmentCatalog()[environment];
+  const guidance = known
+    ? `"${environment}" is a known Prisme.ai environment (${known.apiUrl}) but it is not configured here. ` +
+      `Create an API token in its studio, then run this as one shell command ` +
+      `(copy it exactly; do not insert line breaks inside quoted paths):`
+    : `If you meant "${environment}", configure it before retrying. ` +
+      `Create an API token in the target Prisme.ai studio, find the environment API URL ` +
+      `(for example https://studio.prisme.ai uses https://api.studio.prisme.ai/v2, ` +
+      `and https://sandbox.prisme.ai uses https://api.sandbox.prisme.ai/v2). Then run this as one shell command ` +
+      `(copy it exactly; do not insert line breaks inside quoted paths). ` +
+      `You may also omit --api-url and enter the API URL when the CLI prompts:`;
+  return new Error(
+    `Unknown environment: "${environment}". ` +
+      `Available: ${available.length > 0 ? available.join(", ") : "none configured"}. ` +
+      `${guidance}\n\n` +
+      `   ${setTokenCommand(environment, context, known?.apiUrl ?? "<api-url>")}\n\n` +
+      `Agents should use the /prisme-ai:setup skill for the setup workflow.`
+  );
+}
+
+/**
  * Error for a call with no `environment` when no default can be chosen:
  * nothing is configured yet, or several environments are and none is marked
  * as the default. Guessing one would send the call to the wrong instance.

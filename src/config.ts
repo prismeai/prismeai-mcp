@@ -4,6 +4,7 @@ import {
   loadTopologySync,
   loadCredentialsSync,
 } from "./auth/persist.js";
+import { unknownEnvironmentError } from "./environments.js";
 
 // Load environment variables
 dotenv.config();
@@ -263,26 +264,51 @@ if (Object.keys(environmentsConfig).length === 0 && !PRISME_API_KEY) {
 // Export the resolved default environment name
 export { defaultEnvironmentName };
 
+/**
+ * Load one environment registered after startup — typically by the `set-token`
+ * CLI, which writes config.json from the user's own terminal — so it can be
+ * used without restarting the server. Returns false when config.json does not
+ * declare it. The server and the API client share `environmentsConfig`, so
+ * both see the new entry.
+ */
+export function loadEnvironmentFromDisk(environment: string): boolean {
+  let stored;
+  try {
+    stored = loadTopologySync()?.environments[environment];
+    if (!stored) return false;
+    validateEnvironments({ [environment]: stored });
+  } catch (error) {
+    console.error(
+      `Warning: could not load environment "${environment}" from config.json: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
+    return false;
+  }
+  const token = loadCredentialsSync()[environment]?.token;
+  environmentsConfig[environment] = { ...stored, ...(token ? { apiKey: token } : {}) };
+  console.error(`Loaded environment "${environment}" registered after startup`);
+  return true;
+}
+
 // Workspace and environment resolution helper
 export function resolveWorkspaceAndEnvironment(
   params: WorkspaceResolutionParams
 ): WorkspaceResolutionResult {
   // Priority: workspaceId parameter > environment+workspaceName > workspaceName > default
+  if (
+    params.environment &&
+    !environmentsConfig[params.environment] &&
+    !loadEnvironmentFromDisk(params.environment)
+  ) {
+    throw unknownEnvironmentError(params.environment, Object.keys(environmentsConfig), {
+      scriptPath: process.argv[1],
+      configDir: getConfigDir(),
+    });
+  }
   const explicitEnvConfig = params.environment
     ? environmentsConfig[params.environment]
     : undefined;
-  if (params.environment && !explicitEnvConfig) {
-    const availableEnvs = Object.keys(environmentsConfig);
-    throw new Error(
-      `Unknown environment: "${params.environment}". ` +
-        `Available: ${
-          availableEnvs.length > 0
-            ? availableEnvs.join(", ")
-            : "none configured"
-        }. ` +
-        `If you meant "${params.environment}", configure it before retrying.`
-    );
-  }
 
   // 1. Direct workspaceId parameter (use environment's API URL if available, else default)
   if (params.workspaceId) {

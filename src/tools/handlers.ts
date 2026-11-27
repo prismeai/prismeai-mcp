@@ -8,6 +8,7 @@ import { PrismeApiClient, AIKnowledgeQueryParams, AIKnowledgeCompletionParams, A
 import {
   resolveWorkspaceAndEnvironment,
   environmentsConfig,
+  loadEnvironmentFromDisk,
   PRISME_API_BASE_URL,
   PRISME_FORCE_READONLY,
   type EnvironmentConfig,
@@ -2244,8 +2245,11 @@ export async function handleToolCall(
         throw new Error("`token` is required");
       }
 
+      const configured =
+        environmentsConfig[environment] ??
+        (loadEnvironmentFromDisk(environment) ? environmentsConfig[environment] : undefined);
       // A known Prisme.ai environment (sandbox, staging, prod) only lends its URLs.
-      const existing = environmentsConfig[environment] ?? loadEnvironmentCatalog()[environment];
+      const existing = configured ?? loadEnvironmentCatalog()[environment];
       if (!existing && !apiUrl) {
         const available = Object.keys(environmentsConfig).join(", ") || "(none)";
         throw new Error(
